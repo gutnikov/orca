@@ -107,16 +107,6 @@ class Orchestrator:
             },
         )
 
-        # Record session in manifest for transcript rendering
-        if self._session_sync is not None:
-            self._session_sync.manifest.append(
-                issue_id=effect.issue_id,
-                state=effect.state,
-                session_id=f"{effect.issue_id}-{effect.state}-{self.now()}",
-                worktree_path=str(workdir),
-                started_at=self.now(),
-            )
-
     def _route_effects(self, effects: list[Effect], pending: list[DispatchWorkerEffect]) -> None:
         """Separate effects: dispatch workers immediately or log errors."""
         for effect in effects:
@@ -202,6 +192,17 @@ class Orchestrator:
                 )
 
                 self.persistence.save(self.state)
+
+                # Record session in manifest for transcript rendering
+                if self._session_sync is not None and outcome.session_id is not None:
+                    workdir = self.worktree_resolver(issue_id)
+                    self._session_sync.manifest.append(
+                        issue_id=issue_id,
+                        state=old_issue_state or "unknown",
+                        session_id=outcome.session_id,
+                        worktree_path=str(workdir),
+                        started_at=ts,
+                    )
 
                 # Log worker outcome
                 if isinstance(outcome, WorkerSuccess):

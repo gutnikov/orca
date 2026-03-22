@@ -18,11 +18,13 @@ logger = logging.getLogger(__name__)
 @dataclass(frozen=True)
 class WorkerSuccess:
     result: dict[str, Any]
+    session_id: str | None = None
 
 
 @dataclass(frozen=True)
 class WorkerFailure:
     error: str
+    session_id: str | None = None
 
 
 WorkerOutcome = WorkerSuccess | WorkerFailure
@@ -99,10 +101,19 @@ class ClaudeCodeWorker:
             proc.stdin.write(prompt.encode())
             proc.stdin.close()
 
-        # e. Stream stdout lines to session log file
+        # e. Stream stdout lines to session log file, extract session_id
+        session_id: str | None = None
         with session_log_path.open("wb") as log_file:
             async for line in proc.stdout:  # type: ignore[union-attr]
                 log_file.write(line)
+                # Extract session_id from the system/init message
+                if session_id is None:
+                    try:
+                        msg = json.loads(line)
+                        if msg.get("type") == "system" and msg.get("subtype") == "init":
+                            session_id = msg.get("session_id")
+                    except (json.JSONDecodeError, AttributeError):
+                        pass
 
         # f. Wait for process, check returncode
         await proc.wait()
@@ -119,21 +130,24 @@ class ClaudeCodeWorker:
             },
         )
         if proc.returncode != 0:
-            return WorkerFailure(error=f"claude exited with non-zero exit code: {proc.returncode}")
+            return WorkerFailure(
+                error=f"claude exited with non-zero exit code: {proc.returncode}",
+                session_id=session_id,
+            )
 
         # g. Read result_path, parse JSON
         if not result_path.exists():
-            return WorkerFailure(error="result file not found after claude exited successfully")
+            return WorkerFailure(error="result file not found after claude exited successfully", session_id=session_id)
 
         try:
             result: dict[str, Any] = json.loads(result_path.read_text())
         except (json.JSONDecodeError, OSError) as e:
-            return WorkerFailure(error=f"failed to parse result file: {e}")
+            return WorkerFailure(error=f"failed to parse result file: {e}", session_id=session_id)
 
         # h. Validate result
         error = validate_result(result, effect.result_format)
         if error is not None:
-            return WorkerFailure(error=error)
+            return WorkerFailure(error=error, session_id=session_id)
 
         # i. Return WorkerSuccess
-        return WorkerSuccess(result=result)
+        return WorkerSuccess(result=result, session_id=session_id)
