@@ -283,3 +283,38 @@ class TestConfigTypes:
         assert len(config.states) == 3
         assert config.states["closed"].terminal is True
         assert len(config.issue_fields) == 2
+
+
+class TestPublicAPI:
+    def test_imports_from_engine_package(self) -> None:
+        from orca.engine import (
+            AdvanceEvent,
+            ConfigValidationError,
+            CreateEvent,
+            DispatchWorkerEffect,
+            Effect,
+            ErrorEffect,
+            Event,
+            Issue,
+            State,
+            StateMachineConfig,
+            WorkerFailedEvent,
+            WorkerResultEvent,
+            parse_config,
+            reduce,
+        )
+
+        assert callable(reduce)
+        assert callable(parse_config)
+        assert ConfigValidationError is not None
+        assert AdvanceEvent is not None
+        assert CreateEvent is not None
+        assert DispatchWorkerEffect is not None
+        assert Effect is not None
+        assert ErrorEffect is not None
+        assert Event is not None
+        assert Issue is not None
+        assert State is not None
+        assert StateMachineConfig is not None
+        assert WorkerFailedEvent is not None
+        assert WorkerResultEvent is not None
