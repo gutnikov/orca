@@ -24,6 +24,8 @@ issue:
 states:
   todo:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -35,6 +37,8 @@ states:
 
   implementing:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -69,6 +73,8 @@ issue:
 states:
   todo:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -80,6 +86,8 @@ states:
 
   scoping:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -100,6 +108,8 @@ states:
 
   implementing:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -128,6 +138,8 @@ issue:
 states:
   todo:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -139,6 +151,8 @@ states:
 
   implementing:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -151,6 +165,8 @@ states:
   apply:
     max_workers: 1
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum

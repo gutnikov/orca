@@ -33,25 +33,31 @@ def _make_config(
         states = {
             "todo": StateDef(
                 worker=WorkerDef(
+                    kind="claude-code",
+                    prompt="prompts/default.md",
                     result_format={
                         "outcome": EnumFieldDef(values=["start"], description="Decision"),
-                    }
+                    },
                 ),
                 on={},
             ),
             "implementing": StateDef(
                 worker=WorkerDef(
+                    kind="claude-code",
+                    prompt="prompts/default.md",
                     result_format={
                         "outcome": EnumFieldDef(values=["complete"], description="Outcome"),
-                    }
+                    },
                 ),
                 on={},
             ),
             "apply": StateDef(
                 worker=WorkerDef(
+                    kind="claude-code",
+                    prompt="prompts/default.md",
                     result_format={
                         "outcome": EnumFieldDef(values=["applied"], description="Apply result"),
-                    }
+                    },
                 ),
                 on={},
                 max_workers=1,
@@ -207,10 +213,12 @@ class TestBuildResultFormat:
         states = {
             "review": StateDef(
                 worker=WorkerDef(
+                    kind="claude-code",
+                    prompt="prompts/default.md",
                     result_format={
                         "outcome": EnumFieldDef(values=["approve"], description="Decision"),
                         "reason": StringFieldDef(description="Explanation", required_when=["reject"]),
-                    }
+                    },
                 ),
                 on={},
             ),
@@ -228,12 +236,14 @@ class TestBuildResultFormat:
         states = {
             "scoping": StateDef(
                 worker=WorkerDef(
+                    kind="claude-code",
+                    prompt="prompts/default.md",
                     result_format={
                         "outcome": EnumFieldDef(values=["decompose"], description="Decision"),
                         "sub_issues": ListFieldDef(
                             description="Sub-issues", items="$issue", required_when=["decompose"]
                         ),
-                    }
+                    },
                 ),
                 on={},
             ),

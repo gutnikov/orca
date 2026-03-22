@@ -24,6 +24,8 @@ states:
   todo: {}
   implementing:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -38,6 +40,8 @@ states:
       done: review
   review:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum

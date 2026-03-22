@@ -22,6 +22,8 @@ initial: work
 states:
   work:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -44,6 +46,8 @@ states:
   work:
     max_workers: 1
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -65,6 +69,8 @@ initial: refine
 states:
   refine:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -88,6 +94,8 @@ initial: work
 states:
   work:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum

@@ -60,17 +60,21 @@ def _config() -> StateMachineConfig:
             "review": StateDef(),
             "todo": StateDef(
                 worker=WorkerDef(
+                    kind="claude-code",
+                    prompt="prompts/default.md",
                     result_format={
                         "outcome": EnumFieldDef(values=["start"], description="Decision"),
-                    }
+                    },
                 ),
                 on={},
             ),
             "implementing": StateDef(
                 worker=WorkerDef(
+                    kind="claude-code",
+                    prompt="prompts/default.md",
                     result_format={
                         "outcome": EnumFieldDef(values=["complete"], description="Outcome"),
-                    }
+                    },
                 ),
                 on={},
             ),

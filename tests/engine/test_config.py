@@ -120,6 +120,8 @@ issue:
 states:
   todo:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -141,6 +143,8 @@ issue:
 states:
   todo:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -162,6 +166,8 @@ issue:
 states:
   todo:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         reason:
           type: string
@@ -182,6 +188,8 @@ issue:
 states:
   todo:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -192,6 +200,8 @@ states:
   done:
     terminal: true
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -209,6 +219,8 @@ issue:
 states:
   todo:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -228,6 +240,8 @@ issue:
 states:
   todo:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -250,6 +264,8 @@ issue:
 states:
   todo:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -259,6 +275,8 @@ states:
       go: done
   orphan:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -281,6 +299,8 @@ states:
   todo:
     max_workers: 0
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -303,6 +323,8 @@ states:
   todo:
     max_workers: -1
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -324,6 +346,8 @@ issue:
 states:
   todo:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -346,6 +370,8 @@ issue:
 states:
   todo:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -369,6 +395,8 @@ states:
   todo:
     max_visits: 0
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -392,6 +420,8 @@ issue:
 states:
   todo:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -417,6 +447,8 @@ states:
   todo:
     max_visits: 5
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -430,3 +462,127 @@ initial: todo
 """
         cfg = parse_config(yaml_str)
         assert cfg.states["todo"].max_visits == 5
+
+
+class TestWorkerDefFields:
+    def test_parse_worker_with_kind_and_prompt(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      kind: claude-code
+      prompt: prompts/work.md
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+  done:
+    terminal: true
+initial: todo
+"""
+        cfg = parse_config(yaml_str)
+        worker = cfg.states["todo"].worker
+        assert worker is not None
+        assert worker.kind == "claude-code"
+        assert worker.prompt == "prompts/work.md"
+        assert worker.timeout is None
+
+    def test_parse_worker_with_timeout(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      kind: claude-code
+      prompt: prompts/work.md
+      timeout: 300
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+  done:
+    terminal: true
+initial: todo
+"""
+        cfg = parse_config(yaml_str)
+        worker = cfg.states["todo"].worker
+        assert worker is not None
+        assert worker.timeout == 300
+
+    def test_invalid_kind_rejected(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      kind: unknown-worker
+      prompt: prompts/work.md
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+  done:
+    terminal: true
+initial: todo
+"""
+        with pytest.raises(ConfigValidationError, match="kind must be 'claude-code'"):
+            parse_config(yaml_str)
+
+    def test_missing_prompt_rejected(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      kind: claude-code
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+  done:
+    terminal: true
+initial: todo
+"""
+        with pytest.raises(ConfigValidationError, match="prompt"):
+            parse_config(yaml_str)
+
+    def test_invalid_timeout_rejected(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      kind: claude-code
+      prompt: prompts/work.md
+      timeout: -1
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+  done:
+    terminal: true
+initial: todo
+"""
+        with pytest.raises(ConfigValidationError, match="timeout"):
+            parse_config(yaml_str)

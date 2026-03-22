@@ -24,6 +24,8 @@ states:
   todo: {}
   implementing:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -35,6 +37,8 @@ states:
       done: qa
   qa:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -49,6 +53,8 @@ states:
   apply:
     max_workers: 1
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum

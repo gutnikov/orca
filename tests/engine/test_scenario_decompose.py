@@ -25,6 +25,8 @@ initial: todo
 states:
   todo:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -36,6 +38,8 @@ states:
       scope: scoping
   scoping:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -56,6 +60,8 @@ states:
         action: decompose
   implementing:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum

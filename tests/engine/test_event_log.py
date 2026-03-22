@@ -43,9 +43,11 @@ def _passive_initial_config() -> StateMachineConfig:
             "backlog": StateDef(),
             "todo": StateDef(
                 worker=WorkerDef(
+                    kind="claude-code",
+                    prompt="prompts/default.md",
                     result_format={
                         "outcome": EnumFieldDef(values=["start"], description="Decision"),
-                    }
+                    },
                 ),
                 on={},
             ),
@@ -62,9 +64,11 @@ def _active_initial_config() -> StateMachineConfig:
         states={
             "todo": StateDef(
                 worker=WorkerDef(
+                    kind="claude-code",
+                    prompt="prompts/default.md",
                     result_format={
                         "outcome": EnumFieldDef(values=["done"], description="Decision"),
-                    }
+                    },
                 ),
                 on={"done": __import__("orca.engine.types", fromlist=["OnTransition"]).OnTransition(target="done")},
             ),

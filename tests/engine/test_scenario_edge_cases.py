@@ -24,6 +24,8 @@ initial: work
 states:
   work:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -45,6 +47,8 @@ initial: triage
 states:
   triage:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -70,6 +74,8 @@ initial: refine
 states:
   refine:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum

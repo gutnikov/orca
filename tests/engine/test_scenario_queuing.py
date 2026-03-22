@@ -23,6 +23,8 @@ states:
   work:
     max_workers: 3
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -45,6 +47,8 @@ states:
   work:
     max_workers: 2
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum

@@ -42,6 +42,8 @@ issue:
 states:
   todo:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -54,6 +56,8 @@ states:
   implementing:
     max_visits: 2
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -83,6 +87,8 @@ issue:
 states:
   todo:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -94,6 +100,8 @@ states:
 
   implementing:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -130,6 +138,8 @@ states:
   implementing:
     max_visits: 2
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -165,6 +175,8 @@ issue:
 states:
   scoping:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -205,6 +217,8 @@ states:
     max_workers: 1
     max_visits: 2
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -217,6 +231,8 @@ states:
   implementing:
     max_visits: 1
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -247,6 +263,8 @@ issue:
 states:
   todo:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -258,6 +276,8 @@ states:
 
   implementing:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -288,6 +308,8 @@ issue:
 states:
   todo:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -300,6 +322,8 @@ states:
   implementing:
     max_visits: 3
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum
@@ -311,6 +335,8 @@ states:
 
   qa:
     worker:
+      kind: claude-code
+      prompt: prompts/default.md
       result_format:
         outcome:
           type: enum

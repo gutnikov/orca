@@ -37,7 +37,10 @@ ResultFormatField = EnumFieldDef | StringFieldDef | ListFieldDef
 
 @dataclass(frozen=True)
 class WorkerDef:
+    kind: str
+    prompt: str
     result_format: dict[str, ResultFormatField]
+    timeout: int | None = None
 
 
 @dataclass(frozen=True)

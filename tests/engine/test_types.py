@@ -295,9 +295,11 @@ class TestConfigTypes:
 
     def test_worker_def(self) -> None:
         w = WorkerDef(
+            kind="claude-code",
+            prompt="prompts/default.md",
             result_format={
                 "decision": EnumFieldDef(values=["approve", "reject"], description="Decision"),
-            }
+            },
         )
         assert "decision" in w.result_format
 
@@ -319,9 +321,11 @@ class TestConfigTypes:
 
     def test_state_def_active(self) -> None:
         worker = WorkerDef(
+            kind="claude-code",
+            prompt="prompts/default.md",
             result_format={
                 "decision": EnumFieldDef(values=["approve"], description="Decision"),
-            }
+            },
         )
         s = StateDef(
             worker=worker,
@@ -350,9 +354,11 @@ class TestConfigTypes:
             states={
                 "triage": StateDef(
                     worker=WorkerDef(
+                        kind="claude-code",
+                        prompt="prompts/default.md",
                         result_format={
                             "decision": EnumFieldDef(values=["accept", "reject"], description="Decision"),
-                        }
+                        },
                     ),
                     on={
                         "accept": OnTransition(target="in_progress"),

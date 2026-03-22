@@ -87,11 +87,14 @@ def _parse_state(name: str, raw_data: dict[str, Any] | None) -> StateDef:
     worker: WorkerDef | None = None
     worker_data = data.get("worker")
     if worker_data is not None:
+        kind: str = worker_data.get("kind", "")
+        prompt: str = worker_data.get("prompt", "")
+        timeout: int | None = worker_data.get("timeout")
         rf_data: dict[str, Any] = worker_data.get("result_format", {})
         result_format: dict[str, ResultFormatField] = {}
         for field_name, field_data in rf_data.items():
             result_format[field_name] = _parse_result_format_field(field_name, field_data)
-        worker = WorkerDef(result_format=result_format)
+        worker = WorkerDef(kind=kind, prompt=prompt, result_format=result_format, timeout=timeout)
 
     on: dict[str, OnRule] = {}
     on_data = data.get("True") or data.get("on")
@@ -145,6 +148,20 @@ def _validate(config: StateMachineConfig) -> None:
     reachable: set[str] = {config.initial}
 
     for name, state in config.states.items():
+        # Validate worker fields
+        if state.worker is not None:
+            if state.worker.kind != "claude-code":
+                msg = f"Worker for state '{name}': kind must be 'claude-code', got '{state.worker.kind}'"
+                raise ConfigValidationError(msg)
+            if not state.worker.prompt:
+                msg = f"Worker prompt for state '{name}' must be a non-empty string"
+                raise ConfigValidationError(msg)
+            if state.worker.timeout is not None and (
+                not isinstance(state.worker.timeout, int) or state.worker.timeout < 1
+            ):
+                msg = f"Worker timeout for state '{name}' must be a positive integer, got {state.worker.timeout}"
+                raise ConfigValidationError(msg)
+
         # Rule 9: max_workers must be positive integer
         if state.max_workers is not None and (not isinstance(state.max_workers, int) or state.max_workers < 1):
             msg = f"max_workers for state '{name}' must be a positive integer, got {state.max_workers}"
