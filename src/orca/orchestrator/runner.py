@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import logging
 import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -21,10 +22,13 @@ from orca.engine.types import (
     WorkerResultEvent,
 )
 from orca.orchestrator.branches import BranchMap
+from orca.orchestrator.log import setup_logging
 from orca.orchestrator.persistence import Persistence
 from orca.orchestrator.validation import validate_result
 from orca.orchestrator.worker import ClaudeCodeWorker
 from orca.orchestrator.worktree import WorktreeManager
+
+logger = logging.getLogger(__name__)
 
 
 def parse_task_file(path: Path) -> tuple[str, str]:
@@ -136,6 +140,9 @@ async def run(task_file: Path, branch_name: str) -> None:
     branches = BranchMap(repo_root, branch_name)
     worktree_mgr = WorktreeManager(repo_root, branch_name)
 
+    log_path = repo_root / ".orca" / "runs" / branch_name / "orca.log.jsonl"
+    setup_logging(log_path)
+
     initial_effects: list[Effect] = []
 
     if persistence.exists():
@@ -145,6 +152,11 @@ async def run(task_file: Path, branch_name: str) -> None:
             msg = "Failed to load state from persistence"
             raise RuntimeError(msg)
         branches.load()
+
+        logger.info(
+            "Run resumed",
+            extra={"event": "run_resumed", "branch": branch_name},
+        )
 
         recovered_events, recovered_effects = _recover_effects(
             config, state, branches, worktree_mgr, repo_root, _generate_id, _now
@@ -190,6 +202,16 @@ async def run(task_file: Path, branch_name: str) -> None:
         branches.save()
         persistence.save(state)
 
+        logger.info(
+            "Run started",
+            extra={
+                "event": "run_started",
+                "branch": branch_name,
+                "task_file": str(task_file),
+                "root_issue_id": root_issue_id,
+            },
+        )
+
     # Find root issue ID
     root_issue_id = _find_root_issue(state)
 
@@ -211,7 +233,20 @@ async def run(task_file: Path, branch_name: str) -> None:
         repo_root=repo_root,
     )
 
-    await orchestrator.run(root_issue_id, initial_effects)
+    try:
+        await orchestrator.run(root_issue_id, initial_effects)
+    except Exception:
+        logger.error(
+            "Run failed",
+            extra={"event": "run_failed", "branch": branch_name},
+            exc_info=True,
+        )
+        raise
+
+    logger.info(
+        "Run completed",
+        extra={"event": "run_completed", "branch": branch_name, "root_issue_id": root_issue_id},
+    )
 
 
 def main() -> None:
