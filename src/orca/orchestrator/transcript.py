@@ -64,10 +64,7 @@ def _render_assistant(entry: dict[str, Any]) -> list[str]:
         elif block_type == "thinking":
             thinking = block.get("thinking", "")
             if thinking.strip():
-                preview = thinking[:200].replace("\n", " ")
-                if len(thinking) > 200:
-                    preview += "..."
-                parts.append(f"<details>\n<summary>Thinking: {preview}</summary>\n\n{thinking}\n\n</details>")
+                parts.append(f"*Thinking:*\n\n> {thinking.replace(chr(10), chr(10) + '> ')}")
 
     return parts
 

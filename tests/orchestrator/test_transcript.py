@@ -146,7 +146,7 @@ class TestRenderTranscript:
         assert "Hi" in md
 
     def test_thinking_block(self, tmp_path: Path) -> None:
-        """Thinking blocks are rendered as collapsible details."""
+        """Thinking blocks are rendered as blockquotes."""
         path = self._write_jsonl(
             tmp_path,
             [
@@ -157,8 +157,8 @@ class TestRenderTranscript:
             ],
         )
         md = render_transcript(path)
-        assert "<details>" in md
-        assert "Thinking:" in md
+        assert "*Thinking:*" in md
+        assert "> Let me consider" in md
 
     def test_truncation(self, tmp_path: Path) -> None:
         """Long tool content is truncated."""
