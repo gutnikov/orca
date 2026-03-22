@@ -59,31 +59,28 @@ class WorkerDef:
     timeout: int | None = None
 ```
 
-**`DispatchWorkerEffect`** in `types.py`:
+**`DispatchWorkerEffect`** — unchanged. The effect retains its current fields (`issue_id`, `state`, `result_format`, `issue`). The orchestrator resolves `kind`, `prompt`, and `timeout` from the config using `effect.state`:
 
 ```python
-@dataclass(frozen=True)
-class DispatchWorkerEffect:
-    issue_id: str
-    state: str
-    kind: str
-    prompt: str
-    timeout: int | None
-    result_format: dict[str, Any]
-    issue: dict[str, Any]
+worker_def = config.states[effect.state].worker
+kind = worker_def.kind       # e.g. "claude-code"
+prompt = worker_def.prompt   # e.g. "prompts/impl.md"
+timeout = worker_def.timeout # e.g. 300 or None
 ```
 
 ### Config Validation
 
-Added to `config.py`:
+Added to `config.py` in `_parse_state`:
 
 - `kind` must be `"claude-code"` (only supported value).
 - `prompt` must be a non-empty string. File existence is checked at runtime by the orchestrator, not at config parse time.
 - `timeout`, if present, must be a positive integer.
 
-### Impact on Reducer
+The config parser reads these new fields from the `worker` YAML block and passes them to the `WorkerDef` constructor alongside the existing `result_format` parsing.
 
-None. The reducer does not use `kind`, `prompt`, or `timeout`. These fields pass through `DispatchWorkerEffect` for the orchestrator to consume. The reducer remains pure and untouched.
+### Impact on Reducer and Effects
+
+None. `DispatchWorkerEffect` is unchanged. The reducer does not use `kind`, `prompt`, or `timeout` — it only constructs effects with `issue_id`, `state`, `result_format`, and `issue` as before. The orchestrator looks up worker metadata from the config. The reducer remains pure and untouched.
 
 ## Module Structure
 
@@ -127,7 +124,7 @@ orca run <task-file> <branch-name>
 
 1. **Read task file** — first line is title, rest is description.
 2. **Load config** — parse `orca.yml` from repo root.
-3. **Create root branch** — `git checkout -b {branch-name}` from current HEAD, then return to original branch.
+3. **Create root branch and worktree** — `git branch {branch-name}` from current HEAD (does not switch branches), then create a worktree at `.orca/worktrees/{branch-name}/` for the root issue. The repo root's checked-out branch is never changed.
 4. **Initialize or resume state:**
    - If `.orca/runs/{branch-name}/state.json` exists, load it (crash recovery).
    - Otherwise, create fresh `State`, emit `CreateEvent` with `fields.title` and `fields.description`.
@@ -137,7 +134,11 @@ orca run <task-file> <branch-name>
 
 ### Crash Recovery
 
-On resume, the runner loads persisted state and scans for issues with `worker_active: true` in active states. For each, it re-emits a `DispatchWorkerEffect` so the orchestrator re-dispatches those workers.
+On resume, the runner loads persisted state and scans for issues with `worker_active: true` in active states. For each:
+
+1. **Check for existing result file** in the issue's worktree (`.orca/result.json`).
+2. If a valid result file exists, validate it against `result_format`. If valid, feed a `WorkerResultEvent` instead of re-running the worker.
+3. If no result file or invalid, re-emit a `DispatchWorkerEffect` to re-dispatch the worker.
 
 ### Multiple Concurrent Runs
 
@@ -180,7 +181,8 @@ class Orchestrator:
       - Spawn worker as asyncio.Task.
    b. Await any worker completion (asyncio.wait, FIRST_COMPLETED).
    c. Build WorkerResultEvent or WorkerFailedEvent from WorkerOutcome.
-   d. Call reduce(config, state, event) → (new_state, effects).
+   d. Call reduce(config, state, event, generate_id, now) → (new_state, effects).
+      The orchestrator supplies `generate_id` (e.g. `uuid4`) and `now` (e.g. `datetime.now(UTC).isoformat`).
    e. Persist new_state.
    f. Add new effects to pending queue.
    g. Handle ErrorEffects (log).
@@ -256,7 +258,7 @@ Each worker run produces a session log:
 {workdir}/.orca/sessions/{state}-{timestamp}.jsonl
 ```
 
-Session logs accumulate across the issue lifecycle. An issue going through `planning` → `implementing` → `applying` → (conflict) → `implementing` → `applying` produces five session files. These are for observability and debugging.
+Session logs accumulate across the issue lifecycle. An issue going through `planning` → `implementing` → `applying` → (conflict) → `implementing` → `applying` produces five session files. These are for observability and debugging. Since all issues (including root) have worktrees, session logs are always at `{worktree}/.orca/sessions/`.
 
 ### Result File
 
@@ -335,18 +337,39 @@ nested (key=idx): my-feature/db/idx
 
 ### Worktree Lifecycle
 
-- **Root issue:** No worktree. Runs in the repo root on the root branch.
+- **Root issue:** Gets a worktree like any other issue, at `.orca/worktrees/{root-branch}/`, branched from the commit where `orca run` was invoked. This avoids ambiguity about which branch is checked out in the repo root — the repo root's branch is never changed.
 - **Sub-issues (from decompose):** Orchestrator creates worktree on first `DispatchWorkerEffect` for that issue. Subsequent workers for the same issue reuse the worktree.
 - **Cleanup:** Manual for now. Worktrees persist after the run completes.
 
+### Issue-to-Branch Mapping
+
+The orchestrator needs to map issue IDs to branch names. Branch names are derived from decompose keys (e.g., `my-feature/db`), but the engine's `Issue` type does not store the decompose key — it only appears in the `WorkerResultEvent.result["sub_issues"]` list.
+
+**Solution:** The orchestrator maintains a persistent mapping of issue ID → branch name in `.orca/runs/{branch}/branches.json`. This mapping is updated:
+
+1. **Root issue:** mapped to `{root-branch}` at run start.
+2. **Sub-issues:** When the orchestrator processes a `WorkerResultEvent` with a decompose outcome, it inspects `result["sub_issues"]` to extract the `key` for each sub-issue. The reducer's response includes `CreateEvent`-derived effects for the new issues. The orchestrator correlates new issue IDs with their keys (by matching fields) and builds the branch name by appending the key to the parent's branch name.
+
+Example mapping:
+
+```json
+{
+  "issue-001": "my-feature",
+  "issue-002": "my-feature/db",
+  "issue-003": "my-feature/api"
+}
+```
+
 ### Branch-to-Parent Resolution
 
-The orchestrator knows the issue hierarchy via `decomposed_from`. For a sub-issue:
+For a sub-issue, the parent branch is looked up from the mapping using `decomposed_from`:
 
-- If parent is root issue → parent branch is root branch.
-- If parent is itself a sub-issue → parent branch is parent's branch name.
+```python
+parent_branch = branches[issue.decomposed_from]
+child_branch = f"{parent_branch}/{decompose_key}"
+```
 
-The full branch path is built by chaining decompose keys up the tree.
+This chains naturally for nested decomposition: `my-feature` → `my-feature/api` → `my-feature/api/validation`.
 
 ## Template Rendering
 
@@ -370,7 +393,7 @@ def render_prompt(
 | `issue.event_log` | list | Full event history (dispatches, results, transitions, blocks) |
 | `issue.decomposed_from` | str or None | Parent issue ID |
 | `issue.depends_on` | list[str] | Dependency issue IDs |
-| `issue.children` | list[dict] | Resolved child issues (fields, state, results) |
+| `issue.children` | list[dict] | Resolved child issues with `issue_id`, `fields`, `state`, `event_log` |
 | `result_format` | dict | Schema the worker must produce |
 | `result_path` | str | Absolute path to write result JSON |
 
@@ -443,8 +466,8 @@ orca run task.md my-feature
   │
   ├─ parse task.md → title + description
   ├─ load orca.yml → StateMachineConfig
-  ├─ git checkout -b my-feature
-  ├─ CreateEvent → reduce() → State + [DispatchWorkerEffect]
+  ├─ git branch my-feature + worktree at .orca/worktrees/my-feature/
+  ├─ CreateEvent → reduce(config, state, event, generate_id, now) → State + [DispatchWorkerEffect]
   ├─ save state to .orca/runs/my-feature/state.json
   │
   └─ Orchestrator.run()
@@ -460,7 +483,7 @@ orca run task.md my-feature
        │   └─ WorkerSuccess or WorkerFailure
        │
        ├─ WorkerResultEvent or WorkerFailedEvent
-       │   └─ reduce(config, state, event) → (new_state, new_effects)
+       │   └─ reduce(config, state, event, generate_id, now) → (new_state, new_effects)
        │       └─ persist new_state
        │
        └─ root issue terminal? → done
