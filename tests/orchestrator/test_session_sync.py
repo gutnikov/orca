@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from orca.orchestrator.session_sync import SessionManifest
+from orca.orchestrator.session_sync import SessionManifest, SessionSync
 
 
 class TestSessionManifest:
@@ -102,3 +102,85 @@ class TestSessionManifest:
 
         assert manifest.path.exists()
         assert not manifest.path.with_suffix(".tmp").exists()
+
+
+class TestSessionSync:
+    def test_claude_projects_path(self) -> None:
+        """Derive project hash from worktree path."""
+        sync = SessionSync(
+            run_dir=Path("/tmp/runs/main"),
+            transcripts_dir=Path("/tmp/transcripts"),
+        )
+
+        result = sync.claude_projects_path(Path("/Users/alice/work/myproject"))
+
+        expected = Path.home() / ".claude" / "projects" / "-Users-alice-work-myproject"
+        assert result == expected
+
+    def test_claude_projects_path_nested_worktree(self) -> None:
+        """Worktree paths produce their own project hash."""
+        sync = SessionSync(
+            run_dir=Path("/tmp/runs/main"),
+            transcripts_dir=Path("/tmp/transcripts"),
+        )
+
+        result = sync.claude_projects_path(Path("/Users/alice/work/myproject/.orca/worktrees/feat/db"))
+
+        expected = Path.home() / ".claude" / "projects" / "-Users-alice-work-myproject-.orca-worktrees-feat-db"
+        assert result == expected
+
+    def test_find_transcript_direct_path(self, tmp_path: Path) -> None:
+        """Find transcript at the derived project path."""
+        sync = SessionSync(
+            run_dir=tmp_path / "runs" / "main",
+            transcripts_dir=tmp_path / "transcripts",
+            claude_projects_root=tmp_path / "claude-projects",
+        )
+        # Create transcript at expected location
+        projects_dir = tmp_path / "claude-projects" / "-tmp-worktrees-main"
+        projects_dir.mkdir(parents=True)
+        transcript = projects_dir / "sess-aaa.jsonl"
+        transcript.write_text('{"type":"system"}\n')
+
+        result = sync.find_transcript(
+            session_id="sess-aaa",
+            worktree_path=Path("/tmp/worktrees/main"),
+        )
+
+        assert result == transcript
+
+    def test_find_transcript_fallback_scan(self, tmp_path: Path) -> None:
+        """Fall back to scanning all project dirs when derived path is wrong."""
+        sync = SessionSync(
+            run_dir=tmp_path / "runs" / "main",
+            transcripts_dir=tmp_path / "transcripts",
+            claude_projects_root=tmp_path / "claude-projects",
+        )
+        # Create transcript in an unexpected project dir (simulates changed hash algo)
+        other_dir = tmp_path / "claude-projects" / "some-other-hash"
+        other_dir.mkdir(parents=True)
+        transcript = other_dir / "sess-aaa.jsonl"
+        transcript.write_text('{"type":"system"}\n')
+
+        result = sync.find_transcript(
+            session_id="sess-aaa",
+            worktree_path=Path("/tmp/worktrees/main"),
+        )
+
+        assert result == transcript
+
+    def test_find_transcript_not_found(self, tmp_path: Path) -> None:
+        """Return None when transcript doesn't exist anywhere."""
+        sync = SessionSync(
+            run_dir=tmp_path / "runs" / "main",
+            transcripts_dir=tmp_path / "transcripts",
+            claude_projects_root=tmp_path / "claude-projects",
+        )
+        (tmp_path / "claude-projects").mkdir(parents=True)
+
+        result = sync.find_transcript(
+            session_id="sess-aaa",
+            worktree_path=Path("/tmp/worktrees/main"),
+        )
+
+        assert result is None
