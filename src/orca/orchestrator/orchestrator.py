@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -17,6 +18,7 @@ from orca.engine.types import (
 )
 from orca.orchestrator.branches import BranchMap
 from orca.orchestrator.persistence import Persistence
+from orca.orchestrator.session_sync import SessionSync
 from orca.orchestrator.worker import Worker, WorkerFailure, WorkerOutcome, WorkerSuccess
 
 logger = logging.getLogger(__name__)
@@ -35,6 +37,7 @@ class Orchestrator:
         now: Callable[[], str],
         worktree_resolver: Callable[[str], Path],
         repo_root: Path | None = None,
+        session_sync: SessionSync | None = None,
     ) -> None:
         self.config = config
         self.state = state
@@ -46,6 +49,7 @@ class Orchestrator:
         self.now = now
         self.worktree_resolver = worktree_resolver
         self.repo_root = repo_root
+        self._session_sync = session_sync
         # Maps asyncio.Task -> issue_id
         self._in_flight: dict[asyncio.Task[WorkerOutcome], str] = {}
 
@@ -103,6 +107,16 @@ class Orchestrator:
             },
         )
 
+        # Record session in manifest for transcript rendering
+        if self._session_sync is not None:
+            self._session_sync.manifest.append(
+                issue_id=effect.issue_id,
+                state=effect.state,
+                session_id=f"{effect.issue_id}-{effect.state}-{self.now()}",
+                worktree_path=str(workdir),
+                started_at=self.now(),
+            )
+
     def _route_effects(self, effects: list[Effect], pending: list[DispatchWorkerEffect]) -> None:
         """Separate effects: dispatch workers immediately or log errors."""
         for effect in effects:
@@ -116,8 +130,20 @@ class Orchestrator:
                     extra={"event": "error_effect", "issue_id": effect.issue_id, "error": effect.message},
                 )
 
+    async def _sync_sessions_loop(self) -> None:
+        """Periodically render session transcripts to markdown."""
+        while True:
+            await asyncio.sleep(180)
+            if self._session_sync is not None:
+                await asyncio.to_thread(self._session_sync.sync)
+
     async def run(self, root_issue_id: str, initial_effects: list[Effect]) -> None:
         """Drive the orchestrator event loop until the root issue is terminal."""
+        # Start background session sync
+        sync_task: asyncio.Task[None] | None = None
+        if self._session_sync is not None:
+            sync_task = asyncio.create_task(self._sync_sessions_loop())
+
         pending: list[DispatchWorkerEffect] = []
         self._route_effects(initial_effects, pending)
 
@@ -236,3 +262,11 @@ class Orchestrator:
         if self._in_flight:
             await asyncio.gather(*self._in_flight.keys(), return_exceptions=True)
         self._in_flight.clear()
+
+        # Stop background sync and do a final sync
+        if sync_task is not None:
+            sync_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await sync_task
+        if self._session_sync is not None:
+            await asyncio.to_thread(self._session_sync.sync)

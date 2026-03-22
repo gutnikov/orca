@@ -206,10 +206,15 @@ async def run(task_file: Path, branch_name: str) -> None:
     # Find root issue ID
     root_issue_id = _find_root_issue(state)
 
-    # Set up worker and orchestrator
+    # Set up worker, session sync, and orchestrator
     worker = ClaudeCodeWorker(repo_root)
 
     from orca.orchestrator.orchestrator import Orchestrator
+    from orca.orchestrator.session_sync import SessionSync
+
+    run_dir = repo_root / ".orca" / "runs" / branch_name
+    transcripts_dir = repo_root / ".orca" / "transcripts"
+    session_sync = SessionSync(run_dir=run_dir, transcripts_dir=transcripts_dir)
 
     orchestrator = Orchestrator(
         config=config,
@@ -222,6 +227,7 @@ async def run(task_file: Path, branch_name: str) -> None:
         now=_now,
         worktree_resolver=lambda issue_id: worktree_mgr.resolve(branches.get(issue_id) or issue_id),
         repo_root=repo_root,
+        session_sync=session_sync,
     )
 
     try:
