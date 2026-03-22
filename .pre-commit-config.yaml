@@ -13,3 +13,4 @@ repos:
         additional_dependencies:
           - types-PyYAML>=6.0.12
           - pytest>=9.0.2
+          - jinja2>=3.0.0
