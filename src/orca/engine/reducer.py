@@ -136,6 +136,34 @@ def _handle_advance(
 
     old_state = issue.state
 
+    # Hop limit checks before moving
+    target_state_def = config.states[event.target_state]
+    if target_state_def.max_visits is not None:
+        current_visits = issue.visit_counts.get(event.target_state, 0)
+        if current_visits + 1 > target_state_def.max_visits:
+            append_log(
+                issue,
+                ts,
+                "limit_reached",
+                {"limit": "max_visits", "state": event.target_state, "count": current_visits + 1},
+            )
+            effects.append(
+                ErrorEffect(
+                    issue_id=event.issue_id,
+                    message=f"max_visits ({target_state_def.max_visits}) reached for state '{event.target_state}'",
+                )
+            )
+            return
+    if config.max_hops is not None and issue.hop_count + 1 > config.max_hops:
+        append_log(issue, ts, "limit_reached", {"limit": "max_hops", "count": issue.hop_count + 1})
+        effects.append(
+            ErrorEffect(
+                issue_id=event.issue_id,
+                message=f"max_hops ({config.max_hops}) reached",
+            )
+        )
+        return
+
     # Move to target state
     issue.state = event.target_state
 
@@ -145,9 +173,6 @@ def _handle_advance(
     # Update visit counts and hop count
     issue.visit_counts[event.target_state] = issue.visit_counts.get(event.target_state, 0) + 1
     issue.hop_count += 1
-
-    # If target state is active, dispatch
-    target_state_def = config.states[event.target_state]
     if target_state_def.worker is not None:
         prev_len = len(effects)
         try_dispatch(config, state, event.issue_id, effects)
@@ -235,7 +260,47 @@ def _handle_worker_result(
     if state_def.max_workers is not None:
         backfill_queue(config, state, old_state_name, dispatch_effects)
 
-    # 3. Route based on rule type
+    # 3. Hop limit checks before transition/decompose
+    if isinstance(rule, OnTransition):
+        target = rule.target
+        target_def = config.states[target]
+        if target_def.max_visits is not None:
+            current_visits = issue.visit_counts.get(target, 0)
+            if current_visits + 1 > target_def.max_visits:
+                append_log(
+                    issue, ts, "limit_reached", {"limit": "max_visits", "state": target, "count": current_visits + 1}
+                )
+                effects.append(
+                    ErrorEffect(
+                        issue_id=event.issue_id,
+                        message=f"max_visits ({target_def.max_visits}) reached for state '{target}'",
+                    )
+                )
+                effects.extend(dispatch_effects)
+                return
+        if config.max_hops is not None and issue.hop_count + 1 > config.max_hops:
+            append_log(issue, ts, "limit_reached", {"limit": "max_hops", "count": issue.hop_count + 1})
+            effects.append(
+                ErrorEffect(
+                    issue_id=event.issue_id,
+                    message=f"max_hops ({config.max_hops}) reached",
+                )
+            )
+            effects.extend(dispatch_effects)
+            return
+
+    if isinstance(rule, OnDecompose) and config.max_hops is not None and issue.hop_count + 1 > config.max_hops:
+        append_log(issue, ts, "limit_reached", {"limit": "max_hops", "count": issue.hop_count + 1})
+        effects.append(
+            ErrorEffect(
+                issue_id=event.issue_id,
+                message=f"max_hops ({config.max_hops}) reached",
+            )
+        )
+        effects.extend(dispatch_effects)
+        return
+
+    # 4. Route based on rule type
     if isinstance(rule, OnTransition):
         _apply_transition(config, state, event.issue_id, issue, old_state_name, rule.target, dispatch_effects, ts)
     elif isinstance(rule, OnDecompose):
