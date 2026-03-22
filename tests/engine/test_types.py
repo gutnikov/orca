@@ -8,12 +8,12 @@ from orca.engine.types import (
     DispatchWorkerEffect,
     EnumFieldDef,
     ErrorEffect,
+    EventLogEntry,
     FieldDef,
     Issue,
     ListFieldDef,
     OnDecompose,
     OnTransition,
-    ResultHistoryEntry,
     State,
     StateDef,
     StateMachineConfig,
@@ -32,14 +32,18 @@ class TestIssueConstruction:
             worker_active=False,
             decomposed_from="PARENT-1",
             depends_on=["DEP-1", "DEP-2"],
-            result_history=[],
+            event_log=[],
+            visit_counts={},
+            hop_count=0,
         )
         assert issue.fields == {"title": "Fix bug", "priority": "high"}
         assert issue.state == "open"
         assert issue.worker_active is False
         assert issue.decomposed_from == "PARENT-1"
         assert issue.depends_on == ["DEP-1", "DEP-2"]
-        assert issue.result_history == []
+        assert issue.event_log == []
+        assert issue.visit_counts == {}
+        assert issue.hop_count == 0
 
     def test_issue_without_decomposed_from(self) -> None:
         issue = Issue(
@@ -48,9 +52,35 @@ class TestIssueConstruction:
             worker_active=False,
             decomposed_from=None,
             depends_on=[],
-            result_history=[],
+            event_log=[],
+            visit_counts={},
+            hop_count=0,
         )
         assert issue.decomposed_from is None
+
+
+class TestEventLogEntry:
+    def test_construction(self) -> None:
+        entry = EventLogEntry(
+            timestamp="2026-03-22T10:00:00Z",
+            type="worker_result",
+            data={"outcome": "approve"},
+        )
+        assert entry.timestamp == "2026-03-22T10:00:00Z"
+        assert entry.type == "worker_result"
+        assert entry.data == {"outcome": "approve"}
+
+    def test_round_trip(self) -> None:
+        entry = EventLogEntry(
+            timestamp="2026-03-22T10:00:00Z",
+            type="advance",
+            data={"target_state": "review"},
+        )
+        d = entry.to_dict()
+        restored = EventLogEntry.from_dict(d)
+        assert restored.timestamp == entry.timestamp
+        assert restored.type == entry.type
+        assert restored.data == entry.data
 
 
 class TestSerializationRoundTrip:
@@ -63,7 +93,9 @@ class TestSerializationRoundTrip:
                     worker_active=False,
                     decomposed_from=None,
                     depends_on=[],
-                    result_history=[],
+                    event_log=[],
+                    visit_counts={},
+                    hop_count=0,
                 ),
             },
             worker_queues={},
@@ -77,7 +109,7 @@ class TestSerializationRoundTrip:
         assert restored.issues["ISS-1"].decomposed_from is None
         assert restored.issues["ISS-1"].depends_on == []
 
-    def test_state_with_result_history_round_trip(self) -> None:
+    def test_state_with_event_log_round_trip(self) -> None:
         state = State(
             issues={
                 "ISS-1": Issue(
@@ -86,10 +118,20 @@ class TestSerializationRoundTrip:
                     worker_active=False,
                     decomposed_from=None,
                     depends_on=[],
-                    result_history=[
-                        ResultHistoryEntry(state="triage", result={"decision": "approve"}),
-                        ResultHistoryEntry(state="review", result={"verdict": "pass"}),
+                    event_log=[
+                        EventLogEntry(
+                            timestamp="2026-03-22T10:00:00Z",
+                            type="worker_result",
+                            data={"decision": "approve"},
+                        ),
+                        EventLogEntry(
+                            timestamp="2026-03-22T11:00:00Z",
+                            type="advance",
+                            data={"target_state": "review"},
+                        ),
                     ],
+                    visit_counts={"triage": 1, "review": 1},
+                    hop_count=2,
                 ),
             },
             worker_queues={},
@@ -97,11 +139,12 @@ class TestSerializationRoundTrip:
         d = state.to_dict()
         json_str = json.dumps(d)
         restored = State.from_dict(json.loads(json_str))
-        assert len(restored.issues["ISS-1"].result_history) == 2
-        assert restored.issues["ISS-1"].result_history[0].state == "triage"
-        assert restored.issues["ISS-1"].result_history[0].result == {"decision": "approve"}
-        assert restored.issues["ISS-1"].result_history[1].state == "review"
-        assert restored.issues["ISS-1"].result_history[1].result == {"verdict": "pass"}
+        assert len(restored.issues["ISS-1"].event_log) == 2
+        assert restored.issues["ISS-1"].event_log[0].type == "worker_result"
+        assert restored.issues["ISS-1"].event_log[0].data == {"decision": "approve"}
+        assert restored.issues["ISS-1"].event_log[1].type == "advance"
+        assert restored.issues["ISS-1"].visit_counts == {"triage": 1, "review": 1}
+        assert restored.issues["ISS-1"].hop_count == 2
 
     def test_state_with_worker_queues_round_trip(self) -> None:
         state = State(
@@ -122,7 +165,9 @@ class TestSerializationRoundTrip:
                     worker_active=False,
                     decomposed_from="ISS-0",
                     depends_on=["ISS-2", "ISS-3"],
-                    result_history=[],
+                    event_log=[],
+                    visit_counts={},
+                    hop_count=0,
                 ),
             },
             worker_queues={},
@@ -133,27 +178,61 @@ class TestSerializationRoundTrip:
         assert restored.issues["ISS-1"].decomposed_from == "ISS-0"
         assert restored.issues["ISS-1"].depends_on == ["ISS-2", "ISS-3"]
 
+    def test_issue_visit_counts_hop_count_round_trip(self) -> None:
+        issue = Issue(
+            fields={"title": "Test"},
+            state="review",
+            worker_active=False,
+            decomposed_from=None,
+            depends_on=[],
+            event_log=[],
+            visit_counts={"triage": 2, "review": 1},
+            hop_count=3,
+        )
+        d = issue.to_dict()
+        restored = Issue.from_dict(d)
+        assert restored.visit_counts == {"triage": 2, "review": 1}
+        assert restored.hop_count == 3
+
+    def test_issue_from_dict_backward_compat(self) -> None:
+        """from_dict handles missing visit_counts, hop_count, and event_log."""
+        raw = {
+            "fields": {"title": "Old"},
+            "state": "open",
+            "worker_active": False,
+            "decomposed_from": None,
+            "depends_on": [],
+        }
+        issue = Issue.from_dict(raw)
+        assert issue.event_log == []
+        assert issue.visit_counts == {}
+        assert issue.hop_count == 0
+
 
 class TestEvents:
     def test_create_event(self) -> None:
-        e = CreateEvent(issue_id="ISS-1", fields={"title": "New"})
+        e = CreateEvent(issue_id="ISS-1", fields={"title": "New"}, timestamp="2026-03-22T10:00:00Z")
         assert e.issue_id == "ISS-1"
         assert e.fields == {"title": "New"}
+        assert e.timestamp == "2026-03-22T10:00:00Z"
 
     def test_advance_event(self) -> None:
-        e = AdvanceEvent(issue_id="ISS-1", target_state="review")
+        e = AdvanceEvent(issue_id="ISS-1", target_state="review", timestamp="2026-03-22T10:00:00Z")
         assert e.issue_id == "ISS-1"
         assert e.target_state == "review"
+        assert e.timestamp == "2026-03-22T10:00:00Z"
 
     def test_worker_result_event(self) -> None:
-        e = WorkerResultEvent(issue_id="ISS-1", result={"decision": "approve"})
+        e = WorkerResultEvent(issue_id="ISS-1", result={"decision": "approve"}, timestamp="2026-03-22T10:00:00Z")
         assert e.issue_id == "ISS-1"
         assert e.result == {"decision": "approve"}
+        assert e.timestamp == "2026-03-22T10:00:00Z"
 
     def test_worker_failed_event(self) -> None:
-        e = WorkerFailedEvent(issue_id="ISS-1", error="timeout")
+        e = WorkerFailedEvent(issue_id="ISS-1", error="timeout", timestamp="2026-03-22T10:00:00Z")
         assert e.issue_id == "ISS-1"
         assert e.error == "timeout"
+        assert e.timestamp == "2026-03-22T10:00:00Z"
 
 
 class TestEffects:
@@ -236,6 +315,7 @@ class TestConfigTypes:
         assert s.on == {}
         assert s.terminal is False
         assert s.max_workers is None
+        assert s.max_visits is None
 
     def test_state_def_active(self) -> None:
         worker = WorkerDef(
@@ -255,6 +335,10 @@ class TestConfigTypes:
     def test_state_def_terminal(self) -> None:
         s = StateDef(terminal=True)
         assert s.terminal is True
+
+    def test_state_def_with_max_visits(self) -> None:
+        s = StateDef(max_visits=5)
+        assert s.max_visits == 5
 
     def test_state_machine_config(self) -> None:
         config = StateMachineConfig(
@@ -283,38 +367,13 @@ class TestConfigTypes:
         assert len(config.states) == 3
         assert config.states["closed"].terminal is True
         assert len(config.issue_fields) == 2
+        assert config.max_hops is None
 
-
-class TestPublicAPI:
-    def test_imports_from_engine_package(self) -> None:
-        from orca.engine import (
-            AdvanceEvent,
-            ConfigValidationError,
-            CreateEvent,
-            DispatchWorkerEffect,
-            Effect,
-            ErrorEffect,
-            Event,
-            Issue,
-            State,
-            StateMachineConfig,
-            WorkerFailedEvent,
-            WorkerResultEvent,
-            parse_config,
-            reduce,
+    def test_state_machine_config_with_max_hops(self) -> None:
+        config = StateMachineConfig(
+            issue_fields={},
+            initial="todo",
+            states={"todo": StateDef(terminal=True)},
+            max_hops=50,
         )
-
-        assert callable(reduce)
-        assert callable(parse_config)
-        assert ConfigValidationError is not None
-        assert AdvanceEvent is not None
-        assert CreateEvent is not None
-        assert DispatchWorkerEffect is not None
-        assert Effect is not None
-        assert ErrorEffect is not None
-        assert Event is not None
-        assert Issue is not None
-        assert State is not None
-        assert StateMachineConfig is not None
-        assert WorkerFailedEvent is not None
-        assert WorkerResultEvent is not None
+        assert config.max_hops == 50

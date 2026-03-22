@@ -11,11 +11,12 @@ from orca.engine.dispatch import (
 )
 from orca.engine.types import (
     DispatchWorkerEffect,
+    Effect,
     EnumFieldDef,
+    EventLogEntry,
     FieldDef,
     Issue,
     ListFieldDef,
-    ResultHistoryEntry,
     State,
     StateDef,
     StateMachineConfig,
@@ -70,7 +71,9 @@ def _make_issue(
     decomposed_from: str | None = None,
     depends_on: list[str] | None = None,
     fields: dict[str, object] | None = None,
-    result_history: list[ResultHistoryEntry] | None = None,
+    event_log: list[EventLogEntry] | None = None,
+    visit_counts: dict[str, int] | None = None,
+    hop_count: int = 0,
 ) -> Issue:
     return Issue(
         fields=fields or {"title": "Test"},
@@ -78,7 +81,9 @@ def _make_issue(
         worker_active=worker_active,
         decomposed_from=decomposed_from,
         depends_on=depends_on or [],
-        result_history=result_history or [],
+        event_log=event_log or [],
+        visit_counts=visit_counts or {},
+        hop_count=hop_count,
     )
 
 
@@ -161,14 +166,20 @@ class TestBuildIssueContext:
                     state="done",
                     decomposed_from="A",
                     fields={"title": "Child1"},
-                    result_history=[ResultHistoryEntry(state="done", result={"outcome": "complete"})],
+                    event_log=[
+                        EventLogEntry(
+                            timestamp="2026-03-22T10:00:00Z",
+                            type="worker_result",
+                            data={"outcome": "complete"},
+                        )
+                    ],
                 ),
             },
             worker_queues={},
         )
         ctx = build_issue_context(state, "A")
         assert ctx["fields"] == {"title": "Parent"}
-        assert ctx["result_history"] == []
+        assert ctx["event_log"] == []
         assert ctx["decomposed_from"] is None
         assert ctx["depends_on"] == []
         assert len(ctx["children"]) == 1
@@ -176,7 +187,9 @@ class TestBuildIssueContext:
         assert child["issue_id"] == "B"
         assert child["fields"] == {"title": "Child1"}
         assert child["state"] == "done"
-        assert child["result_history"] == [{"state": "done", "result": {"outcome": "complete"}}]
+        assert child["event_log"] == [
+            {"timestamp": "2026-03-22T10:00:00Z", "type": "worker_result", "data": {"outcome": "complete"}}
+        ]
 
 
 class TestBuildResultFormat:
@@ -240,9 +253,10 @@ class TestTryDispatch:
     def test_dispatch_no_limit(self) -> None:
         config = _make_config()
         state = State(issues={"A": _make_issue(state="todo")}, worker_queues={})
-        effects: list[DispatchWorkerEffect] = []
+        effects: list[Effect] = []
         try_dispatch(config, state, "A", effects)
         assert len(effects) == 1
+        assert isinstance(effects[0], DispatchWorkerEffect)
         assert effects[0].issue_id == "A"
         assert effects[0].state == "todo"
         assert state.issues["A"].worker_active is True
@@ -255,7 +269,7 @@ class TestTryDispatch:
             },
             worker_queues={},
         )
-        effects: list[DispatchWorkerEffect] = []
+        effects: list[Effect] = []
         try_dispatch(config, state, "A", effects)
         assert len(effects) == 1
         assert state.issues["A"].worker_active is True
@@ -269,7 +283,7 @@ class TestTryDispatch:
             },
             worker_queues={},
         )
-        effects: list[DispatchWorkerEffect] = []
+        effects: list[Effect] = []
         try_dispatch(config, state, "B", effects)
         assert len(effects) == 0
         assert state.issues["B"].worker_active is False
@@ -284,7 +298,7 @@ class TestTryDispatch:
             },
             worker_queues={},
         )
-        effects: list[DispatchWorkerEffect] = []
+        effects: list[Effect] = []
         try_dispatch(config, state, "A", effects)
         assert len(effects) == 0
         assert state.issues["A"].worker_active is False
@@ -292,7 +306,7 @@ class TestTryDispatch:
     def test_no_worker_not_dispatched(self) -> None:
         config = _make_config()
         state = State(issues={"A": _make_issue(state="done")}, worker_queues={})
-        effects: list[DispatchWorkerEffect] = []
+        effects: list[Effect] = []
         try_dispatch(config, state, "A", effects)
         assert len(effects) == 0
 
@@ -307,9 +321,10 @@ class TestBackfillQueue:
             },
             worker_queues={"apply": ["A", "B"]},
         )
-        effects: list[DispatchWorkerEffect] = []
+        effects: list[Effect] = []
         backfill_queue(config, state, "apply", effects)
         assert len(effects) == 1
+        assert isinstance(effects[0], DispatchWorkerEffect)
         assert effects[0].issue_id == "A"
         assert state.issues["A"].worker_active is True
         assert state.worker_queues["apply"] == ["B"]
@@ -324,9 +339,10 @@ class TestBackfillQueue:
             },
             worker_queues={"apply": ["A", "B"]},
         )
-        effects: list[DispatchWorkerEffect] = []
+        effects: list[Effect] = []
         backfill_queue(config, state, "apply", effects)
         assert len(effects) == 1
+        assert isinstance(effects[0], DispatchWorkerEffect)
         assert effects[0].issue_id == "B"
         assert state.worker_queues["apply"] == ["A"]
 
@@ -340,9 +356,10 @@ class TestBackfillQueue:
             },
             worker_queues={"apply": ["A", "B"]},
         )
-        effects: list[DispatchWorkerEffect] = []
+        effects: list[Effect] = []
         backfill_queue(config, state, "apply", effects)
         assert len(effects) == 1
+        assert isinstance(effects[0], DispatchWorkerEffect)
         assert effects[0].issue_id == "B"
         assert state.worker_queues["apply"] == ["A"]
 

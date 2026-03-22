@@ -22,7 +22,7 @@ from orca.engine.types import (
     Issue,
     OnDecompose,
     OnTransition,
-    ResultHistoryEntry,
+    EventLogEntry,
     State,
     StateMachineConfig,
     WorkerFailedEvent,
@@ -68,14 +68,14 @@ def _handle_create(
         worker_active=False,
         decomposed_from=None,
         depends_on=[],
-        result_history=[],
+        event_log=[],
     )
     state.issues[event.issue_id] = issue
 
     # If initial state is active (has a worker), dispatch
     state_def = config.states[config.initial]
     if state_def.worker is not None:
-        dispatch_effects: list[DispatchWorkerEffect] = []
+        dispatch_effects: list[Effect] = []
         try_dispatch(config, state, event.issue_id, dispatch_effects)
         effects.extend(dispatch_effects)
 
@@ -130,7 +130,7 @@ def _handle_advance(
     # If target state is active, dispatch
     target_state_def = config.states[event.target_state]
     if target_state_def.worker is not None:
-        dispatch_effects: list[DispatchWorkerEffect] = []
+        dispatch_effects: list[Effect] = []
         try_dispatch(config, state, event.issue_id, dispatch_effects)
         effects.extend(dispatch_effects)
 
@@ -206,11 +206,11 @@ def _handle_worker_result(
     # 1. Set worker_active = False (frees slot)
     issue.worker_active = False
 
-    # 2. Append ResultHistoryEntry
-    issue.result_history.append(ResultHistoryEntry(state=issue.state, result=event.result))
+    # 2. Append EventLogEntry
+    issue.event_log.append(EventLogEntry(timestamp=event.timestamp, type="worker_result", data=event.result))
 
     # Slot backfill: if old state has max_workers, backfill
-    dispatch_effects: list[DispatchWorkerEffect] = []
+    dispatch_effects: list[Effect] = []
     if state_def.max_workers is not None:
         backfill_queue(config, state, old_state_name, dispatch_effects)
 
@@ -268,7 +268,7 @@ def _apply_transition(
     issue: Issue,
     old_state_name: str,
     target_state: str,
-    effects: list[DispatchWorkerEffect],
+    effects: list[Effect],
 ) -> None:
     # Remove issue from old state's worker queue
     remove_from_queue(state, old_state_name, issue_id)
@@ -291,7 +291,7 @@ def _apply_decompose(
     event: WorkerResultEvent,
     _parent_issue: Issue,
     generate_id: Callable[[], str],
-    effects: list[DispatchWorkerEffect],
+    effects: list[Effect],
 ) -> None:
     sub_issues: list[dict[str, object]] = event.result.get("sub_issues", [])
 
@@ -324,7 +324,7 @@ def _apply_decompose(
             worker_active=False,
             decomposed_from=event.issue_id,
             depends_on=resolved_depends,
-            result_history=[],
+            event_log=[],
         )
         state.issues[real_id] = child
 
@@ -340,7 +340,7 @@ def _cascading_unblock(
     config: StateMachineConfig,
     state: State,
     terminal_issue_id: str,
-    effects: list[DispatchWorkerEffect],
+    effects: list[Effect],
 ) -> None:
     terminal_issue = state.issues[terminal_issue_id]
 
