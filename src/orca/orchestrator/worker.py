@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,6 +11,8 @@ from typing import Any, Protocol
 from orca.engine.types import DispatchWorkerEffect
 from orca.orchestrator.template import render_prompt
 from orca.orchestrator.validation import validate_result
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -76,6 +79,18 @@ class ClaudeCodeWorker:
             cwd=workdir,
         )
 
+        logger.debug(
+            "Subprocess started for issue %s",
+            effect.issue_id,
+            extra={
+                "event": "subprocess_started",
+                "issue_id": effect.issue_id,
+                "state": effect.state,
+                "pid": proc.pid,
+                "workdir": str(workdir),
+            },
+        )
+
         # Write rendered prompt to stdin and close it
         if proc.stdin is not None:
             proc.stdin.write(prompt.encode())
@@ -88,6 +103,18 @@ class ClaudeCodeWorker:
 
         # f. Wait for process, check returncode
         await proc.wait()
+        logger.debug(
+            "Subprocess exited for issue %s with code %s",
+            effect.issue_id,
+            proc.returncode,
+            extra={
+                "event": "subprocess_exited",
+                "issue_id": effect.issue_id,
+                "state": effect.state,
+                "pid": proc.pid,
+                "returncode": proc.returncode,
+            },
+        )
         if proc.returncode != 0:
             return WorkerFailure(error=f"claude exited with non-zero exit code: {proc.returncode}")
 
