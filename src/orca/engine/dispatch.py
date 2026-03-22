@@ -116,7 +116,7 @@ def try_dispatch(
 
     # 3. If state has max_workers and active count >= limit, queue the issue
     if state_def.max_workers is not None:
-        active_count = sum(1 for iid, iss in state.issues.items() if iss.state == state_name and iss.worker_active)
+        active_count = sum(1 for iss in state.issues.values() if iss.state == state_name and iss.worker_active)
         if active_count >= state_def.max_workers:
             queue = state.worker_queues.setdefault(state_name, [])
             queue.append(issue_id)
