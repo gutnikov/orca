@@ -98,3 +98,14 @@ class SessionSync:
                     return candidate
 
         return None
+
+    def output_path(self, issue_id: str, state: str, started_at: str) -> Path:
+        """Build .orca/transcripts/{issue_id}/{state}-{timestamp}.md"""
+        safe_ts = started_at.replace(":", "-")
+        return self.transcripts_dir / issue_id / f"{state}-{safe_ts}.md"
+
+    def needs_render(self, entry: dict[str, Any], target: Path) -> bool:
+        """True if session is still running or completed but not yet rendered."""
+        if not target.exists():
+            return True
+        return entry["completed_at"] is None

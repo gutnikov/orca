@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from orca.orchestrator.session_sync import SessionManifest, SessionSync
 
@@ -184,3 +185,49 @@ class TestSessionSync:
         )
 
         assert result is None
+
+    def test_output_path(self) -> None:
+        """Build .orca/transcripts/{issue_id}/{state}-{timestamp}.md"""
+        sync = SessionSync(
+            run_dir=Path("/tmp/runs/main"),
+            transcripts_dir=Path("/tmp/transcripts"),
+        )
+
+        result = sync.output_path("issue-1", "implementing", "2026-03-22T10:36:00Z")
+
+        expected = Path("/tmp/transcripts/issue-1/implementing-2026-03-22T10-36-00Z.md")
+        assert result == expected
+
+    def test_needs_render_no_target(self, tmp_path: Path) -> None:
+        """Needs render when target markdown doesn't exist."""
+        sync = SessionSync(
+            run_dir=tmp_path / "runs" / "main",
+            transcripts_dir=tmp_path / "transcripts",
+        )
+        entry: dict[str, Any] = {"completed_at": None}
+
+        assert sync.needs_render(entry, tmp_path / "nonexistent.md")
+
+    def test_needs_render_completed_and_exists(self, tmp_path: Path) -> None:
+        """Skip render when completed and target exists."""
+        sync = SessionSync(
+            run_dir=tmp_path / "runs" / "main",
+            transcripts_dir=tmp_path / "transcripts",
+        )
+        target = tmp_path / "output.md"
+        target.write_text("rendered")
+        entry: dict[str, Any] = {"completed_at": "2026-03-22T10:10:00Z"}
+
+        assert not sync.needs_render(entry, target)
+
+    def test_needs_render_still_running(self, tmp_path: Path) -> None:
+        """Re-render when session still running even if target exists."""
+        sync = SessionSync(
+            run_dir=tmp_path / "runs" / "main",
+            transcripts_dir=tmp_path / "transcripts",
+        )
+        target = tmp_path / "output.md"
+        target.write_text("partial render")
+        entry: dict[str, Any] = {"completed_at": None}
+
+        assert sync.needs_render(entry, target)
