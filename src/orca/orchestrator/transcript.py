@@ -17,6 +17,9 @@ _MAX_TOOL_CONTENT = 2000
 # ANSI escape code pattern
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
+# Line number prefix pattern from Read tool output (e.g. "     1→")
+_LINE_NUM_RE = re.compile(r"^ *\d+→", re.MULTILINE)
+
 
 def render_transcript(jsonl_path: Path) -> str:
     """Read a JSONL transcript file and return a markdown string."""
@@ -200,7 +203,7 @@ def _render_tool_result(block: dict[str, Any]) -> str:
     if isinstance(content, str):
         if not content.strip():
             return f"{prefix} *(empty)*"
-        cleaned = _strip_ansi(content)
+        cleaned = _strip_line_numbers(_strip_ansi(content))
         return f"{prefix}\n\n```\n{_truncate(cleaned)}\n```"
 
     if isinstance(content, list):
@@ -215,7 +218,7 @@ def _render_tool_result(block: dict[str, Any]) -> str:
         combined = "\n".join(text_parts)
         if not combined.strip():
             return f"{prefix} *(empty)*"
-        cleaned = _strip_ansi(combined)
+        cleaned = _strip_line_numbers(_strip_ansi(combined))
         return f"{prefix}\n\n```\n{_truncate(cleaned)}\n```"
 
     return f"{prefix} *(unknown format)*"
@@ -249,6 +252,11 @@ def _render_result(entry: dict[str, Any]) -> list[str]:
 def _strip_ansi(text: str) -> str:
     """Remove ANSI escape codes from text."""
     return _ANSI_RE.sub("", text)
+
+
+def _strip_line_numbers(text: str) -> str:
+    """Remove Read tool line number prefixes (e.g. '     1→')."""
+    return _LINE_NUM_RE.sub("", text)
 
 
 def _truncate(text: str, max_len: int = _MAX_TOOL_CONTENT) -> str:

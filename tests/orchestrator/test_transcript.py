@@ -346,3 +346,16 @@ class TestRenderTranscript:
         md = render_transcript(path)
         assert "screenshot taken" in md
         assert "[Image: image/jpeg]" in md
+
+    def test_line_number_stripping(self, tmp_path: Path) -> None:
+        """Read tool line number prefixes are stripped from tool results."""
+        content = "     1\u2192def hello():\n     2\u2192    return 'hi'\n"
+        path = self._write_jsonl(
+            tmp_path,
+            [
+                {"type": "user", "message": {"content": [{"type": "tool_result", "content": content}]}},
+            ],
+        )
+        md = render_transcript(path)
+        assert "def hello():" in md
+        assert "1\u2192" not in md
