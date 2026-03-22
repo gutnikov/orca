@@ -1,6 +1,7 @@
 """Orca state machine engine."""
 
 from orca.engine.config import ConfigValidationError, parse_config
+from orca.engine.formatting import format_issues
 from orca.engine.reducer import reduce
 from orca.engine.types import (
     AdvanceEvent,
@@ -9,6 +10,7 @@ from orca.engine.types import (
     Effect,
     ErrorEffect,
     Event,
+    EventLogEntry,
     Issue,
     State,
     StateMachineConfig,
@@ -19,6 +21,7 @@ from orca.engine.types import (
 __all__ = [
     "ConfigValidationError",
     "parse_config",
+    "format_issues",
     "reduce",
     "AdvanceEvent",
     "CreateEvent",
@@ -26,6 +29,7 @@ __all__ = [
     "Effect",
     "ErrorEffect",
     "Event",
+    "EventLogEntry",
     "Issue",
     "State",
     "StateMachineConfig",

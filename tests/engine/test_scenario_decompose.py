@@ -69,6 +69,12 @@ states:
     terminal: true
 """
 
+TS = "2026-01-01T00:00:00Z"
+
+
+def _clock(value: str = TS) -> Callable[[], str]:
+    return lambda: value
+
 
 def _counter() -> Callable[[], str]:
     n = 0
@@ -90,7 +96,7 @@ def _advance_to_scoping(
 ) -> tuple[State, list[Effect]]:
     """Advance an issue from todo to scoping via worker result."""
     result: tuple[State, list[Effect]] = reduce(
-        config, state, WorkerResultEvent(issue_id=issue_id, result={"outcome": "scope"}), gen
+        config, state, WorkerResultEvent(issue_id=issue_id, result={"outcome": "scope"}, timestamp=TS), gen, _clock()
     )
     return result
 
@@ -98,11 +104,17 @@ def _advance_to_scoping(
 def _complete_child(config: StateMachineConfig, state: State, child_id: str, gen: Callable[[], str]) -> State:
     """Take a child through todo→scoping(ready)→implementing→done."""
     # Child starts in todo (active, auto-dispatched). Move to scoping.
-    state, _ = reduce(config, state, WorkerResultEvent(issue_id=child_id, result={"outcome": "scope"}), gen)
+    state, _ = reduce(
+        config, state, WorkerResultEvent(issue_id=child_id, result={"outcome": "scope"}, timestamp=TS), gen, _clock()
+    )
     # Scoping says ready → implementing
-    state, _ = reduce(config, state, WorkerResultEvent(issue_id=child_id, result={"outcome": "ready"}), gen)
+    state, _ = reduce(
+        config, state, WorkerResultEvent(issue_id=child_id, result={"outcome": "ready"}, timestamp=TS), gen, _clock()
+    )
     # Implementing done → done
-    state, _ = reduce(config, state, WorkerResultEvent(issue_id=child_id, result={"outcome": "done"}), gen)
+    state, _ = reduce(
+        config, state, WorkerResultEvent(issue_id=child_id, result={"outcome": "done"}, timestamp=TS), gen, _clock()
+    )
     return state
 
 
@@ -115,7 +127,9 @@ class TestSingleLevelDecomposeAndUnblock:
         state = _empty_state()
 
         # Create root and advance to scoping
-        state, _ = reduce(config, state, CreateEvent(issue_id="ROOT", fields={"title": "Root"}), gen)
+        state, _ = reduce(
+            config, state, CreateEvent(issue_id="ROOT", fields={"title": "Root"}, timestamp=TS), gen, _clock()
+        )
         state, _ = _advance_to_scoping(config, state, "ROOT", gen)
 
         # Decompose into 2 children
@@ -131,8 +145,10 @@ class TestSingleLevelDecomposeAndUnblock:
                         {"key": "child-b", "fields": {"title": "Child B"}},
                     ],
                 },
+                timestamp=TS,
             ),
             gen,
+            _clock(),
         )
 
         # Children created with generated IDs
@@ -157,12 +173,16 @@ class TestSingleLevelDecomposeAndUnblock:
         assert state.issues["ROOT"].state == "scoping"
 
         # Parent returns ready → implementing
-        state, effects = reduce(config, state, WorkerResultEvent(issue_id="ROOT", result={"outcome": "ready"}), gen)
+        state, effects = reduce(
+            config, state, WorkerResultEvent(issue_id="ROOT", result={"outcome": "ready"}, timestamp=TS), gen, _clock()
+        )
         assert state.issues["ROOT"].state == "implementing"
         assert state.issues["ROOT"].worker_active is True
 
         # Implementing done
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id="ROOT", result={"outcome": "done"}), gen)
+        state, _ = reduce(
+            config, state, WorkerResultEvent(issue_id="ROOT", result={"outcome": "done"}, timestamp=TS), gen, _clock()
+        )
         assert state.issues["ROOT"].state == "done"
 
 
@@ -175,7 +195,9 @@ class TestThreeLevelCascadingUnblock:
         state = _empty_state()
 
         # L1: create and decompose
-        state, _ = reduce(config, state, CreateEvent(issue_id="L1", fields={"title": "Level 1"}), gen)
+        state, _ = reduce(
+            config, state, CreateEvent(issue_id="L1", fields={"title": "Level 1"}, timestamp=TS), gen, _clock()
+        )
         state, _ = _advance_to_scoping(config, state, "L1", gen)
         state, _ = reduce(
             config,
@@ -186,8 +208,10 @@ class TestThreeLevelCascadingUnblock:
                     "outcome": "decompose",
                     "sub_issues": [{"key": "l2", "fields": {"title": "Level 2"}}],
                 },
+                timestamp=TS,
             ),
             gen,
+            _clock(),
         )
 
         l2_ids = [iid for iid, iss in state.issues.items() if iss.decomposed_from == "L1"]
@@ -195,7 +219,9 @@ class TestThreeLevelCascadingUnblock:
         l2_id = l2_ids[0]
 
         # L2: in todo (active, auto-dispatched), move to scoping
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id=l2_id, result={"outcome": "scope"}), gen)
+        state, _ = reduce(
+            config, state, WorkerResultEvent(issue_id=l2_id, result={"outcome": "scope"}, timestamp=TS), gen, _clock()
+        )
         state, _ = reduce(
             config,
             state,
@@ -205,8 +231,10 @@ class TestThreeLevelCascadingUnblock:
                     "outcome": "decompose",
                     "sub_issues": [{"key": "l3", "fields": {"title": "Level 3"}}],
                 },
+                timestamp=TS,
             ),
             gen,
+            _clock(),
         )
 
         l3_ids = [iid for iid, iss in state.issues.items() if iss.decomposed_from == l2_id]
@@ -222,8 +250,12 @@ class TestThreeLevelCascadingUnblock:
         assert state.issues[l2_id].state == "scoping"
 
         # L2: ready → implementing → done
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id=l2_id, result={"outcome": "ready"}), gen)
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id=l2_id, result={"outcome": "done"}), gen)
+        state, _ = reduce(
+            config, state, WorkerResultEvent(issue_id=l2_id, result={"outcome": "ready"}, timestamp=TS), gen, _clock()
+        )
+        state, _ = reduce(
+            config, state, WorkerResultEvent(issue_id=l2_id, result={"outcome": "done"}, timestamp=TS), gen, _clock()
+        )
         assert state.issues[l2_id].state == "done"
 
         # L1 should be unblocked and re-dispatched in scoping
@@ -239,7 +271,9 @@ class TestEmptyDecomposeError:
         gen = _counter()
         state = _empty_state()
 
-        state, _ = reduce(config, state, CreateEvent(issue_id="ROOT", fields={"title": "Root"}), gen)
+        state, _ = reduce(
+            config, state, CreateEvent(issue_id="ROOT", fields={"title": "Root"}, timestamp=TS), gen, _clock()
+        )
         state, _ = _advance_to_scoping(config, state, "ROOT", gen)
 
         state, effects = reduce(
@@ -248,8 +282,10 @@ class TestEmptyDecomposeError:
             WorkerResultEvent(
                 issue_id="ROOT",
                 result={"outcome": "decompose", "sub_issues": []},
+                timestamp=TS,
             ),
             gen,
+            _clock(),
         )
 
         assert len(effects) == 1
@@ -268,7 +304,9 @@ class TestMassiveFanOut:
         gen = _counter()
         state = _empty_state()
 
-        state, _ = reduce(config, state, CreateEvent(issue_id="ROOT", fields={"title": "Root"}), gen)
+        state, _ = reduce(
+            config, state, CreateEvent(issue_id="ROOT", fields={"title": "Root"}, timestamp=TS), gen, _clock()
+        )
         state, _ = _advance_to_scoping(config, state, "ROOT", gen)
 
         sub_issues = [{"key": f"child-{i}", "fields": {"title": f"Child {i}"}} for i in range(20)]
@@ -278,8 +316,10 @@ class TestMassiveFanOut:
             WorkerResultEvent(
                 issue_id="ROOT",
                 result={"outcome": "decompose", "sub_issues": sub_issues},
+                timestamp=TS,
             ),
             gen,
+            _clock(),
         )
 
         child_ids = [iid for iid, iss in state.issues.items() if iss.decomposed_from == "ROOT"]
@@ -302,7 +342,9 @@ class TestDiamondDependency:
         gen = _counter()
         state = _empty_state()
 
-        state, _ = reduce(config, state, CreateEvent(issue_id="ROOT", fields={"title": "Root"}), gen)
+        state, _ = reduce(
+            config, state, CreateEvent(issue_id="ROOT", fields={"title": "Root"}, timestamp=TS), gen, _clock()
+        )
         state, _ = _advance_to_scoping(config, state, "ROOT", gen)
 
         state, effects = reduce(
@@ -318,8 +360,10 @@ class TestDiamondDependency:
                         {"key": "orders", "fields": {"title": "Orders Service"}, "depends_on": ["db"]},
                     ],
                 },
+                timestamp=TS,
             ),
             gen,
+            _clock(),
         )
 
         # Find the real IDs
@@ -365,7 +409,9 @@ class TestDispatchIncludesChildrenContext:
         gen = _counter()
         state = _empty_state()
 
-        state, _ = reduce(config, state, CreateEvent(issue_id="ROOT", fields={"title": "Root"}), gen)
+        state, _ = reduce(
+            config, state, CreateEvent(issue_id="ROOT", fields={"title": "Root"}, timestamp=TS), gen, _clock()
+        )
         state, _ = _advance_to_scoping(config, state, "ROOT", gen)
 
         state, _ = reduce(
@@ -379,8 +425,10 @@ class TestDispatchIncludesChildrenContext:
                         {"key": "c1", "fields": {"title": "Child 1"}},
                     ],
                 },
+                timestamp=TS,
             ),
             gen,
+            _clock(),
         )
 
         child_ids = [iid for iid, iss in state.issues.items() if iss.decomposed_from == "ROOT"]
@@ -389,10 +437,22 @@ class TestDispatchIncludesChildrenContext:
 
         # Complete the child (todo→scoping→implementing→done) — last step triggers parent re-dispatch
         # Child is auto-dispatched in todo
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id=child_id, result={"outcome": "scope"}), gen)
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id=child_id, result={"outcome": "ready"}), gen)
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id=child_id, result={"outcome": "scope"}, timestamp=TS),
+            gen,
+            _clock(),
+        )
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id=child_id, result={"outcome": "ready"}, timestamp=TS),
+            gen,
+            _clock(),
+        )
         state, effects_from_last = reduce(
-            config, state, WorkerResultEvent(issue_id=child_id, result={"outcome": "done"}), gen
+            config, state, WorkerResultEvent(issue_id=child_id, result={"outcome": "done"}, timestamp=TS), gen, _clock()
         )
 
         # The last step should produce a dispatch for the parent
@@ -408,7 +468,7 @@ class TestDispatchIncludesChildrenContext:
         child_context = dispatch.issue["children"][0]
         assert child_context["issue_id"] == child_id
         assert child_context["state"] == "done"
-        assert len(child_context["result_history"]) > 0
+        assert len(child_context["event_log"]) > 0
 
 
 class TestBlockedIssueRejectsWorkerResult:
@@ -419,7 +479,9 @@ class TestBlockedIssueRejectsWorkerResult:
         gen = _counter()
         state = _empty_state()
 
-        state, _ = reduce(config, state, CreateEvent(issue_id="ROOT", fields={"title": "Root"}), gen)
+        state, _ = reduce(
+            config, state, CreateEvent(issue_id="ROOT", fields={"title": "Root"}, timestamp=TS), gen, _clock()
+        )
         state, _ = _advance_to_scoping(config, state, "ROOT", gen)
 
         # Decompose
@@ -432,8 +494,10 @@ class TestBlockedIssueRejectsWorkerResult:
                     "outcome": "decompose",
                     "sub_issues": [{"key": "c1", "fields": {"title": "Child 1"}}],
                 },
+                timestamp=TS,
             ),
             gen,
+            _clock(),
         )
 
         # Parent is now blocked. Try to send a worker result to it.
@@ -441,8 +505,9 @@ class TestBlockedIssueRejectsWorkerResult:
         state, effects = reduce(
             config,
             state,
-            WorkerResultEvent(issue_id="ROOT", result={"outcome": "ready"}),
+            WorkerResultEvent(issue_id="ROOT", result={"outcome": "ready"}, timestamp=TS),
             gen,
+            _clock(),
         )
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)

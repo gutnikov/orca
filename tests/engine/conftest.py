@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Callable
+
 import pytest
+
+
+def _clock(value: str = "2026-01-01T00:00:00Z") -> Callable[[], str]:
+    return lambda: value
 
 
 @pytest.fixture()
