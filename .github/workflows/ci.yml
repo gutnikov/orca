@@ -31,3 +31,14 @@ jobs:
 
       - name: Mypy
         run: uv run mypy src/
+
+  test:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: uv sync
+
+      - name: Run tests
+        run: uv run pytest -v
