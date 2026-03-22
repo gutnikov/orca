@@ -316,3 +316,117 @@ initial: todo
 """
         with pytest.raises(ConfigValidationError, match="max_workers"):
             parse_config(yaml_str)
+
+    def test_max_hops_zero(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+  done:
+    terminal: true
+initial: todo
+max_hops: 0
+"""
+        with pytest.raises(ConfigValidationError, match="max_hops"):
+            parse_config(yaml_str)
+
+    def test_max_hops_negative(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+  done:
+    terminal: true
+initial: todo
+max_hops: -1
+"""
+        with pytest.raises(ConfigValidationError, match="max_hops"):
+            parse_config(yaml_str)
+
+    def test_max_visits_zero(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    max_visits: 0
+    worker:
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+  done:
+    terminal: true
+initial: todo
+"""
+        with pytest.raises(ConfigValidationError, match="max_visits"):
+            parse_config(yaml_str)
+
+
+class TestParseMaxHops:
+    def test_max_hops_parsed(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+  done:
+    terminal: true
+initial: todo
+max_hops: 50
+"""
+        cfg = parse_config(yaml_str)
+        assert cfg.max_hops == 50
+
+
+class TestParseMaxVisits:
+    def test_max_visits_parsed(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    max_visits: 5
+    worker:
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+  done:
+    terminal: true
+initial: todo
+"""
+        cfg = parse_config(yaml_str)
+        assert cfg.states["todo"].max_visits == 5

@@ -64,6 +64,12 @@ states:
     terminal: true
 """
 
+TS = "2026-01-01T00:00:00Z"
+
+
+def _clock(value: str = TS) -> Callable[[], str]:
+    return lambda: value
+
 
 def _counter() -> Callable[[], str]:
     n = 0
@@ -85,9 +91,15 @@ def _advance_to_apply(config: object, state: State, issue_id: str, gen: Callable
     from orca.engine.types import StateMachineConfig
 
     assert isinstance(config, StateMachineConfig)
-    state, _ = reduce(config, state, AdvanceEvent(issue_id=issue_id, target_state="implementing"), gen)
-    state, _ = reduce(config, state, WorkerResultEvent(issue_id=issue_id, result={"outcome": "done"}), gen)
-    state, _ = reduce(config, state, WorkerResultEvent(issue_id=issue_id, result={"outcome": "passed"}), gen)
+    state, _ = reduce(
+        config, state, AdvanceEvent(issue_id=issue_id, target_state="implementing", timestamp=TS), gen, _clock()
+    )
+    state, _ = reduce(
+        config, state, WorkerResultEvent(issue_id=issue_id, result={"outcome": "done"}, timestamp=TS), gen, _clock()
+    )
+    state, _ = reduce(
+        config, state, WorkerResultEvent(issue_id=issue_id, result={"outcome": "passed"}, timestamp=TS), gen, _clock()
+    )
     return state
 
 
@@ -103,7 +115,9 @@ class TestSerializedMerge4Issues:
 
         # Create all issues
         for iid in ids:
-            state, _ = reduce(config, state, CreateEvent(issue_id=iid, fields={"title": iid}), gen)
+            state, _ = reduce(
+                config, state, CreateEvent(issue_id=iid, fields={"title": iid}, timestamp=TS), gen, _clock()
+            )
 
         # Advance all to apply
         for iid in ids:
@@ -121,7 +135,13 @@ class TestSerializedMerge4Issues:
 
         # Merge them one by one
         for i, iid in enumerate(ids):
-            state, effects = reduce(config, state, WorkerResultEvent(issue_id=iid, result={"outcome": "merged"}), gen)
+            state, effects = reduce(
+                config,
+                state,
+                WorkerResultEvent(issue_id=iid, result={"outcome": "merged"}, timestamp=TS),
+                gen,
+                _clock(),
+            )
             assert state.issues[iid].state == "done"
 
             if i < len(ids) - 1:
@@ -151,7 +171,9 @@ class TestConflictFreesSlotForNext:
         state = _empty_state()
 
         for iid in ["P-1", "P-2"]:
-            state, _ = reduce(config, state, CreateEvent(issue_id=iid, fields={"title": iid}), gen)
+            state, _ = reduce(
+                config, state, CreateEvent(issue_id=iid, fields={"title": iid}, timestamp=TS), gen, _clock()
+            )
             state = _advance_to_apply(config, state, iid, gen)
 
         assert state.issues["P-1"].worker_active is True
@@ -159,7 +181,13 @@ class TestConflictFreesSlotForNext:
         assert state.worker_queues.get("apply") == ["P-2"]
 
         # P-1 conflicts → goes back to implementing, P-2 gets dispatched in apply
-        state, effects = reduce(config, state, WorkerResultEvent(issue_id="P-1", result={"outcome": "conflict"}), gen)
+        state, effects = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="P-1", result={"outcome": "conflict"}, timestamp=TS),
+            gen,
+            _clock(),
+        )
         assert state.issues["P-1"].state == "implementing"
         assert state.issues["P-1"].worker_active is True  # implementing dispatches immediately
 
@@ -179,14 +207,22 @@ class TestConflictReenterAtBackOfQueue:
         state = _empty_state()
 
         for iid in ["P-1", "P-2", "P-3"]:
-            state, _ = reduce(config, state, CreateEvent(issue_id=iid, fields={"title": iid}), gen)
+            state, _ = reduce(
+                config, state, CreateEvent(issue_id=iid, fields={"title": iid}, timestamp=TS), gen, _clock()
+            )
             state = _advance_to_apply(config, state, iid, gen)
 
         assert state.issues["P-1"].worker_active is True
         assert state.worker_queues.get("apply") == ["P-2", "P-3"]
 
         # P-1 conflicts → goes back to implementing
-        state, effects = reduce(config, state, WorkerResultEvent(issue_id="P-1", result={"outcome": "conflict"}), gen)
+        state, effects = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="P-1", result={"outcome": "conflict"}, timestamp=TS),
+            gen,
+            _clock(),
+        )
         assert state.issues["P-1"].state == "implementing"
 
         # P-2 should now be active in apply
@@ -197,8 +233,12 @@ class TestConflictReenterAtBackOfQueue:
         assert state.worker_queues.get("apply") == ["P-3"]
 
         # P-1 goes back through implementing→qa→apply, should end up queued behind P-3
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id="P-1", result={"outcome": "done"}), gen)
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id="P-1", result={"outcome": "passed"}), gen)
+        state, _ = reduce(
+            config, state, WorkerResultEvent(issue_id="P-1", result={"outcome": "done"}, timestamp=TS), gen, _clock()
+        )
+        state, _ = reduce(
+            config, state, WorkerResultEvent(issue_id="P-1", result={"outcome": "passed"}, timestamp=TS), gen, _clock()
+        )
 
         assert state.issues["P-1"].state == "apply"
         assert state.issues["P-1"].worker_active is False
@@ -214,14 +254,18 @@ class TestWorkerFailedRetainsSlot:
         state = _empty_state()
 
         for iid in ["P-1", "P-2"]:
-            state, _ = reduce(config, state, CreateEvent(issue_id=iid, fields={"title": iid}), gen)
+            state, _ = reduce(
+                config, state, CreateEvent(issue_id=iid, fields={"title": iid}, timestamp=TS), gen, _clock()
+            )
             state = _advance_to_apply(config, state, iid, gen)
 
         assert state.issues["P-1"].worker_active is True
         assert state.worker_queues.get("apply") == ["P-2"]
 
         # Worker fails on P-1 → slot retained, P-2 stays queued
-        state, effects = reduce(config, state, WorkerFailedEvent(issue_id="P-1", error="timeout"), gen)
+        state, effects = reduce(
+            config, state, WorkerFailedEvent(issue_id="P-1", error="timeout", timestamp=TS), gen, _clock()
+        )
         assert state.issues["P-1"].worker_active is True  # slot retained
         assert state.issues["P-1"].state == "apply"
 

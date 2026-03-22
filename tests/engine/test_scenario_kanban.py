@@ -56,6 +56,12 @@ states:
     terminal: true
 """
 
+TS = "2026-01-01T00:00:00Z"
+
+
+def _clock(value: str = TS) -> Callable[[], str]:
+    return lambda: value
+
 
 def _counter() -> Callable[[], str]:
     n = 0
@@ -81,13 +87,17 @@ class TestFullHappyPath:
         state = _empty_state()
 
         # Create issue in todo (passive state, no dispatch)
-        state, effects = reduce(config, state, CreateEvent(issue_id="K-1", fields={"title": "Feature A"}), gen)
+        state, effects = reduce(
+            config, state, CreateEvent(issue_id="K-1", fields={"title": "Feature A"}, timestamp=TS), gen, _clock()
+        )
         assert state.issues["K-1"].state == "todo"
         assert state.issues["K-1"].worker_active is False
         assert effects == []
 
         # Advance to implementing (active state, should dispatch)
-        state, effects = reduce(config, state, AdvanceEvent(issue_id="K-1", target_state="implementing"), gen)
+        state, effects = reduce(
+            config, state, AdvanceEvent(issue_id="K-1", target_state="implementing", timestamp=TS), gen, _clock()
+        )
         assert state.issues["K-1"].state == "implementing"
         assert state.issues["K-1"].worker_active is True
         assert len(effects) == 1
@@ -97,26 +107,33 @@ class TestFullHappyPath:
 
         # Worker completes implementing → transitions to review
         state, effects = reduce(
-            config, state, WorkerResultEvent(issue_id="K-1", result={"outcome": "done", "summary": "Built it"}), gen
+            config,
+            state,
+            WorkerResultEvent(issue_id="K-1", result={"outcome": "done", "summary": "Built it"}, timestamp=TS),
+            gen,
+            _clock(),
         )
         assert state.issues["K-1"].state == "review"
         assert state.issues["K-1"].worker_active is True
         assert len(effects) == 1
         assert isinstance(effects[0], DispatchWorkerEffect)
         assert effects[0].state == "review"
-        assert len(state.issues["K-1"].result_history) == 1
+        worker_results = [e for e in state.issues["K-1"].event_log if e.type == "worker_result"]
+        assert len(worker_results) == 1
 
         # Review approves → transitions to done (terminal)
         state, effects = reduce(
             config,
             state,
-            WorkerResultEvent(issue_id="K-1", result={"outcome": "approved", "feedback": "LGTM"}),
+            WorkerResultEvent(issue_id="K-1", result={"outcome": "approved", "feedback": "LGTM"}, timestamp=TS),
             gen,
+            _clock(),
         )
         assert state.issues["K-1"].state == "done"
         assert state.issues["K-1"].worker_active is False
         assert effects == []
-        assert len(state.issues["K-1"].result_history) == 2
+        worker_results = [e for e in state.issues["K-1"].event_log if e.type == "worker_result"]
+        assert len(worker_results) == 2
 
 
 class TestReviewRejectionLoop:
@@ -128,16 +145,23 @@ class TestReviewRejectionLoop:
         state = _empty_state()
 
         # Create and advance to implementing
-        state, _ = reduce(config, state, CreateEvent(issue_id="K-1", fields={"title": "Feature B"}), gen)
-        state, _ = reduce(config, state, AdvanceEvent(issue_id="K-1", target_state="implementing"), gen)
+        state, _ = reduce(
+            config, state, CreateEvent(issue_id="K-1", fields={"title": "Feature B"}, timestamp=TS), gen, _clock()
+        )
+        state, _ = reduce(
+            config, state, AdvanceEvent(issue_id="K-1", target_state="implementing", timestamp=TS), gen, _clock()
+        )
 
         for attempt in range(1, 4):
             # Implementing completes → review
             state, effects = reduce(
                 config,
                 state,
-                WorkerResultEvent(issue_id="K-1", result={"outcome": "done", "summary": f"Attempt {attempt}"}),
+                WorkerResultEvent(
+                    issue_id="K-1", result={"outcome": "done", "summary": f"Attempt {attempt}"}, timestamp=TS
+                ),
                 gen,
+                _clock(),
             )
             assert state.issues["K-1"].state == "review"
             assert len(effects) == 1
@@ -148,8 +172,11 @@ class TestReviewRejectionLoop:
                 state, effects = reduce(
                     config,
                     state,
-                    WorkerResultEvent(issue_id="K-1", result={"outcome": "rejected", "feedback": "Needs work"}),
+                    WorkerResultEvent(
+                        issue_id="K-1", result={"outcome": "rejected", "feedback": "Needs work"}, timestamp=TS
+                    ),
                     gen,
+                    _clock(),
                 )
                 assert state.issues["K-1"].state == "implementing"
                 assert state.issues["K-1"].worker_active is True
@@ -161,16 +188,22 @@ class TestReviewRejectionLoop:
                 state, effects = reduce(
                     config,
                     state,
-                    WorkerResultEvent(issue_id="K-1", result={"outcome": "approved", "feedback": "Ship it"}),
+                    WorkerResultEvent(
+                        issue_id="K-1", result={"outcome": "approved", "feedback": "Ship it"}, timestamp=TS
+                    ),
                     gen,
+                    _clock(),
                 )
                 assert state.issues["K-1"].state == "done"
 
         # 3 implementing results + 2 rejected reviews + 1 approved review = 6
-        assert len(state.issues["K-1"].result_history) == 6
-        # Verify the pattern of states in result_history
-        states_in_history = [e.state for e in state.issues["K-1"].result_history]
-        assert states_in_history == [
+        worker_results = [e for e in state.issues["K-1"].event_log if e.type == "worker_result"]
+        assert len(worker_results) == 6
+        # Verify the pattern of states via transitioned entries (from field)
+        transitioned = [e for e in state.issues["K-1"].event_log if e.type == "transitioned"]
+        # Filter to only transitions triggered by worker results (from implementing/review)
+        worker_transitions = [e.data["from"] for e in transitioned if e.data["from"] in ("implementing", "review")]
+        assert worker_transitions == [
             "implementing",
             "review",
             "implementing",
@@ -192,8 +225,12 @@ class TestParallelIssues:
 
         # Create all issues and advance to implementing
         for iid in issue_ids:
-            state, _ = reduce(config, state, CreateEvent(issue_id=iid, fields={"title": f"Issue {iid}"}), gen)
-            state, effects = reduce(config, state, AdvanceEvent(issue_id=iid, target_state="implementing"), gen)
+            state, _ = reduce(
+                config, state, CreateEvent(issue_id=iid, fields={"title": f"Issue {iid}"}, timestamp=TS), gen, _clock()
+            )
+            state, effects = reduce(
+                config, state, AdvanceEvent(issue_id=iid, target_state="implementing", timestamp=TS), gen, _clock()
+            )
             assert len(effects) == 1
             assert isinstance(effects[0], DispatchWorkerEffect)
 
@@ -206,7 +243,11 @@ class TestParallelIssues:
         for iid in reversed(issue_ids):
             # implementing → review
             state, effects = reduce(
-                config, state, WorkerResultEvent(issue_id=iid, result={"outcome": "done", "summary": "Done"}), gen
+                config,
+                state,
+                WorkerResultEvent(issue_id=iid, result={"outcome": "done", "summary": "Done"}, timestamp=TS),
+                gen,
+                _clock(),
             )
             assert state.issues[iid].state == "review"
             assert len(effects) == 1
@@ -215,8 +256,9 @@ class TestParallelIssues:
             state, effects = reduce(
                 config,
                 state,
-                WorkerResultEvent(issue_id=iid, result={"outcome": "approved", "feedback": "OK"}),
+                WorkerResultEvent(issue_id=iid, result={"outcome": "approved", "feedback": "OK"}, timestamp=TS),
                 gen,
+                _clock(),
             )
             assert state.issues[iid].state == "done"
             assert state.issues[iid].worker_active is False
@@ -224,4 +266,5 @@ class TestParallelIssues:
         # Verify all done, no interference
         for iid in issue_ids:
             assert state.issues[iid].state == "done"
-            assert len(state.issues[iid].result_history) == 2
+            worker_results = [e for e in state.issues[iid].event_log if e.type == "worker_result"]
+            assert len(worker_results) == 2

@@ -4,6 +4,7 @@ import copy
 from collections.abc import Callable
 
 from orca.engine.dispatch import (
+    append_log,
     backfill_queue,
     build_issue_context,
     build_result_format,
@@ -22,7 +23,6 @@ from orca.engine.types import (
     Issue,
     OnDecompose,
     OnTransition,
-    ResultHistoryEntry,
     State,
     StateMachineConfig,
     WorkerFailedEvent,
@@ -35,19 +35,21 @@ def reduce(
     state: State,
     event: Event,
     generate_id: Callable[[], str],
+    now: Callable[[], str],
 ) -> tuple[State, list[Effect]]:
     """Dispatch event to the appropriate handler and return (new_state, effects)."""
     new_state = copy.deepcopy(state)
     effects: list[Effect] = []
+    ts = now()
 
     if isinstance(event, CreateEvent):
-        _handle_create(config, new_state, event, effects)
+        _handle_create(config, new_state, event, effects, ts)
     elif isinstance(event, AdvanceEvent):
-        _handle_advance(config, new_state, event, effects)
+        _handle_advance(config, new_state, event, effects, ts)
     elif isinstance(event, WorkerResultEvent):
-        _handle_worker_result(config, new_state, event, effects, generate_id)
+        _handle_worker_result(config, new_state, event, effects, generate_id, ts)
     elif isinstance(event, WorkerFailedEvent):
-        _handle_worker_failed(config, new_state, event, effects)
+        _handle_worker_failed(config, new_state, event, effects, ts)
 
     return new_state, effects
 
@@ -57,6 +59,7 @@ def _handle_create(
     state: State,
     event: CreateEvent,
     effects: list[Effect],
+    ts: str,
 ) -> None:
     if event.issue_id in state.issues:
         effects.append(ErrorEffect(issue_id=event.issue_id, message=f"Issue '{event.issue_id}' already exists"))
@@ -68,16 +71,22 @@ def _handle_create(
         worker_active=False,
         decomposed_from=None,
         depends_on=[],
-        result_history=[],
+        event_log=[],
+        visit_counts={config.initial: 1},
+        hop_count=0,
     )
     state.issues[event.issue_id] = issue
+
+    # Log the creation
+    append_log(issue, event.timestamp, "created", {"state": config.initial})
 
     # If initial state is active (has a worker), dispatch
     state_def = config.states[config.initial]
     if state_def.worker is not None:
-        dispatch_effects: list[DispatchWorkerEffect] = []
-        try_dispatch(config, state, event.issue_id, dispatch_effects)
-        effects.extend(dispatch_effects)
+        prev_len = len(effects)
+        try_dispatch(config, state, event.issue_id, effects)
+        if len(effects) > prev_len:
+            append_log(issue, ts, "worker_dispatched", {"state": issue.state})
 
 
 def _handle_advance(
@@ -85,6 +94,7 @@ def _handle_advance(
     state: State,
     event: AdvanceEvent,
     effects: list[Effect],
+    ts: str,
 ) -> None:
     # Issue must exist
     if event.issue_id not in state.issues:
@@ -124,15 +134,50 @@ def _handle_advance(
         )
         return
 
+    old_state = issue.state
+
+    # Hop limit checks before moving
+    target_state_def = config.states[event.target_state]
+    if target_state_def.max_visits is not None:
+        current_visits = issue.visit_counts.get(event.target_state, 0)
+        if current_visits + 1 > target_state_def.max_visits:
+            append_log(
+                issue,
+                ts,
+                "limit_reached",
+                {"limit": "max_visits", "state": event.target_state, "count": current_visits + 1},
+            )
+            effects.append(
+                ErrorEffect(
+                    issue_id=event.issue_id,
+                    message=f"max_visits ({target_state_def.max_visits}) reached for state '{event.target_state}'",
+                )
+            )
+            return
+    if config.max_hops is not None and issue.hop_count + 1 > config.max_hops:
+        append_log(issue, ts, "limit_reached", {"limit": "max_hops", "count": issue.hop_count + 1})
+        effects.append(
+            ErrorEffect(
+                issue_id=event.issue_id,
+                message=f"max_hops ({config.max_hops}) reached",
+            )
+        )
+        return
+
     # Move to target state
     issue.state = event.target_state
 
-    # If target state is active, dispatch
-    target_state_def = config.states[event.target_state]
+    # Log the advance
+    append_log(issue, event.timestamp, "advanced", {"from": old_state, "to": event.target_state})
+
+    # Update visit counts and hop count
+    issue.visit_counts[event.target_state] = issue.visit_counts.get(event.target_state, 0) + 1
+    issue.hop_count += 1
     if target_state_def.worker is not None:
-        dispatch_effects: list[DispatchWorkerEffect] = []
-        try_dispatch(config, state, event.issue_id, dispatch_effects)
-        effects.extend(dispatch_effects)
+        prev_len = len(effects)
+        try_dispatch(config, state, event.issue_id, effects)
+        if len(effects) > prev_len:
+            append_log(issue, ts, "worker_dispatched", {"state": issue.state})
 
 
 def _handle_worker_result(
@@ -141,6 +186,7 @@ def _handle_worker_result(
     event: WorkerResultEvent,
     effects: list[Effect],
     generate_id: Callable[[], str],
+    ts: str,
 ) -> None:
     # --- Validation (before any mutation) ---
 
@@ -206,19 +252,59 @@ def _handle_worker_result(
     # 1. Set worker_active = False (frees slot)
     issue.worker_active = False
 
-    # 2. Append ResultHistoryEntry
-    issue.result_history.append(ResultHistoryEntry(state=issue.state, result=event.result))
+    # 2. Append worker_result log entry
+    append_log(issue, event.timestamp, "worker_result", event.result)
 
     # Slot backfill: if old state has max_workers, backfill
-    dispatch_effects: list[DispatchWorkerEffect] = []
+    dispatch_effects: list[Effect] = []
     if state_def.max_workers is not None:
         backfill_queue(config, state, old_state_name, dispatch_effects)
 
-    # 3. Route based on rule type
+    # 3. Hop limit checks before transition/decompose
     if isinstance(rule, OnTransition):
-        _apply_transition(config, state, event.issue_id, issue, old_state_name, rule.target, dispatch_effects)
+        target = rule.target
+        target_def = config.states[target]
+        if target_def.max_visits is not None:
+            current_visits = issue.visit_counts.get(target, 0)
+            if current_visits + 1 > target_def.max_visits:
+                append_log(
+                    issue, ts, "limit_reached", {"limit": "max_visits", "state": target, "count": current_visits + 1}
+                )
+                effects.append(
+                    ErrorEffect(
+                        issue_id=event.issue_id,
+                        message=f"max_visits ({target_def.max_visits}) reached for state '{target}'",
+                    )
+                )
+                effects.extend(dispatch_effects)
+                return
+        if config.max_hops is not None and issue.hop_count + 1 > config.max_hops:
+            append_log(issue, ts, "limit_reached", {"limit": "max_hops", "count": issue.hop_count + 1})
+            effects.append(
+                ErrorEffect(
+                    issue_id=event.issue_id,
+                    message=f"max_hops ({config.max_hops}) reached",
+                )
+            )
+            effects.extend(dispatch_effects)
+            return
+
+    if isinstance(rule, OnDecompose) and config.max_hops is not None and issue.hop_count + 1 > config.max_hops:
+        append_log(issue, ts, "limit_reached", {"limit": "max_hops", "count": issue.hop_count + 1})
+        effects.append(
+            ErrorEffect(
+                issue_id=event.issue_id,
+                message=f"max_hops ({config.max_hops}) reached",
+            )
+        )
+        effects.extend(dispatch_effects)
+        return
+
+    # 4. Route based on rule type
+    if isinstance(rule, OnTransition):
+        _apply_transition(config, state, event.issue_id, issue, old_state_name, rule.target, dispatch_effects, ts)
     elif isinstance(rule, OnDecompose):
-        _apply_decompose(config, state, event, issue, generate_id, dispatch_effects)
+        _apply_decompose(config, state, event, issue, generate_id, dispatch_effects, ts)
 
     effects.extend(dispatch_effects)
 
@@ -228,6 +314,7 @@ def _handle_worker_failed(
     state: State,
     event: WorkerFailedEvent,
     effects: list[Effect],
+    ts: str,
 ) -> None:
     # Issue must exist
     if event.issue_id not in state.issues:
@@ -249,6 +336,12 @@ def _handle_worker_failed(
         effects.append(ErrorEffect(issue_id=event.issue_id, message=f"State '{issue.state}' has no worker"))
         return
 
+    # Log the failure
+    append_log(issue, event.timestamp, "worker_failed", {"state": issue.state, "error": event.error})
+
+    # Log the retry dispatch
+    append_log(issue, ts, "worker_dispatched", {"state": issue.state})
+
     # worker_active stays True — slot is RETAINED (not freed)
     # Emit DispatchWorkerEffect unconditionally (retry), bypassing dispatch protocol
     effects.append(
@@ -268,7 +361,8 @@ def _apply_transition(
     issue: Issue,
     old_state_name: str,
     target_state: str,
-    effects: list[DispatchWorkerEffect],
+    effects: list[Effect],
+    ts: str,
 ) -> None:
     # Remove issue from old state's worker queue
     remove_from_queue(state, old_state_name, issue_id)
@@ -277,12 +371,22 @@ def _apply_transition(
     issue.state = target_state
     target_def = config.states[target_state]
 
+    # Log the transition
+    append_log(issue, ts, "transitioned", {"from": old_state_name, "to": target_state})
+
+    # Update visit counts and hop count
+    issue.visit_counts[target_state] = issue.visit_counts.get(target_state, 0) + 1
+    issue.hop_count += 1
+
     if target_def.terminal:
         # Run cascading unblock check
-        _cascading_unblock(config, state, issue_id, effects)
+        _cascading_unblock(config, state, issue_id, effects, ts)
     elif target_def.worker is not None:
         # Target is active -> dispatch
+        prev_len = len(effects)
         try_dispatch(config, state, issue_id, effects)
+        if len(effects) > prev_len:
+            append_log(issue, ts, "worker_dispatched", {"state": issue.state})
 
 
 def _apply_decompose(
@@ -291,9 +395,16 @@ def _apply_decompose(
     event: WorkerResultEvent,
     _parent_issue: Issue,
     generate_id: Callable[[], str],
-    effects: list[DispatchWorkerEffect],
+    effects: list[Effect],
+    ts: str,
 ) -> None:
     sub_issues: list[dict[str, object]] = event.result.get("sub_issues", [])
+
+    # Log decomposition blocked on parent
+    append_log(_parent_issue, ts, "decomposition_blocked", {})
+
+    # Increment parent hop count
+    _parent_issue.hop_count += 1
 
     # Generate IDs and build key -> real_id mapping
     key_to_id: dict[str, str] = {}
@@ -324,23 +435,37 @@ def _apply_decompose(
             worker_active=False,
             decomposed_from=event.issue_id,
             depends_on=resolved_depends,
-            result_history=[],
+            event_log=[],
+            visit_counts={config.initial: 1},
+            hop_count=0,
         )
         state.issues[real_id] = child
+
+        # Log creation on child
+        append_log(child, ts, "created", {"state": config.initial})
+
+        # If child has dependencies, log dependency_blocked
+        if resolved_depends:
+            append_log(child, ts, "dependency_blocked", {"depends_on": resolved_depends})
 
     # Dispatch each child that is not blocked and whose initial state is active
     initial_def = config.states[config.initial]
     if initial_def.worker is not None:
         for _key, real_id in key_to_id.items():
             if not is_blocked(state, config, real_id):
+                prev_len = len(effects)
                 try_dispatch(config, state, real_id, effects)
+                if len(effects) > prev_len:
+                    child_issue = state.issues[real_id]
+                    append_log(child_issue, ts, "worker_dispatched", {"state": child_issue.state})
 
 
 def _cascading_unblock(
     config: StateMachineConfig,
     state: State,
     terminal_issue_id: str,
-    effects: list[DispatchWorkerEffect],
+    effects: list[Effect],
+    ts: str,
 ) -> None:
     terminal_issue = state.issues[terminal_issue_id]
 
@@ -351,8 +476,13 @@ def _cascading_unblock(
         children = get_children(state, parent_id)
         all_terminal = all(config.states[state.issues[cid].state].terminal for cid in children)
         if all_terminal and not parent.worker_active:
+            # Log unblocked on parent
+            append_log(parent, ts, "unblocked", {"reason": "decomposition"})
             # Parent is no longer decomposition-blocked -> dispatch
+            prev_len = len(effects)
             try_dispatch(config, state, parent_id, effects)
+            if len(effects) > prev_len:
+                append_log(parent, ts, "worker_dispatched", {"state": parent.state})
 
     # 2. Dependency unblock: find all issues that depend on the terminal issue
     for iid, iss in state.issues.items():
@@ -365,4 +495,9 @@ def _cascading_unblock(
                 and not iss.worker_active
                 and config.states[iss.state].worker is not None
             ):
+                # Log unblocked on the dependent issue
+                append_log(iss, ts, "unblocked", {"reason": "dependency"})
+                prev_len = len(effects)
                 try_dispatch(config, state, iid, effects)
+                if len(effects) > prev_len:
+                    append_log(iss, ts, "worker_dispatched", {"state": iss.state})

@@ -59,6 +59,7 @@ class StateDef:
     on: dict[str, OnRule] = field(default_factory=dict)
     terminal: bool = False
     max_workers: int | None = None
+    max_visits: int | None = None
 
 
 @dataclass(frozen=True)
@@ -66,22 +67,24 @@ class StateMachineConfig:
     issue_fields: dict[str, FieldDef]
     initial: str
     states: dict[str, StateDef]
+    max_hops: int | None = None
 
 
 # --- Runtime state types (mutable, with serialization) ---
 
 
 @dataclass
-class ResultHistoryEntry:
-    state: str
-    result: dict[str, Any]
+class EventLogEntry:
+    timestamp: str  # ISO 8601
+    type: str
+    data: dict[str, Any]
 
     def to_dict(self) -> dict[str, Any]:
-        return {"state": self.state, "result": self.result}
+        return {"timestamp": self.timestamp, "type": self.type, "data": self.data}
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ResultHistoryEntry:
-        return cls(state=data["state"], result=data["result"])
+    def from_dict(cls, data: dict[str, Any]) -> EventLogEntry:
+        return cls(timestamp=data["timestamp"], type=data["type"], data=data["data"])
 
 
 @dataclass
@@ -91,7 +94,9 @@ class Issue:
     worker_active: bool
     decomposed_from: str | None
     depends_on: list[str]
-    result_history: list[ResultHistoryEntry]
+    event_log: list[EventLogEntry]
+    visit_counts: dict[str, int] = field(default_factory=dict)
+    hop_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -100,7 +105,9 @@ class Issue:
             "worker_active": self.worker_active,
             "decomposed_from": self.decomposed_from,
             "depends_on": self.depends_on,
-            "result_history": [entry.to_dict() for entry in self.result_history],
+            "event_log": [entry.to_dict() for entry in self.event_log],
+            "visit_counts": self.visit_counts,
+            "hop_count": self.hop_count,
         }
 
     @classmethod
@@ -111,7 +118,9 @@ class Issue:
             worker_active=data["worker_active"],
             decomposed_from=data["decomposed_from"],
             depends_on=data["depends_on"],
-            result_history=[ResultHistoryEntry.from_dict(e) for e in data["result_history"]],
+            event_log=[EventLogEntry.from_dict(e) for e in data.get("event_log", [])],
+            visit_counts=data.get("visit_counts", {}),
+            hop_count=data.get("hop_count", 0),
         )
 
 
@@ -141,24 +150,28 @@ class State:
 class CreateEvent:
     issue_id: str
     fields: dict[str, Any]
+    timestamp: str
 
 
 @dataclass(frozen=True)
 class AdvanceEvent:
     issue_id: str
     target_state: str
+    timestamp: str
 
 
 @dataclass(frozen=True)
 class WorkerResultEvent:
     issue_id: str
     result: dict[str, Any]
+    timestamp: str
 
 
 @dataclass(frozen=True)
 class WorkerFailedEvent:
     issue_id: str
     error: str
+    timestamp: str
 
 
 Event = CreateEvent | AdvanceEvent | WorkerResultEvent | WorkerFailedEvent

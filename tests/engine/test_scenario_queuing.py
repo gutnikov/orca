@@ -67,6 +67,12 @@ states:
     terminal: true
 """
 
+TS = "2026-01-01T00:00:00Z"
+
+
+def _clock(value: str = TS) -> Callable[[], str]:
+    return lambda: value
+
 
 def _counter(start: int = 0) -> Callable[[], str]:
     n = start
@@ -94,7 +100,9 @@ class TestMaxWorkersRespected:
         # Create 10 issues
         all_ids = [f"Q-{i}" for i in range(1, 11)]
         for iid in all_ids:
-            state, _effects = reduce(config, state, CreateEvent(issue_id=iid, fields={"title": f"Issue {iid}"}), gen)
+            state, _effects = reduce(
+                config, state, CreateEvent(issue_id=iid, fields={"title": f"Issue {iid}"}, timestamp=TS), gen, _clock()
+            )
 
         # First 3 should be active, remaining 7 queued
         active = [iid for iid in all_ids if state.issues[iid].worker_active]
@@ -107,8 +115,9 @@ class TestMaxWorkersRespected:
         state, effects = reduce(
             config,
             state,
-            WorkerResultEvent(issue_id="Q-1", result={"outcome": "done"}),
+            WorkerResultEvent(issue_id="Q-1", result={"outcome": "done"}, timestamp=TS),
             gen,
+            _clock(),
         )
         assert state.issues["Q-1"].state == "done"
 
@@ -131,7 +140,9 @@ class TestWorkerFailureRetainsSlotInCappedState:
 
         all_ids = [f"Q-{i}" for i in range(1, 6)]
         for iid in all_ids:
-            state, _effects = reduce(config, state, CreateEvent(issue_id=iid, fields={"title": f"Issue {iid}"}), gen)
+            state, _effects = reduce(
+                config, state, CreateEvent(issue_id=iid, fields={"title": f"Issue {iid}"}, timestamp=TS), gen, _clock()
+            )
 
         # 3 active, 2 queued
         active = [iid for iid in all_ids if state.issues[iid].worker_active]
@@ -142,8 +153,9 @@ class TestWorkerFailureRetainsSlotInCappedState:
             state, effects = reduce(
                 config,
                 state,
-                WorkerFailedEvent(issue_id="Q-1", error="boom"),
+                WorkerFailedEvent(issue_id="Q-1", error="boom", timestamp=TS),
                 gen,
+                _clock(),
             )
             # Worker should be retried (DispatchWorkerEffect emitted)
             assert len(effects) == 1
@@ -172,7 +184,9 @@ class TestSequentialDrain:
 
         all_ids = [f"Q-{i}" for i in range(1, 11)]
         for iid in all_ids:
-            state, _effects = reduce(config, state, CreateEvent(issue_id=iid, fields={"title": f"Issue {iid}"}), gen)
+            state, _effects = reduce(
+                config, state, CreateEvent(issue_id=iid, fields={"title": f"Issue {iid}"}, timestamp=TS), gen, _clock()
+            )
 
         completed: list[str] = []
         while True:
@@ -187,8 +201,9 @@ class TestSequentialDrain:
             state, _effects = reduce(
                 config,
                 state,
-                WorkerResultEvent(issue_id=active_id, result={"outcome": "done"}),
+                WorkerResultEvent(issue_id=active_id, result={"outcome": "done"}, timestamp=TS),
                 gen,
+                _clock(),
             )
             completed.append(active_id)
 
@@ -216,8 +231,9 @@ class TestDecomposeFanoutRespectsMaxWorkers:
         state, effects = reduce(
             config,
             state,
-            CreateEvent(issue_id="ROOT-1", fields={"title": "Root"}),
+            CreateEvent(issue_id="ROOT-1", fields={"title": "Root"}, timestamp=TS),
             gen,
+            _clock(),
         )
         assert state.issues["ROOT-1"].worker_active is True
         assert len(effects) == 1
@@ -233,8 +249,10 @@ class TestDecomposeFanoutRespectsMaxWorkers:
                     "outcome": "decompose",
                     "sub_issues": [{"key": f"child-{i}", "fields": {"title": f"Child {i}"}} for i in range(1, 6)],
                 },
+                timestamp=TS,
             ),
             gen,
+            _clock(),
         )
 
         # Root should no longer be active (it's decomposition-blocked)

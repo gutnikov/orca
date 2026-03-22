@@ -110,6 +110,12 @@ states:
     terminal: true
 """
 
+TS = "2026-01-01T00:00:00Z"
+
+
+def _clock(value: str = TS) -> Callable[[], str]:
+    return lambda: value
+
 
 def _counter(start: int = 0) -> Callable[[], str]:
     n = start
@@ -149,7 +155,9 @@ class TestMidWorkflowRoundtrip:
         state = _empty_state()
 
         # Create issue — dispatched immediately (active initial state)
-        state, effects = reduce(config, state, CreateEvent(issue_id="S-1", fields={"title": "Serialize"}), gen)
+        state, effects = reduce(
+            config, state, CreateEvent(issue_id="S-1", fields={"title": "Serialize"}, timestamp=TS), gen, _clock()
+        )
         assert state.issues["S-1"].worker_active is True
 
         # Serialize and restore (simulating restart)
@@ -164,12 +172,14 @@ class TestMidWorkflowRoundtrip:
         state, effects = reduce(
             config,
             state,
-            WorkerResultEvent(issue_id="S-1", result={"outcome": "done"}),
+            WorkerResultEvent(issue_id="S-1", result={"outcome": "done"}, timestamp=TS),
             gen,
+            _clock(),
         )
         assert state.issues["S-1"].state == "done"
         assert state.issues["S-1"].worker_active is False
-        assert len(state.issues["S-1"].result_history) == 1
+        worker_results = [e for e in state.issues["S-1"].event_log if e.type == "worker_result"]
+        assert len(worker_results) == 1
 
 
 class TestBlockedStateRoundtrip:
@@ -181,7 +191,9 @@ class TestBlockedStateRoundtrip:
         state = _empty_state()
 
         # Create root
-        state, _effects = reduce(config, state, CreateEvent(issue_id="ROOT-1", fields={"title": "Root"}), gen)
+        state, _effects = reduce(
+            config, state, CreateEvent(issue_id="ROOT-1", fields={"title": "Root"}, timestamp=TS), gen, _clock()
+        )
 
         # Decompose into 2 children
         state, _effects = reduce(
@@ -196,8 +208,10 @@ class TestBlockedStateRoundtrip:
                         {"key": "c2", "fields": {"title": "Child 2"}},
                     ],
                 },
+                timestamp=TS,
             ),
             gen,
+            _clock(),
         )
 
         # Identify child IDs
@@ -219,8 +233,9 @@ class TestBlockedStateRoundtrip:
             state, _effects = reduce(
                 config,
                 state,
-                WorkerResultEvent(issue_id=child_id, result={"outcome": "done"}),
+                WorkerResultEvent(issue_id=child_id, result={"outcome": "done"}, timestamp=TS),
                 gen,
+                _clock(),
             )
 
         # Root should now be dispatched (unblocked)
@@ -237,7 +252,9 @@ class TestQueueOrderSurvivesRoundtrip:
 
         all_ids = [f"Q-{i}" for i in range(1, 6)]
         for iid in all_ids:
-            state, _effects = reduce(config, state, CreateEvent(issue_id=iid, fields={"title": f"Issue {iid}"}), gen)
+            state, _effects = reduce(
+                config, state, CreateEvent(issue_id=iid, fields={"title": f"Issue {iid}"}, timestamp=TS), gen, _clock()
+            )
 
         # Only Q-1 active, rest queued
         assert state.issues["Q-1"].worker_active is True
@@ -254,8 +271,9 @@ class TestQueueOrderSurvivesRoundtrip:
         state, effects = reduce(
             config,
             state,
-            WorkerResultEvent(issue_id="Q-1", result={"outcome": "done"}),
+            WorkerResultEvent(issue_id="Q-1", result={"outcome": "done"}, timestamp=TS),
             gen,
+            _clock(),
         )
         assert state.issues["Q-1"].state == "done"
 
@@ -266,43 +284,49 @@ class TestQueueOrderSurvivesRoundtrip:
         assert state.issues["Q-2"].worker_active is True
 
 
-class TestDeepResultHistoryRoundtrip:
-    """Issue loops 10 times. Serialize. Verify 10 history entries survive. Continue to completion."""
+class TestDeepEventLogRoundtrip:
+    """Issue loops 10 times. Serialize. Verify 10 event_log entries survive. Continue to completion."""
 
-    def test_deep_result_history_roundtrip(self) -> None:
+    def test_deep_event_log_roundtrip(self) -> None:
         config = parse_config(SELF_LOOP_CONFIG_YAML)
         gen = _counter()
         state = _empty_state()
 
         # Create — refine is active
-        state, _effects = reduce(config, state, CreateEvent(issue_id="H-1", fields={"title": "History"}), gen)
+        state, _effects = reduce(
+            config, state, CreateEvent(issue_id="H-1", fields={"title": "History"}, timestamp=TS), gen, _clock()
+        )
 
         # Loop 10 times
         for _ in range(10):
             state, _effects = reduce(
                 config,
                 state,
-                WorkerResultEvent(issue_id="H-1", result={"outcome": "again"}),
+                WorkerResultEvent(issue_id="H-1", result={"outcome": "again"}, timestamp=TS),
                 gen,
+                _clock(),
             )
 
-        assert len(state.issues["H-1"].result_history) == 10
+        worker_results = [e for e in state.issues["H-1"].event_log if e.type == "worker_result"]
+        assert len(worker_results) == 10
 
         # Serialize and restore
         state = _roundtrip(state)
 
         # Verify all 10 entries survive
-        assert len(state.issues["H-1"].result_history) == 10
-        assert all(e.state == "refine" for e in state.issues["H-1"].result_history)
-        assert all(e.result["outcome"] == "again" for e in state.issues["H-1"].result_history)
+        worker_results = [e for e in state.issues["H-1"].event_log if e.type == "worker_result"]
+        assert len(worker_results) == 10
+        assert all(e.data["outcome"] == "again" for e in worker_results)
 
         # Continue to completion after roundtrip
         state, effects = reduce(
             config,
             state,
-            WorkerResultEvent(issue_id="H-1", result={"outcome": "done"}),
+            WorkerResultEvent(issue_id="H-1", result={"outcome": "done"}, timestamp=TS),
             gen,
+            _clock(),
         )
         assert state.issues["H-1"].state == "done"
-        assert len(state.issues["H-1"].result_history) == 11
-        assert state.issues["H-1"].result_history[-1].result["outcome"] == "done"
+        worker_results = [e for e in state.issues["H-1"].event_log if e.type == "worker_result"]
+        assert len(worker_results) == 11
+        assert worker_results[-1].data["outcome"] == "done"

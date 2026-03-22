@@ -99,11 +99,14 @@ def _parse_state(name: str, raw_data: dict[str, Any] | None) -> StateDef:
         for key, value in on_data.items():
             on[key] = _parse_on_rule(key, value)
 
+    max_visits = data.get("max_visits")
+
     return StateDef(
         worker=worker,
         on=on,
         terminal=terminal,
         max_workers=max_workers,
+        max_visits=max_visits,
     )
 
 
@@ -121,6 +124,11 @@ def _parse_issue_fields(data: dict[str, Any] | None) -> dict[str, FieldDef]:
 
 def _validate(config: StateMachineConfig) -> None:
     state_names = set(config.states.keys())
+
+    # Validate max_hops if present
+    if config.max_hops is not None and (not isinstance(config.max_hops, int) or config.max_hops < 1):
+        msg = f"max_hops must be a positive integer, got {config.max_hops}"
+        raise ConfigValidationError(msg)
 
     # Rule 1: initial references an existing state
     if config.initial not in state_names:
@@ -140,6 +148,11 @@ def _validate(config: StateMachineConfig) -> None:
         # Rule 9: max_workers must be positive integer
         if state.max_workers is not None and (not isinstance(state.max_workers, int) or state.max_workers < 1):
             msg = f"max_workers for state '{name}' must be a positive integer, got {state.max_workers}"
+            raise ConfigValidationError(msg)
+
+        # max_visits must be positive integer
+        if state.max_visits is not None and (not isinstance(state.max_visits, int) or state.max_visits < 1):
+            msg = f"max_visits for state '{name}' must be a positive integer, got {state.max_visits}"
             raise ConfigValidationError(msg)
 
         # Rule 5: terminal states have no worker or on
@@ -215,11 +228,13 @@ def parse_config(yaml_str: str) -> StateMachineConfig:
         states[name] = _parse_state(name, state_data)
 
     initial: str = raw.get("initial", "")
+    max_hops = raw.get("max_hops")
 
     config = StateMachineConfig(
         issue_fields=issue_fields,
         initial=initial,
         states=states,
+        max_hops=max_hops,
     )
 
     _validate(config)

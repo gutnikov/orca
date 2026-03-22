@@ -85,6 +85,12 @@ states:
     terminal: true
 """
 
+TS = "2026-01-01T00:00:00Z"
+
+
+def _clock(value: str = TS) -> Callable[[], str]:
+    return lambda: value
+
 
 def _counter(start: int = 0) -> Callable[[], str]:
     n = start
@@ -110,7 +116,9 @@ class TestMinimalSingleStateMachine:
         state = _empty_state()
 
         # Create — initial state is active, so dispatch happens
-        state, effects = reduce(config, state, CreateEvent(issue_id="M-1", fields={"title": "Minimal"}), gen)
+        state, effects = reduce(
+            config, state, CreateEvent(issue_id="M-1", fields={"title": "Minimal"}, timestamp=TS), gen, _clock()
+        )
         assert state.issues["M-1"].state == "work"
         assert state.issues["M-1"].worker_active is True
         assert len(effects) == 1
@@ -120,13 +128,15 @@ class TestMinimalSingleStateMachine:
         state, effects = reduce(
             config,
             state,
-            WorkerResultEvent(issue_id="M-1", result={"outcome": "done"}),
+            WorkerResultEvent(issue_id="M-1", result={"outcome": "done"}, timestamp=TS),
             gen,
+            _clock(),
         )
         assert state.issues["M-1"].state == "done"
         assert state.issues["M-1"].worker_active is False
         assert effects == []
-        assert len(state.issues["M-1"].result_history) == 1
+        worker_results = [e for e in state.issues["M-1"].event_log if e.type == "worker_result"]
+        assert len(worker_results) == 1
 
 
 class TestPassiveToPassiveAdvance:
@@ -138,7 +148,9 @@ class TestPassiveToPassiveAdvance:
         state = _empty_state()
 
         # Create issue (triage is active, dispatched immediately)
-        state, effects = reduce(config, state, CreateEvent(issue_id="P-1", fields={"title": "Passive"}), gen)
+        state, effects = reduce(
+            config, state, CreateEvent(issue_id="P-1", fields={"title": "Passive"}, timestamp=TS), gen, _clock()
+        )
         assert state.issues["P-1"].state == "triage"
         assert state.issues["P-1"].worker_active is True
 
@@ -146,15 +158,18 @@ class TestPassiveToPassiveAdvance:
         state, effects = reduce(
             config,
             state,
-            WorkerResultEvent(issue_id="P-1", result={"outcome": "ready"}),
+            WorkerResultEvent(issue_id="P-1", result={"outcome": "ready"}, timestamp=TS),
             gen,
+            _clock(),
         )
         assert state.issues["P-1"].state == "review"
         assert state.issues["P-1"].worker_active is False
         assert effects == []
 
         # Advance review → approved (both passive)
-        state, effects = reduce(config, state, AdvanceEvent(issue_id="P-1", target_state="approved"), gen)
+        state, effects = reduce(
+            config, state, AdvanceEvent(issue_id="P-1", target_state="approved", timestamp=TS), gen, _clock()
+        )
         assert state.issues["P-1"].state == "approved"
         assert state.issues["P-1"].worker_active is False
         assert effects == []
@@ -169,25 +184,30 @@ class TestAdvanceToTerminal:
         state = _empty_state()
 
         # Create issue (triage is active)
-        state, _effects = reduce(config, state, CreateEvent(issue_id="P-1", fields={"title": "Skip"}), gen)
+        state, _effects = reduce(
+            config, state, CreateEvent(issue_id="P-1", fields={"title": "Skip"}, timestamp=TS), gen, _clock()
+        )
 
         # Complete triage → review (passive)
         state, _effects = reduce(
             config,
             state,
-            WorkerResultEvent(issue_id="P-1", result={"outcome": "ready"}),
+            WorkerResultEvent(issue_id="P-1", result={"outcome": "ready"}, timestamp=TS),
             gen,
+            _clock(),
         )
         assert state.issues["P-1"].state == "review"
 
         # Advance review → done (passive to terminal)
-        state, effects = reduce(config, state, AdvanceEvent(issue_id="P-1", target_state="done"), gen)
+        state, effects = reduce(
+            config, state, AdvanceEvent(issue_id="P-1", target_state="done", timestamp=TS), gen, _clock()
+        )
         assert state.issues["P-1"].state == "done"
         assert effects == []
 
 
 class TestSelfLoopState:
-    """Loop 3 times in refine, then done. Verify 4 result_history entries."""
+    """Loop 3 times in refine, then done. Verify 4 event_log worker_result entries."""
 
     def test_self_loop_state(self) -> None:
         config = parse_config(SELF_LOOP_CONFIG_YAML)
@@ -195,7 +215,9 @@ class TestSelfLoopState:
         state = _empty_state()
 
         # Create — refine is active, dispatched immediately
-        state, effects = reduce(config, state, CreateEvent(issue_id="L-1", fields={"title": "Loop"}), gen)
+        state, effects = reduce(
+            config, state, CreateEvent(issue_id="L-1", fields={"title": "Loop"}, timestamp=TS), gen, _clock()
+        )
         assert state.issues["L-1"].state == "refine"
         assert state.issues["L-1"].worker_active is True
 
@@ -204,8 +226,9 @@ class TestSelfLoopState:
             state, effects = reduce(
                 config,
                 state,
-                WorkerResultEvent(issue_id="L-1", result={"outcome": "again"}),
+                WorkerResultEvent(issue_id="L-1", result={"outcome": "again"}, timestamp=TS),
                 gen,
+                _clock(),
             )
             assert state.issues["L-1"].state == "refine"
             assert state.issues["L-1"].worker_active is True
@@ -216,15 +239,17 @@ class TestSelfLoopState:
         state, effects = reduce(
             config,
             state,
-            WorkerResultEvent(issue_id="L-1", result={"outcome": "done"}),
+            WorkerResultEvent(issue_id="L-1", result={"outcome": "done"}, timestamp=TS),
             gen,
+            _clock(),
         )
         assert state.issues["L-1"].state == "done"
         assert state.issues["L-1"].worker_active is False
 
         # 3 "again" + 1 "done" = 4 entries
-        assert len(state.issues["L-1"].result_history) == 4
-        outcomes = [e.result["outcome"] for e in state.issues["L-1"].result_history]
+        worker_results = [e for e in state.issues["L-1"].event_log if e.type == "worker_result"]
+        assert len(worker_results) == 4
+        outcomes = [e.data["outcome"] for e in worker_results]
         assert outcomes == ["again", "again", "again", "done"]
 
 
@@ -236,10 +261,14 @@ class TestDuplicateCreateErrors:
         gen = _counter()
         state = _empty_state()
 
-        state, _effects = reduce(config, state, CreateEvent(issue_id="D-1", fields={"title": "First"}), gen)
+        state, _effects = reduce(
+            config, state, CreateEvent(issue_id="D-1", fields={"title": "First"}, timestamp=TS), gen, _clock()
+        )
         original_fields = state.issues["D-1"].fields.copy()
 
-        state, effects = reduce(config, state, CreateEvent(issue_id="D-1", fields={"title": "Duplicate"}), gen)
+        state, effects = reduce(
+            config, state, CreateEvent(issue_id="D-1", fields={"title": "Duplicate"}, timestamp=TS), gen, _clock()
+        )
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)
         assert "already exists" in effects[0].message
@@ -257,12 +286,15 @@ class TestWorkerResultOnTerminalErrors:
         state = _empty_state()
 
         # Create and complete
-        state, _effects = reduce(config, state, CreateEvent(issue_id="T-1", fields={"title": "Terminal"}), gen)
+        state, _effects = reduce(
+            config, state, CreateEvent(issue_id="T-1", fields={"title": "Terminal"}, timestamp=TS), gen, _clock()
+        )
         state, _effects = reduce(
             config,
             state,
-            WorkerResultEvent(issue_id="T-1", result={"outcome": "done"}),
+            WorkerResultEvent(issue_id="T-1", result={"outcome": "done"}, timestamp=TS),
             gen,
+            _clock(),
         )
         assert state.issues["T-1"].state == "done"
 
@@ -270,8 +302,9 @@ class TestWorkerResultOnTerminalErrors:
         state, effects = reduce(
             config,
             state,
-            WorkerResultEvent(issue_id="T-1", result={"outcome": "done"}),
+            WorkerResultEvent(issue_id="T-1", result={"outcome": "done"}, timestamp=TS),
             gen,
+            _clock(),
         )
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)
@@ -286,15 +319,18 @@ class TestWorkerResultUnknownOutcomeErrors:
         gen = _counter()
         state = _empty_state()
 
-        state, _effects = reduce(config, state, CreateEvent(issue_id="U-1", fields={"title": "Unknown"}), gen)
+        state, _effects = reduce(
+            config, state, CreateEvent(issue_id="U-1", fields={"title": "Unknown"}, timestamp=TS), gen, _clock()
+        )
         assert state.issues["U-1"].worker_active is True
 
         # Send invalid outcome
         state, effects = reduce(
             config,
             state,
-            WorkerResultEvent(issue_id="U-1", result={"outcome": "invalid_value"}),
+            WorkerResultEvent(issue_id="U-1", result={"outcome": "invalid_value"}, timestamp=TS),
             gen,
+            _clock(),
         )
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)
@@ -312,15 +348,18 @@ class TestDoubleWorkerResultRaceCondition:
         gen = _counter()
         state = _empty_state()
 
-        state, _effects = reduce(config, state, CreateEvent(issue_id="R-1", fields={"title": "Race"}), gen)
+        state, _effects = reduce(
+            config, state, CreateEvent(issue_id="R-1", fields={"title": "Race"}, timestamp=TS), gen, _clock()
+        )
         assert state.issues["R-1"].worker_active is True
 
         # First result succeeds
         state, effects = reduce(
             config,
             state,
-            WorkerResultEvent(issue_id="R-1", result={"outcome": "done"}),
+            WorkerResultEvent(issue_id="R-1", result={"outcome": "done"}, timestamp=TS),
             gen,
+            _clock(),
         )
         assert state.issues["R-1"].state == "done"
         assert not any(isinstance(e, ErrorEffect) for e in effects)
@@ -329,8 +368,9 @@ class TestDoubleWorkerResultRaceCondition:
         state, effects = reduce(
             config,
             state,
-            WorkerResultEvent(issue_id="R-1", result={"outcome": "done"}),
+            WorkerResultEvent(issue_id="R-1", result={"outcome": "done"}, timestamp=TS),
             gen,
+            _clock(),
         )
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)
@@ -345,7 +385,9 @@ class TestEventsOnNonexistentIssue:
         state = _empty_state()
 
         # AdvanceEvent on nonexistent
-        state, effects = reduce(config, state, AdvanceEvent(issue_id="NOPE-1", target_state="done"), gen)
+        state, effects = reduce(
+            config, state, AdvanceEvent(issue_id="NOPE-1", target_state="done", timestamp=TS), gen, _clock()
+        )
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)
         assert "does not exist" in effects[0].message
@@ -354,8 +396,9 @@ class TestEventsOnNonexistentIssue:
         state, effects = reduce(
             config,
             state,
-            WorkerResultEvent(issue_id="NOPE-2", result={"outcome": "done"}),
+            WorkerResultEvent(issue_id="NOPE-2", result={"outcome": "done"}, timestamp=TS),
             gen,
+            _clock(),
         )
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)
@@ -365,8 +408,9 @@ class TestEventsOnNonexistentIssue:
         state, effects = reduce(
             config,
             state,
-            WorkerFailedEvent(issue_id="NOPE-3", error="boom"),
+            WorkerFailedEvent(issue_id="NOPE-3", error="boom", timestamp=TS),
             gen,
+            _clock(),
         )
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)
@@ -382,15 +426,18 @@ class TestWorkerFailedWhenNotActiveErrors:
         state = _empty_state()
 
         # Create issue — active initial state, so dispatched
-        state, _effects = reduce(config, state, CreateEvent(issue_id="F-1", fields={"title": "Fail"}), gen)
+        state, _effects = reduce(
+            config, state, CreateEvent(issue_id="F-1", fields={"title": "Fail"}, timestamp=TS), gen, _clock()
+        )
         assert state.issues["F-1"].worker_active is True
 
         # Complete the worker so worker_active becomes False
         state, _effects = reduce(
             config,
             state,
-            WorkerResultEvent(issue_id="F-1", result={"outcome": "done"}),
+            WorkerResultEvent(issue_id="F-1", result={"outcome": "done"}, timestamp=TS),
             gen,
+            _clock(),
         )
         assert state.issues["F-1"].worker_active is False
 
@@ -398,8 +445,9 @@ class TestWorkerFailedWhenNotActiveErrors:
         state, effects = reduce(
             config,
             state,
-            WorkerFailedEvent(issue_id="F-1", error="boom"),
+            WorkerFailedEvent(issue_id="F-1", error="boom", timestamp=TS),
             gen,
+            _clock(),
         )
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)

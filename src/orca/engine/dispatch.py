@@ -5,7 +5,10 @@ from typing import Any
 
 from orca.engine.types import (
     DispatchWorkerEffect,
+    Effect,
     EnumFieldDef,
+    EventLogEntry,
+    Issue,
     ListFieldDef,
     State,
     StateMachineConfig,
@@ -53,12 +56,12 @@ def build_issue_context(state: State, issue_id: str) -> dict[str, Any]:
                 "issue_id": child_id,
                 "fields": child.fields,
                 "state": child.state,
-                "result_history": [entry.to_dict() for entry in child.result_history],
+                "event_log": [entry.to_dict() for entry in child.event_log],
             }
         )
     return {
         "fields": issue.fields,
-        "result_history": [entry.to_dict() for entry in issue.result_history],
+        "event_log": [entry.to_dict() for entry in issue.event_log],
         "decomposed_from": issue.decomposed_from,
         "depends_on": issue.depends_on,
         "children": children,
@@ -95,11 +98,16 @@ def build_result_format(config: StateMachineConfig, state_name: str) -> dict[str
     return result
 
 
+def append_log(issue: Issue, timestamp: str, entry_type: str, data: dict[str, Any]) -> None:
+    """Append an event log entry to an issue."""
+    issue.event_log.append(EventLogEntry(timestamp=timestamp, type=entry_type, data=data))
+
+
 def try_dispatch(
     config: StateMachineConfig,
     state: State,
     issue_id: str,
-    effects: list[DispatchWorkerEffect],
+    effects: list[Effect],
 ) -> None:
     """Core dispatch protocol."""
     issue = state.issues[issue_id]
@@ -138,7 +146,7 @@ def backfill_queue(
     config: StateMachineConfig,
     state: State,
     state_name: str,
-    effects: list[DispatchWorkerEffect],
+    effects: list[Effect],
 ) -> None:
     """When a slot frees up in a capped state, pop next non-blocked issue from queue and dispatch."""
     queue = state.worker_queues.get(state_name)
