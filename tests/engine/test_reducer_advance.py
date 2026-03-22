@@ -28,6 +28,10 @@ def _counter() -> Callable[[], str]:
     return next_id
 
 
+def _clock(value: str = "2026-01-01T00:00:00Z") -> Callable[[], str]:
+    return lambda: value
+
+
 def _make_issue(
     state: str = "backlog",
     worker_active: bool = False,
@@ -40,7 +44,9 @@ def _make_issue(
         worker_active=worker_active,
         decomposed_from=decomposed_from,
         depends_on=depends_on or [],
-        result_history=[],
+        event_log=[],
+        visit_counts={},
+        hop_count=0,
     )
 
 
@@ -80,9 +86,9 @@ class TestAdvancePassiveToActive:
             issues={"A": _make_issue(state="backlog")},
             worker_queues={},
         )
-        event = AdvanceEvent(issue_id="A", target_state="todo")
+        event = AdvanceEvent(issue_id="A", target_state="todo", timestamp="2026-01-01T00:00:00Z")
 
-        new_state, effects = reduce(config, state, event, _counter())
+        new_state, effects = reduce(config, state, event, _counter(), _clock())
 
         assert new_state.issues["A"].state == "todo"
         assert len(effects) == 1
@@ -98,9 +104,9 @@ class TestAdvanceFromActive:
             issues={"A": _make_issue(state="todo")},
             worker_queues={},
         )
-        event = AdvanceEvent(issue_id="A", target_state="implementing")
+        event = AdvanceEvent(issue_id="A", target_state="implementing", timestamp="2026-01-01T00:00:00Z")
 
-        _new_state, effects = reduce(config, state, event, _counter())
+        _new_state, effects = reduce(config, state, event, _counter(), _clock())
 
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)
@@ -117,9 +123,9 @@ class TestAdvanceBlocked:
             },
             worker_queues={},
         )
-        event = AdvanceEvent(issue_id="A", target_state="todo")
+        event = AdvanceEvent(issue_id="A", target_state="todo", timestamp="2026-01-01T00:00:00Z")
 
-        _new_state, effects = reduce(config, state, event, _counter())
+        _new_state, effects = reduce(config, state, event, _counter(), _clock())
 
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)
@@ -130,9 +136,9 @@ class TestAdvanceNonexistent:
     def test_error_for_missing_issue(self) -> None:
         config = _config()
         state = State(issues={}, worker_queues={})
-        event = AdvanceEvent(issue_id="Z", target_state="todo")
+        event = AdvanceEvent(issue_id="Z", target_state="todo", timestamp="2026-01-01T00:00:00Z")
 
-        _new_state, effects = reduce(config, state, event, _counter())
+        _new_state, effects = reduce(config, state, event, _counter(), _clock())
 
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)
@@ -146,9 +152,9 @@ class TestAdvanceToNonexistentState:
             issues={"A": _make_issue(state="backlog")},
             worker_queues={},
         )
-        event = AdvanceEvent(issue_id="A", target_state="nonexistent")
+        event = AdvanceEvent(issue_id="A", target_state="nonexistent", timestamp="2026-01-01T00:00:00Z")
 
-        _new_state, effects = reduce(config, state, event, _counter())
+        _new_state, effects = reduce(config, state, event, _counter(), _clock())
 
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)
@@ -162,9 +168,9 @@ class TestAdvancePassiveToPassive:
             issues={"A": _make_issue(state="backlog")},
             worker_queues={},
         )
-        event = AdvanceEvent(issue_id="A", target_state="review")
+        event = AdvanceEvent(issue_id="A", target_state="review", timestamp="2026-01-01T00:00:00Z")
 
-        new_state, effects = reduce(config, state, event, _counter())
+        new_state, effects = reduce(config, state, event, _counter(), _clock())
 
         assert new_state.issues["A"].state == "review"
         assert effects == []
@@ -177,9 +183,9 @@ class TestAdvanceToTerminal:
             issues={"A": _make_issue(state="backlog")},
             worker_queues={},
         )
-        event = AdvanceEvent(issue_id="A", target_state="done")
+        event = AdvanceEvent(issue_id="A", target_state="done", timestamp="2026-01-01T00:00:00Z")
 
-        new_state, effects = reduce(config, state, event, _counter())
+        new_state, effects = reduce(config, state, event, _counter(), _clock())
 
         assert new_state.issues["A"].state == "done"
         # Terminal states have no worker, so no dispatch

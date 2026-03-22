@@ -25,6 +25,10 @@ def _counter() -> Callable[[], str]:
     return next_id
 
 
+def _clock(value: str = "2026-01-01T00:00:00Z") -> Callable[[], str]:
+    return lambda: value
+
+
 def _create_and_advance(
     config: object,
     state: State,
@@ -35,14 +39,26 @@ def _create_and_advance(
     from orca.engine.types import StateMachineConfig
 
     assert isinstance(config, StateMachineConfig)
-    state, _ = reduce(config, state, CreateEvent(issue_id=issue_id, fields={"title": "T", "text": "D"}), gen)
+    state, _ = reduce(
+        config,
+        state,
+        CreateEvent(issue_id=issue_id, fields={"title": "T", "text": "D"}, timestamp="2026-01-01T00:00:00Z"),
+        gen,
+        _clock(),
+    )
     if state.issues[issue_id].state != target_state:
-        state, _ = reduce(config, state, AdvanceEvent(issue_id=issue_id, target_state=target_state), gen)
+        state, _ = reduce(
+            config,
+            state,
+            AdvanceEvent(issue_id=issue_id, target_state=target_state, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
     return state
 
 
 class TestSimpleTransition:
-    """Test 1: implementing -> done, verify state change, result_history, worker_active=False."""
+    """Test 1: implementing -> done, verify state change, event_log, worker_active=False."""
 
     def test_transition_to_terminal(self, simple_config_yaml: str) -> None:
         config = parse_config(simple_config_yaml)
@@ -50,23 +66,41 @@ class TestSimpleTransition:
         gen = _counter()
 
         # Create issue -> lands in todo (active), worker dispatched
-        state, effects = reduce(config, state, CreateEvent(issue_id="A", fields={"title": "T"}), gen)
+        state, effects = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="A", fields={"title": "T"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         assert state.issues["A"].worker_active is True
 
         # Worker returns "start" -> transition to implementing
-        state, effects = reduce(config, state, WorkerResultEvent(issue_id="A", result={"outcome": "start"}), gen)
+        state, effects = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="A", result={"outcome": "start"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         assert state.issues["A"].state == "implementing"
         assert state.issues["A"].worker_active is True  # re-dispatched in implementing
 
         # Worker returns "complete" -> transition to done (terminal)
-        state, effects = reduce(config, state, WorkerResultEvent(issue_id="A", result={"outcome": "complete"}), gen)
+        state, effects = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="A", result={"outcome": "complete"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         assert state.issues["A"].state == "done"
         assert state.issues["A"].worker_active is False
-        assert len(state.issues["A"].result_history) == 2
-        assert state.issues["A"].result_history[0].state == "todo"
-        assert state.issues["A"].result_history[0].result == {"outcome": "start"}
-        assert state.issues["A"].result_history[1].state == "implementing"
-        assert state.issues["A"].result_history[1].result == {"outcome": "complete"}
+        # Check event_log for worker_result entries
+        result_entries = [e for e in state.issues["A"].event_log if e.type == "worker_result"]
+        assert len(result_entries) == 2
+        assert result_entries[0].data == {"outcome": "start"}
+        assert result_entries[1].data == {"outcome": "complete"}
         # No dispatch effects for terminal state
         assert not any(isinstance(e, DispatchWorkerEffect) for e in effects)
 
@@ -79,9 +113,21 @@ class TestTransitionToActiveState:
         state = State(issues={}, worker_queues={})
         gen = _counter()
 
-        state, _ = reduce(config, state, CreateEvent(issue_id="A", fields={"title": "T"}), gen)
+        state, _ = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="A", fields={"title": "T"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         # todo -> implementing via "start"
-        state, effects = reduce(config, state, WorkerResultEvent(issue_id="A", result={"outcome": "start"}), gen)
+        state, effects = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="A", result={"outcome": "start"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         assert state.issues["A"].state == "implementing"
         # Should get a DispatchWorkerEffect for the implementing state
         dispatch_effects = [e for e in effects if isinstance(e, DispatchWorkerEffect)]
@@ -99,8 +145,20 @@ class TestWorkerResultOnBlockedIssue:
         gen = _counter()
 
         # Create parent, advance to scoping
-        state, _ = reduce(config, state, CreateEvent(issue_id="P", fields={"title": "T"}), gen)
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id="P", result={"outcome": "scope"}), gen)
+        state, _ = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="P", fields={"title": "T"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="P", result={"outcome": "scope"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         assert state.issues["P"].state == "scoping"
         assert state.issues["P"].worker_active is True
 
@@ -114,8 +172,10 @@ class TestWorkerResultOnBlockedIssue:
                     "outcome": "decompose",
                     "sub_issues": [{"key": "c1", "fields": {"title": "C1"}}],
                 },
+                timestamp="2026-01-01T00:00:00Z",
             ),
             gen,
+            _clock(),
         )
         # Parent should be blocked (children not terminal)
         # Trying to send WorkerResult to blocked parent should error
@@ -123,7 +183,13 @@ class TestWorkerResultOnBlockedIssue:
         # We need to set it True to test the blocked validation
         state.issues["P"].worker_active = True
 
-        state2, effects = reduce(config, state, WorkerResultEvent(issue_id="P", result={"outcome": "implement"}), gen)
+        state2, effects = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="P", result={"outcome": "implement"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)
         assert "blocked" in effects[0].message.lower()
@@ -137,13 +203,37 @@ class TestWorkerResultOnTerminalIssue:
         state = State(issues={}, worker_queues={})
         gen = _counter()
 
-        state, _ = reduce(config, state, CreateEvent(issue_id="A", fields={"title": "T"}), gen)
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id="A", result={"outcome": "start"}), gen)
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id="A", result={"outcome": "complete"}), gen)
+        state, _ = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="A", fields={"title": "T"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="A", result={"outcome": "start"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="A", result={"outcome": "complete"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         assert state.issues["A"].state == "done"
 
         # Try sending result to terminal issue
-        state2, effects = reduce(config, state, WorkerResultEvent(issue_id="A", result={"outcome": "complete"}), gen)
+        state2, effects = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="A", result={"outcome": "complete"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)
 
@@ -156,11 +246,23 @@ class TestWorkerResultWhenInactive:
         state = State(issues={}, worker_queues={})
         gen = _counter()
 
-        state, _ = reduce(config, state, CreateEvent(issue_id="A", fields={"title": "T"}), gen)
+        state, _ = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="A", fields={"title": "T"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         # Manually set worker_active to False
         state.issues["A"].worker_active = False
 
-        state2, effects = reduce(config, state, WorkerResultEvent(issue_id="A", result={"outcome": "start"}), gen)
+        state2, effects = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="A", result={"outcome": "start"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)
         assert "worker_active" in effects[0].message.lower() or "active" in effects[0].message.lower()
@@ -174,11 +276,23 @@ class TestUnknownOutcome:
         state = State(issues={}, worker_queues={})
         gen = _counter()
 
-        state, _ = reduce(config, state, CreateEvent(issue_id="A", fields={"title": "T"}), gen)
+        state, _ = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="A", fields={"title": "T"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         assert state.issues["A"].worker_active is True
         assert state.issues["A"].state == "todo"
 
-        state2, effects = reduce(config, state, WorkerResultEvent(issue_id="A", result={"outcome": "nonexistent"}), gen)
+        state2, effects = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="A", result={"outcome": "nonexistent"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)
         # worker_active stays True since validation is before mutation
@@ -194,8 +308,20 @@ class TestDecomposeCreatesChildren:
         state = State(issues={}, worker_queues={})
         gen = _counter()
 
-        state, _ = reduce(config, state, CreateEvent(issue_id="P", fields={"title": "Parent"}), gen)
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id="P", result={"outcome": "scope"}), gen)
+        state, _ = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="P", fields={"title": "Parent"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="P", result={"outcome": "scope"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         assert state.issues["P"].state == "scoping"
 
         state, effects = reduce(
@@ -210,8 +336,10 @@ class TestDecomposeCreatesChildren:
                         {"key": "c2", "fields": {"title": "Child 2"}},
                     ],
                 },
+                timestamp="2026-01-01T00:00:00Z",
             ),
             gen,
+            _clock(),
         )
 
         # Parent stays in scoping state
@@ -236,8 +364,20 @@ class TestDecomposeWithDependsOn:
         state = State(issues={}, worker_queues={})
         gen = _counter()
 
-        state, _ = reduce(config, state, CreateEvent(issue_id="P", fields={"title": "Parent"}), gen)
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id="P", result={"outcome": "scope"}), gen)
+        state, _ = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="P", fields={"title": "Parent"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="P", result={"outcome": "scope"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
 
         state, effects = reduce(
             config,
@@ -251,8 +391,10 @@ class TestDecomposeWithDependsOn:
                         {"key": "c2", "fields": {"title": "C2"}, "depends_on": ["c1"]},
                     ],
                 },
+                timestamp="2026-01-01T00:00:00Z",
             ),
             gen,
+            _clock(),
         )
 
         # Find the child that depends on the other
@@ -285,8 +427,20 @@ class TestEmptyDecompose:
         state = State(issues={}, worker_queues={})
         gen = _counter()
 
-        state, _ = reduce(config, state, CreateEvent(issue_id="P", fields={"title": "Parent"}), gen)
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id="P", result={"outcome": "scope"}), gen)
+        state, _ = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="P", fields={"title": "Parent"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="P", result={"outcome": "scope"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
 
         state2, effects = reduce(
             config,
@@ -294,8 +448,10 @@ class TestEmptyDecompose:
             WorkerResultEvent(
                 issue_id="P",
                 result={"outcome": "decompose", "sub_issues": []},
+                timestamp="2026-01-01T00:00:00Z",
             ),
             gen,
+            _clock(),
         )
         assert any(isinstance(e, ErrorEffect) for e in effects)
         # State should not be mutated (validation before mutation)
@@ -311,8 +467,20 @@ class TestCascadingDecompositionUnblock:
         gen = _counter()
 
         # Create parent, move to scoping
-        state, _ = reduce(config, state, CreateEvent(issue_id="P", fields={"title": "Parent"}), gen)
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id="P", result={"outcome": "scope"}), gen)
+        state, _ = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="P", fields={"title": "Parent"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="P", result={"outcome": "scope"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
 
         # Decompose into one child
         state, _ = reduce(
@@ -324,8 +492,10 @@ class TestCascadingDecompositionUnblock:
                     "outcome": "decompose",
                     "sub_issues": [{"key": "c1", "fields": {"title": "C1"}}],
                 },
+                timestamp="2026-01-01T00:00:00Z",
             ),
             gen,
+            _clock(),
         )
 
         # Find child ID
@@ -338,16 +508,32 @@ class TestCascadingDecompositionUnblock:
         assert state.issues[child_id].worker_active is True
 
         # Child: todo -> scoping via "scope"
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id=child_id, result={"outcome": "scope"}), gen)
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id=child_id, result={"outcome": "scope"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         assert state.issues[child_id].state == "scoping"
 
         # Child: scoping -> implementing via "implement"
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id=child_id, result={"outcome": "implement"}), gen)
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id=child_id, result={"outcome": "implement"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         assert state.issues[child_id].state == "implementing"
 
         # Child: implementing -> done via "complete"
         state, effects = reduce(
-            config, state, WorkerResultEvent(issue_id=child_id, result={"outcome": "complete"}), gen
+            config,
+            state,
+            WorkerResultEvent(issue_id=child_id, result={"outcome": "complete"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
         )
         assert state.issues[child_id].state == "done"
 
@@ -367,8 +553,20 @@ class TestDependencyUnblock:
         gen = _counter()
 
         # Create parent, move to scoping, decompose with dependency
-        state, _ = reduce(config, state, CreateEvent(issue_id="P", fields={"title": "Parent"}), gen)
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id="P", result={"outcome": "scope"}), gen)
+        state, _ = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="P", fields={"title": "Parent"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="P", result={"outcome": "scope"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         state, _ = reduce(
             config,
             state,
@@ -381,8 +579,10 @@ class TestDependencyUnblock:
                         {"key": "c2", "fields": {"title": "C2"}, "depends_on": ["c1"]},
                     ],
                 },
+                timestamp="2026-01-01T00:00:00Z",
             ),
             gen,
+            _clock(),
         )
 
         # Find children
@@ -394,9 +594,27 @@ class TestDependencyUnblock:
         assert state.issues[c2_id].worker_active is False
 
         # Complete c1: todo -> scoping -> implementing -> done
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id=c1_id, result={"outcome": "scope"}), gen)
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id=c1_id, result={"outcome": "implement"}), gen)
-        state, effects = reduce(config, state, WorkerResultEvent(issue_id=c1_id, result={"outcome": "complete"}), gen)
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id=c1_id, result={"outcome": "scope"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id=c1_id, result={"outcome": "implement"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        state, effects = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id=c1_id, result={"outcome": "complete"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         assert state.issues[c1_id].state == "done"
 
         # c2 should now be dispatched
@@ -415,22 +633,64 @@ class TestSlotBackfillOnWorkerResult:
         gen = _counter()
 
         # Create two issues, both reach "apply" state (max_workers=1)
-        state, _ = reduce(config, state, CreateEvent(issue_id="A", fields={"title": "A"}), gen)
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id="A", result={"outcome": "start"}), gen)
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id="A", result={"outcome": "ready"}), gen)
+        state, _ = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="A", fields={"title": "A"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="A", result={"outcome": "start"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="A", result={"outcome": "ready"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         # A is now in apply, dispatched
         assert state.issues["A"].state == "apply"
         assert state.issues["A"].worker_active is True
 
-        state, _ = reduce(config, state, CreateEvent(issue_id="B", fields={"title": "B"}), gen)
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id="B", result={"outcome": "start"}), gen)
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id="B", result={"outcome": "ready"}), gen)
+        state, _ = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="B", fields={"title": "B"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="B", result={"outcome": "start"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="B", result={"outcome": "ready"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         # B is in apply but queued (max_workers=1, A is active)
         assert state.issues["B"].state == "apply"
         assert state.issues["B"].worker_active is False
 
         # A completes apply -> done, B should be backfilled
-        state, effects = reduce(config, state, WorkerResultEvent(issue_id="A", result={"outcome": "applied"}), gen)
+        state, effects = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="A", result={"outcome": "applied"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         assert state.issues["A"].state == "done"
 
         # B should now be dispatched
@@ -449,8 +709,20 @@ class TestDiamondDependency:
         gen = _counter()
 
         # Create parent, decompose into 3 children: c1, c2 depends on c1, c3 depends on c1
-        state, _ = reduce(config, state, CreateEvent(issue_id="P", fields={"title": "Parent"}), gen)
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id="P", result={"outcome": "scope"}), gen)
+        state, _ = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="P", fields={"title": "Parent"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id="P", result={"outcome": "scope"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
         state, _ = reduce(
             config,
             state,
@@ -464,8 +736,10 @@ class TestDiamondDependency:
                         {"key": "c3", "fields": {"title": "C3"}, "depends_on": ["c1"]},
                     ],
                 },
+                timestamp="2026-01-01T00:00:00Z",
             ),
             gen,
+            _clock(),
         )
 
         # Find children
@@ -479,9 +753,27 @@ class TestDiamondDependency:
             assert state.issues[did].worker_active is False
 
         # Complete c1
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id=c1_id, result={"outcome": "scope"}), gen)
-        state, _ = reduce(config, state, WorkerResultEvent(issue_id=c1_id, result={"outcome": "implement"}), gen)
-        state, effects = reduce(config, state, WorkerResultEvent(issue_id=c1_id, result={"outcome": "complete"}), gen)
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id=c1_id, result={"outcome": "scope"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id=c1_id, result={"outcome": "implement"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        state, effects = reduce(
+            config,
+            state,
+            WorkerResultEvent(issue_id=c1_id, result={"outcome": "complete"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
 
         # Both c2 and c3 should now be dispatched
         dispatch_effects = [e for e in effects if isinstance(e, DispatchWorkerEffect)]
