@@ -5,7 +5,7 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from orca.engine.types import DispatchWorkerEffect
 from orca.orchestrator.template import render_prompt
@@ -23,6 +23,16 @@ class WorkerFailure:
 
 
 WorkerOutcome = WorkerSuccess | WorkerFailure
+
+
+class Worker(Protocol):
+    async def execute(
+        self,
+        effect: DispatchWorkerEffect,
+        workdir: Path,
+        result_path: Path,
+        prompt_path: Path | None = None,
+    ) -> WorkerOutcome: ...
 
 
 class ClaudeCodeWorker:
