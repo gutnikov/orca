@@ -189,15 +189,15 @@ class TestSessionSync:
         assert result is None
 
     def test_output_path(self) -> None:
-        """Build .orca/transcripts/{issue_id}/{state}-{timestamp}.md"""
+        """Build .orca/transcripts/{session_id}.md"""
         sync = SessionSync(
             run_dir=Path("/tmp/runs/main"),
             transcripts_dir=Path("/tmp/transcripts"),
         )
 
-        result = sync.output_path("issue-1", "implementing", "2026-03-22T10:36:00Z")
+        result = sync.output_path("sess-aaa")
 
-        expected = Path("/tmp/transcripts/issue-1/implementing-2026-03-22T10-36-00Z.md")
+        expected = Path("/tmp/transcripts/sess-aaa.md")
         assert result == expected
 
     def test_needs_render_no_target(self, tmp_path: Path) -> None:
@@ -262,7 +262,7 @@ class TestSessionSyncSync:
         transcript = projects_path / "sess-aaa.jsonl"
         transcript.write_text('{"type":"system"}\n')
 
-        expected_output = sync.output_path("issue-1", "implementing", "2026-03-22T10:00:00Z")
+        expected_output = sync.output_path("sess-aaa")
 
         with patch("orca.orchestrator.session_sync.subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
@@ -305,7 +305,7 @@ class TestSessionSyncSync:
         sync.manifest.mark_completed("sess-aaa", "2026-03-22T10:10:00Z")
 
         # Pre-create the rendered output
-        output = sync.output_path("issue-1", "implementing", "2026-03-22T10:00:00Z")
+        output = sync.output_path("sess-aaa")
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_text("already rendered")
 

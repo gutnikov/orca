@@ -102,10 +102,9 @@ class SessionSync:
 
         return None
 
-    def output_path(self, issue_id: str, state: str, started_at: str) -> Path:
-        """Build .orca/transcripts/{issue_id}/{state}-{timestamp}.md"""
-        safe_ts = started_at.replace(":", "-")
-        return self.transcripts_dir / issue_id / f"{state}-{safe_ts}.md"
+    def output_path(self, session_id: str) -> Path:
+        """Build .orca/transcripts/{session_id}.md"""
+        return self.transcripts_dir / f"{session_id}.md"
 
     def needs_render(self, entry: dict[str, Any], target: Path) -> bool:
         """True if session is still running or completed but not yet rendered."""
@@ -123,7 +122,7 @@ class SessionSync:
                 logger.exception("Failed to render session %s", entry.get("session_id"))
 
     def _sync_entry(self, entry: dict[str, Any]) -> None:
-        target = self.output_path(entry["issue_id"], entry["state"], entry["started_at"])
+        target = self.output_path(entry["session_id"])
         if not self.needs_render(entry, target):
             return
 
