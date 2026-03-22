@@ -5,6 +5,8 @@ from collections.abc import Callable
 
 from orca.engine.dispatch import (
     backfill_queue,
+    build_issue_context,
+    build_result_format,
     get_children,
     is_blocked,
     remove_from_queue,
@@ -45,7 +47,7 @@ def reduce(
     elif isinstance(event, WorkerResultEvent):
         _handle_worker_result(config, new_state, event, effects, generate_id)
     elif isinstance(event, WorkerFailedEvent):
-        pass
+        _handle_worker_failed(config, new_state, event, effects)
 
     return new_state, effects
 
@@ -219,6 +221,44 @@ def _handle_worker_result(
         _apply_decompose(config, state, event, issue, generate_id, dispatch_effects)
 
     effects.extend(dispatch_effects)
+
+
+def _handle_worker_failed(
+    config: StateMachineConfig,
+    state: State,
+    event: WorkerFailedEvent,
+    effects: list[Effect],
+) -> None:
+    # Issue must exist
+    if event.issue_id not in state.issues:
+        effects.append(ErrorEffect(issue_id=event.issue_id, message=f"Issue '{event.issue_id}' does not exist"))
+        return
+
+    issue = state.issues[event.issue_id]
+    state_def = config.states[issue.state]
+
+    # Issue must have worker_active == True
+    if not issue.worker_active:
+        effects.append(
+            ErrorEffect(issue_id=event.issue_id, message=f"Issue '{event.issue_id}' has worker_active=False")
+        )
+        return
+
+    # State must have a worker
+    if state_def.worker is None:
+        effects.append(ErrorEffect(issue_id=event.issue_id, message=f"State '{issue.state}' has no worker"))
+        return
+
+    # worker_active stays True — slot is RETAINED (not freed)
+    # Emit DispatchWorkerEffect unconditionally (retry), bypassing dispatch protocol
+    effects.append(
+        DispatchWorkerEffect(
+            issue_id=event.issue_id,
+            state=issue.state,
+            result_format=build_result_format(config, issue.state),
+            issue=build_issue_context(state, event.issue_id),
+        )
+    )
 
 
 def _apply_transition(
