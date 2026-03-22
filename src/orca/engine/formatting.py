@@ -40,9 +40,7 @@ def _get_created_timestamp(issue: Issue) -> str | None:
 
 def _get_children(state: State, issue_id: str) -> list[str]:
     """Get child issue IDs sorted lexicographically."""
-    children = [
-        iid for iid, issue in state.issues.items() if issue.decomposed_from == issue_id
-    ]
+    children = [iid for iid, issue in state.issues.items() if issue.decomposed_from == issue_id]
     return sorted(children)
 
 
@@ -87,9 +85,7 @@ def _render_issue(
     for i, child_id in enumerate(children):
         is_last = i == len(children) - 1
         child_connector = "\u2514\u2500\u2500 " if is_last else "\u251c\u2500\u2500 "
-        lines.extend(
-            _render_issue(state, config, child_id, now, child_prefix, child_connector)
-        )
+        lines.extend(_render_issue(state, config, child_id, now, child_prefix, child_connector))
 
     return lines
 
@@ -100,9 +96,7 @@ def format_issues(state: State, config: StateMachineConfig, now: str) -> str:
         return ""
 
     # Find root issues (no decomposed_from), sorted by ID
-    roots = sorted(
-        iid for iid, issue in state.issues.items() if issue.decomposed_from is None
-    )
+    roots = sorted(iid for iid, issue in state.issues.items() if issue.decomposed_from is None)
 
     lines: list[str] = []
 
@@ -118,9 +112,7 @@ def format_issues(state: State, config: StateMachineConfig, now: str) -> str:
             state_def = config.states[issue.state]
             is_terminal = state_def.terminal
             created_ts = _get_created_timestamp(issue)
-            elapsed = (
-                _format_elapsed(created_ts, now) if created_ts is not None else "?"
-            )
+            elapsed = _format_elapsed(created_ts, now) if created_ts is not None else "?"
             marker = "" if is_terminal else " ..."
             lines.append(f"{root_id} [{issue.state}]{marker} {elapsed}")
 
@@ -132,9 +124,7 @@ def format_issues(state: State, config: StateMachineConfig, now: str) -> str:
             for i, child_id in enumerate(children):
                 is_last = i == len(children) - 1
                 connector = "\u2514\u2500\u2500 " if is_last else "\u251c\u2500\u2500 "
-                lines.extend(
-                    _render_issue(state, config, child_id, now, "", connector)
-                )
+                lines.extend(_render_issue(state, config, child_id, now, "", connector))
 
         lines.append("")  # blank line after each root tree
 

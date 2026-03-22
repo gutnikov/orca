@@ -339,51 +339,63 @@ class TestMaxVisitsBlocksTransition:
 
         # Create -> todo (visit 1 for todo)
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             CreateEvent(issue_id="A", fields={"title": "T"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].state == "todo"
 
         # Worker result: start -> implementing (visit 1 for implementing)
         state, effects = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "start"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].state == "implementing"
         assert state.issues["A"].visit_counts["implementing"] == 1
 
         # Worker result: reject -> todo (visit 2 for todo)
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "reject"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].state == "todo"
 
         # Worker result: start -> implementing (visit 2 for implementing) — should succeed
         state, effects = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "start"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].state == "implementing"
         assert state.issues["A"].visit_counts["implementing"] == 2
 
         # Worker result: reject -> todo (visit 3 for todo)
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "reject"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].state == "todo"
 
         # Worker result: start -> implementing (visit 3) — BLOCKED by max_visits=2
         state, effects = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "start"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].state == "todo"  # did not move
         error_effects = [e for e in effects if isinstance(e, ErrorEffect)]
@@ -401,40 +413,50 @@ class TestMaxHopsBlocksTransition:
 
         # Create -> todo (hop_count = 0)
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             CreateEvent(issue_id="A", fields={"title": "T"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         # Hop 1: todo -> implementing
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "start"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].hop_count == 1
 
         # Hop 2: implementing -> todo (reject)
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "reject"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].hop_count == 2
 
         # Hop 3: todo -> implementing
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "start"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].hop_count == 3
 
         # Hop 4: implementing -> todo — BLOCKED by max_hops=3
         state, effects = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "reject"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].state == "implementing"  # did not move
         error_effects = [e for e in effects if isinstance(e, ErrorEffect)]
@@ -452,49 +474,61 @@ class TestMaxVisitsOnAdvance:
 
         # Create -> backlog (passive)
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             CreateEvent(issue_id="A", fields={"title": "T"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].state == "backlog"
 
         # Advance: backlog -> implementing (visit 1)
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             AdvanceEvent(issue_id="A", target_state="implementing", timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].state == "implementing"
 
         # Worker result: needs_review -> review (passive)
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "needs_review"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].state == "review"
 
         # Advance: review -> implementing (visit 2)
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             AdvanceEvent(issue_id="A", target_state="implementing", timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].state == "implementing"
 
         # Worker result: needs_review -> review
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "needs_review"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].state == "review"
 
         # Advance: review -> implementing (visit 3) — BLOCKED by max_visits=2
         state, effects = reduce(
-            config, state,
+            config,
+            state,
             AdvanceEvent(issue_id="A", target_state="implementing", timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].state == "review"  # did not move
         error_effects = [e for e in effects if isinstance(e, ErrorEffect)]
@@ -512,15 +546,18 @@ class TestDecomposeIncrementsHopCount:
 
         # Create -> scoping
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             CreateEvent(issue_id="P", fields={"title": "Parent"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["P"].hop_count == 0
 
         # Decompose
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(
                 issue_id="P",
                 result={
@@ -529,7 +566,8 @@ class TestDecomposeIncrementsHopCount:
                 },
                 timestamp="2026-01-01T00:00:00Z",
             ),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["P"].hop_count == 1
 
@@ -544,14 +582,17 @@ class TestMaxHopsBlocksDecompose:
 
         # Create -> scoping (hop_count=0)
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             CreateEvent(issue_id="P", fields={"title": "Parent"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         # Decompose 1: hop_count -> 1
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(
                 issue_id="P",
                 result={
@@ -560,21 +601,25 @@ class TestMaxHopsBlocksDecompose:
                 },
                 timestamp="2026-01-01T00:00:00Z",
             ),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["P"].hop_count == 1
 
         # Complete child so parent unblocks
         child_id = "GEN-1"
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id=child_id, result={"outcome": "complete"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         # Decompose 2: hop_count -> 2
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(
                 issue_id="P",
                 result={
@@ -583,21 +628,25 @@ class TestMaxHopsBlocksDecompose:
                 },
                 timestamp="2026-01-01T00:00:00Z",
             ),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["P"].hop_count == 2
 
         # Complete second child
         child_id2 = "GEN-2"
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id=child_id2, result={"outcome": "complete"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         # Decompose 3: hop_count would be 3, max_hops=2 -> BLOCKED
         state, effects = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(
                 issue_id="P",
                 result={
@@ -606,7 +655,8 @@ class TestMaxHopsBlocksDecompose:
                 },
                 timestamp="2026-01-01T00:00:00Z",
             ),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["P"].hop_count == 2  # did not increment
         error_effects = [e for e in effects if isinstance(e, ErrorEffect)]
@@ -624,52 +674,64 @@ class TestLimitFreesSlotAndBackfills:
 
         # Create A -> todo, dispatched (slot used)
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             CreateEvent(issue_id="A", fields={"title": "A"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].worker_active is True
 
         # Create B -> todo, queued (slot full)
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             CreateEvent(issue_id="B", fields={"title": "B"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["B"].worker_active is False
 
         # A: todo -> implementing (frees todo slot, B should get dispatched)
         state, effects = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "start"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].state == "implementing"
         assert state.issues["B"].worker_active is True  # backfilled
 
         # A: implementing -> todo (reject), visit 2 for todo
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "reject"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         # B still has the slot, A queued
         assert state.issues["A"].state == "todo"
 
         # B: todo -> implementing
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="B", result={"outcome": "start"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         # Now A should be dispatched in todo
         assert state.issues["A"].worker_active is True
 
         # A: todo -> implementing — BLOCKED by max_visits=1 on implementing
         state, effects = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "start"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].state == "todo"  # did not move
         assert state.issues["A"].worker_active is False  # slot freed
@@ -688,29 +750,37 @@ class TestLimitLogsLimitReached:
 
         # Create -> todo
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             CreateEvent(issue_id="A", fields={"title": "T"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         # Visit implementing twice
         for _ in range(2):
             state, _ = reduce(
-                config, state,
+                config,
+                state,
                 WorkerResultEvent(issue_id="A", result={"outcome": "start"}, timestamp="2026-01-01T00:00:00Z"),
-                gen, _clock(),
+                gen,
+                _clock(),
             )
             state, _ = reduce(
-                config, state,
+                config,
+                state,
                 WorkerResultEvent(issue_id="A", result={"outcome": "reject"}, timestamp="2026-01-01T00:00:00Z"),
-                gen, _clock(),
+                gen,
+                _clock(),
             )
 
         # Third attempt triggers limit
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "start"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         log = state.issues["A"].event_log
@@ -732,22 +802,28 @@ class TestNoLimitByDefault:
 
         # Create -> todo
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             CreateEvent(issue_id="A", fields={"title": "T"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         # Loop 10 times: todo -> implementing -> todo
         for _ in range(10):
             state, _ = reduce(
-                config, state,
+                config,
+                state,
                 WorkerResultEvent(issue_id="A", result={"outcome": "start"}, timestamp="2026-01-01T00:00:00Z"),
-                gen, _clock(),
+                gen,
+                _clock(),
             )
             state, _ = reduce(
-                config, state,
+                config,
+                state,
                 WorkerResultEvent(issue_id="A", result={"outcome": "reject"}, timestamp="2026-01-01T00:00:00Z"),
-                gen, _clock(),
+                gen,
+                _clock(),
             )
 
         # Should still be running fine
@@ -769,61 +845,77 @@ class TestLoopDetectionImplementingQa:
 
         # Create -> todo
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             CreateEvent(issue_id="A", fields={"title": "T"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         # todo -> implementing (visit 1)
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "start"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].visit_counts["implementing"] == 1
 
         # implementing -> qa
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "submit"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         # qa -> implementing (visit 2)
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "fail"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].visit_counts["implementing"] == 2
 
         # implementing -> qa
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "submit"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         # qa -> implementing (visit 3)
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "fail"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].visit_counts["implementing"] == 3
 
         # implementing -> qa
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "submit"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         # qa -> implementing (visit 4) — BLOCKED by max_visits=3
         state, effects = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="A", result={"outcome": "fail"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["A"].state == "qa"  # did not move
         error_effects = [e for e in effects if isinstance(e, ErrorEffect)]
@@ -841,14 +933,17 @@ class TestDecomposeLoopDetection:
 
         # Create parent -> scoping
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             CreateEvent(issue_id="P", fields={"title": "Parent"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         # Decompose 1 (hop 1)
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(
                 issue_id="P",
                 result={
@@ -857,20 +952,24 @@ class TestDecomposeLoopDetection:
                 },
                 timestamp="2026-01-01T00:00:00Z",
             ),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["P"].hop_count == 1
 
         # Complete child 1
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="GEN-1", result={"outcome": "complete"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         # Decompose 2 (hop 2) — should succeed (max_hops=2)
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(
                 issue_id="P",
                 result={
@@ -879,20 +978,24 @@ class TestDecomposeLoopDetection:
                 },
                 timestamp="2026-01-01T00:00:00Z",
             ),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["P"].hop_count == 2
 
         # Complete child 2
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(issue_id="GEN-2", result={"outcome": "complete"}, timestamp="2026-01-01T00:00:00Z"),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         # Decompose 3 (hop 3) — BLOCKED by max_hops=2
         state, effects = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(
                 issue_id="P",
                 result={
@@ -901,7 +1004,8 @@ class TestDecomposeLoopDetection:
                 },
                 timestamp="2026-01-01T00:00:00Z",
             ),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["P"].hop_count == 2  # unchanged
         error_effects = [e for e in effects if isinstance(e, ErrorEffect)]

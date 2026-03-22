@@ -34,9 +34,7 @@ def _make_issue(
 ) -> Issue:
     event_log: list[EventLogEntry] = []
     if created_ts is not None:
-        event_log.append(
-            EventLogEntry(timestamp=created_ts, type="created", data={})
-        )
+        event_log.append(EventLogEntry(timestamp=created_ts, type="created", data={}))
     return Issue(
         fields={"title": "Test"},
         state=state,
@@ -60,9 +58,7 @@ class TestFormatIssues:
             issues={"ISSUE-1": _make_issue(state="todo")},
             worker_queues={},
         )
-        result = format_issues(
-            state, _make_config(), now="2026-01-01T00:00:00Z"
-        )
+        result = format_issues(state, _make_config(), now="2026-01-01T00:00:00Z")
         assert "ISSUE-1 [todo] ... 0m" in result
 
     def test_terminal_issue_no_marker(self) -> None:
@@ -70,9 +66,7 @@ class TestFormatIssues:
             issues={"ISSUE-1": _make_issue(state="done")},
             worker_queues={},
         )
-        result = format_issues(
-            state, _make_config(), now="2026-01-01T00:30:00Z"
-        )
+        result = format_issues(state, _make_config(), now="2026-01-01T00:30:00Z")
         assert "ISSUE-1 [done] 30m" in result
         assert "..." not in result
 
@@ -80,18 +74,12 @@ class TestFormatIssues:
         state = State(
             issues={
                 "ISSUE-1": _make_issue(state="work"),
-                "ISSUE-3": _make_issue(
-                    state="todo", decomposed_from="ISSUE-1"
-                ),
-                "ISSUE-2": _make_issue(
-                    state="done", decomposed_from="ISSUE-1"
-                ),
+                "ISSUE-3": _make_issue(state="todo", decomposed_from="ISSUE-1"),
+                "ISSUE-2": _make_issue(state="done", decomposed_from="ISSUE-1"),
             },
             worker_queues={},
         )
-        result = format_issues(
-            state, _make_config(), now="2026-01-01T01:00:00Z"
-        )
+        result = format_issues(state, _make_config(), now="2026-01-01T01:00:00Z")
         lines = result.split("\n")
         # Root first
         assert "ISSUE-1 [work] ... 1h" in lines[0]
@@ -107,9 +95,7 @@ class TestFormatIssues:
             },
             worker_queues={},
         )
-        result = format_issues(
-            state, _make_config(), now="2026-01-01T00:00:00Z"
-        )
+        result = format_issues(state, _make_config(), now="2026-01-01T00:00:00Z")
         assert "depends on: ISSUE-2" in result
 
     def test_elapsed_time_minutes(self) -> None:
@@ -117,9 +103,7 @@ class TestFormatIssues:
             issues={"I-1": _make_issue(state="todo")},
             worker_queues={},
         )
-        result = format_issues(
-            state, _make_config(), now="2026-01-01T00:30:00Z"
-        )
+        result = format_issues(state, _make_config(), now="2026-01-01T00:30:00Z")
         assert "30m" in result
 
     def test_elapsed_time_hours(self) -> None:
@@ -127,9 +111,7 @@ class TestFormatIssues:
             issues={"I-1": _make_issue(state="todo")},
             worker_queues={},
         )
-        result = format_issues(
-            state, _make_config(), now="2026-01-01T02:15:00Z"
-        )
+        result = format_issues(state, _make_config(), now="2026-01-01T02:15:00Z")
         assert "2h 15m" in result
 
     def test_elapsed_time_days(self) -> None:
@@ -137,9 +119,7 @@ class TestFormatIssues:
             issues={"I-1": _make_issue(state="todo")},
             worker_queues={},
         )
-        result = format_issues(
-            state, _make_config(), now="2026-01-02T03:00:00Z"
-        )
+        result = format_issues(state, _make_config(), now="2026-01-02T03:00:00Z")
         assert "1d 3h" in result
 
     def test_worker_queues_shown(self) -> None:
@@ -150,9 +130,7 @@ class TestFormatIssues:
             },
             worker_queues={"work": ["I-3", "I-4"]},
         )
-        result = format_issues(
-            state, _make_config(), now="2026-01-01T00:00:00Z"
-        )
+        result = format_issues(state, _make_config(), now="2026-01-01T00:00:00Z")
         assert "Queued in 'work': I-3, I-4" in result
 
     def test_no_created_event_shows_question_mark(self) -> None:
@@ -160,9 +138,7 @@ class TestFormatIssues:
             issues={"I-1": _make_issue(state="todo", created_ts=None)},
             worker_queues={},
         )
-        result = format_issues(
-            state, _make_config(), now="2026-01-01T00:00:00Z"
-        )
+        result = format_issues(state, _make_config(), now="2026-01-01T00:00:00Z")
         assert "I-1 [todo] ... ?" in result
 
     def test_sort_order_by_id(self) -> None:
@@ -174,9 +150,7 @@ class TestFormatIssues:
             },
             worker_queues={},
         )
-        result = format_issues(
-            state, _make_config(), now="2026-01-01T00:00:00Z"
-        )
+        result = format_issues(state, _make_config(), now="2026-01-01T00:00:00Z")
         lines = [line for line in result.split("\n") if line.strip()]
         assert lines[0].startswith("A-1")
         assert lines[1].startswith("B-1")
@@ -191,9 +165,7 @@ class TestFormatIssues:
             },
             worker_queues={},
         )
-        result = format_issues(
-            state, _make_config(), now="2026-01-01T01:00:00Z"
-        )
+        result = format_issues(state, _make_config(), now="2026-01-01T01:00:00Z")
         lines = result.split("\n")
         assert "I-1 [work] ... 1h" in lines[0]
         assert "\u2514\u2500\u2500 I-2 [work] ... 1h" in lines[1]
