@@ -1,0 +1,186 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+from orca.engine import parse_config, reduce
+from orca.engine.types import CreateEvent, DispatchWorkerEffect, State
+from orca.orchestrator.branches import BranchMap
+from orca.orchestrator.orchestrator import Orchestrator
+from orca.orchestrator.persistence import Persistence
+from orca.orchestrator.worker import WorkerFailure, WorkerOutcome, WorkerSuccess
+
+
+class MockWorker:
+    """Worker that returns predefined outcomes by issue state."""
+
+    def __init__(self, outcomes: dict[str, WorkerOutcome]) -> None:
+        self.outcomes = outcomes
+        self.calls: list[tuple[str, str]] = []  # (issue_id, state)
+
+    async def execute(
+        self,
+        effect: DispatchWorkerEffect,
+        workdir: Path,
+        result_path: Path,
+        prompt_path: Path | None = None,
+    ) -> WorkerOutcome:
+        self.calls.append((effect.issue_id, effect.state))
+        return self.outcomes.get(effect.state, WorkerFailure(error="no mock"))
+
+
+def _counter(start: int = 0) -> Any:
+    n = start
+
+    def gen() -> str:
+        nonlocal n
+        n += 1
+        return f"issue-{n}"
+
+    return gen
+
+
+def _now() -> str:
+    return "2026-01-01T00:00:00Z"
+
+
+SIMPLE_CONFIG = """\
+issue:
+  fields:
+    title:
+      type: string
+      description: Title
+states:
+  todo:
+    worker:
+      kind: claude-code
+      prompt: prompts/todo.md
+      result_format:
+        outcome:
+          type: enum
+          values: [start]
+          description: Decision
+    on:
+      start: implementing
+  implementing:
+    worker:
+      kind: claude-code
+      prompt: prompts/impl.md
+      result_format:
+        outcome:
+          type: enum
+          values: [complete]
+          description: Outcome
+    on:
+      complete: done
+  done:
+    terminal: true
+initial: todo
+"""
+
+
+@pytest.mark.asyncio()
+class TestOrchestrator:
+    async def test_simple_run_to_completion(self, tmp_path: Path) -> None:
+        """Create issue, run orchestrator with mock worker that returns success for both states,
+        assert root issue reaches 'done'."""
+        config = parse_config(SIMPLE_CONFIG)
+        state = State(issues={}, worker_queues={})
+
+        # Create the issue via reducer to get initial effects
+        create_event = CreateEvent(issue_id="issue-1", fields={"title": "Test"}, timestamp=_now())
+        state, initial_effects = reduce(config, state, create_event, _counter(), _now)
+
+        persistence = Persistence(tmp_path, "main")
+        persistence.save(state)
+
+        branches = BranchMap(tmp_path, "main")
+
+        worker = MockWorker(
+            outcomes={
+                "todo": WorkerSuccess(result={"outcome": "start"}),
+                "implementing": WorkerSuccess(result={"outcome": "complete"}),
+            }
+        )
+        workers = {"claude-code": worker}
+
+        orchestrator = Orchestrator(
+            config=config,
+            state=state,
+            root_branch="main",
+            persistence=persistence,
+            branches=branches,
+            workers=workers,
+            generate_id=_counter(),
+            now=_now,
+            worktree_resolver=lambda iid: tmp_path,
+        )
+
+        await orchestrator.run("issue-1", initial_effects)
+
+        final_state = orchestrator.state
+        assert "issue-1" in final_state.issues
+        assert final_state.issues["issue-1"].state == "done"
+
+    async def test_worker_failure_retries(self, tmp_path: Path) -> None:
+        """Mock worker that fails first time on 'todo' then succeeds,
+        assert eventually reaches terminal."""
+        config = parse_config(SIMPLE_CONFIG)
+        state = State(issues={}, worker_queues={})
+
+        create_event = CreateEvent(issue_id="issue-1", fields={"title": "Test"}, timestamp=_now())
+        state, initial_effects = reduce(config, state, create_event, _counter(), _now)
+
+        persistence = Persistence(tmp_path, "main")
+        persistence.save(state)
+
+        branches = BranchMap(tmp_path, "main")
+
+        # Stateful mock: fail first call on 'todo', then succeed
+        call_count: dict[str, int] = {}
+
+        class StatefulMockWorker:
+            calls: list[tuple[str, str]] = []
+
+            async def execute(
+                self,
+                effect: DispatchWorkerEffect,
+                workdir: Path,
+                result_path: Path,
+                prompt_path: Path | None = None,
+            ) -> WorkerOutcome:
+                self.calls.append((effect.issue_id, effect.state))
+                count = call_count.get(effect.state, 0)
+                call_count[effect.state] = count + 1
+                if effect.state == "todo" and count == 0:
+                    return WorkerFailure(error="transient failure")
+                if effect.state == "todo":
+                    return WorkerSuccess(result={"outcome": "start"})
+                if effect.state == "implementing":
+                    return WorkerSuccess(result={"outcome": "complete"})
+                return WorkerFailure(error="no mock")
+
+        stateful_worker = StatefulMockWorker()
+        workers = {"claude-code": stateful_worker}
+
+        orchestrator = Orchestrator(
+            config=config,
+            state=state,
+            root_branch="main",
+            persistence=persistence,
+            branches=branches,
+            workers=workers,
+            generate_id=_counter(),
+            now=_now,
+            worktree_resolver=lambda iid: tmp_path,
+        )
+
+        await orchestrator.run("issue-1", initial_effects)
+
+        final_state = orchestrator.state
+        assert "issue-1" in final_state.issues
+        assert final_state.issues["issue-1"].state == "done"
+        # Verify we had at least 2 calls on 'todo' (one failure + one success)
+        assert call_count.get("todo", 0) >= 2
