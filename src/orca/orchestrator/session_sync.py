@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import json
 import logging
-import subprocess
 from pathlib import Path
 from typing import Any
+
+from orca.orchestrator.transcript import render_transcript
 
 logger = logging.getLogger(__name__)
 
@@ -138,19 +139,5 @@ class SessionSync:
             return
 
         target.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(
-            [
-                "uv",
-                "tool",
-                "run",
-                "claude-code-log",
-                str(transcript),
-                "--format",
-                "md",
-                "-o",
-                str(target),
-            ],
-            check=True,
-            capture_output=True,
-            timeout=60,
-        )
+        md = render_transcript(transcript)
+        target.write_text(md)
