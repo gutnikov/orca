@@ -63,13 +63,21 @@ class Orchestrator:
         """Resolve the worker for the effect and spawn an asyncio task."""
         state_def = self.config.states.get(effect.state)
         if state_def is None or state_def.worker is None:
-            logger.warning("No worker definition for state %r — skipping dispatch", effect.state)
+            logger.warning(
+                "No worker definition for state %r — skipping dispatch",
+                effect.state,
+                extra={"event": "no_worker_definition", "state": effect.state},
+            )
             return
 
         worker_kind = state_def.worker.kind
         worker = self.workers.get(worker_kind)
         if worker is None:
-            logger.warning("Unknown worker kind %r — skipping dispatch", worker_kind)
+            logger.warning(
+                "Unknown worker kind %r — skipping dispatch",
+                worker_kind,
+                extra={"event": "unknown_worker_kind", "worker_kind": worker_kind},
+            )
             return
 
         workdir = self.worktree_resolver(effect.issue_id)
@@ -83,6 +91,17 @@ class Orchestrator:
             worker.execute(effect, workdir, result_path, prompt_path)
         )
         self._in_flight[task] = effect.issue_id
+        logger.info(
+            "Worker dispatched for issue %s in state %s",
+            effect.issue_id,
+            effect.state,
+            extra={
+                "event": "worker_dispatched",
+                "issue_id": effect.issue_id,
+                "state": effect.state,
+                "worker_kind": worker_kind,
+            },
+        )
 
     def _route_effects(self, effects: list[Effect], pending: list[DispatchWorkerEffect]) -> None:
         """Separate effects: dispatch workers immediately or log errors."""
@@ -90,7 +109,12 @@ class Orchestrator:
             if isinstance(effect, DispatchWorkerEffect):
                 pending.append(effect)
             elif isinstance(effect, ErrorEffect):
-                logger.error("ErrorEffect for issue %r: %s", effect.issue_id, effect.message)
+                logger.error(
+                    "ErrorEffect for issue %r: %s",
+                    effect.issue_id,
+                    effect.message,
+                    extra={"event": "error_effect", "issue_id": effect.issue_id, "error": effect.message},
+                )
 
     async def run(self, root_issue_id: str, initial_effects: list[Effect]) -> None:
         """Drive the orchestrator event loop until the root issue is terminal."""
@@ -105,7 +129,10 @@ class Orchestrator:
 
             # Deadlock protection: nothing running and nothing pending
             if not self._in_flight:
-                logger.warning("Deadlock detected: no tasks in flight and no pending effects. Stopping.")
+                logger.warning(
+                    "Deadlock detected: no tasks in flight and no pending effects. Stopping.",
+                    extra={"event": "deadlock_detected"},
+                )
                 break
 
             # Wait for at least one task to complete
@@ -137,6 +164,9 @@ class Orchestrator:
                         timestamp=ts,
                     )
 
+                old_issues = set(self.state.issues.keys())
+                old_issue_state = self.state.issues[issue_id].state if issue_id in self.state.issues else None
+
                 self.state, new_effects = reduce(
                     self.config,
                     self.state,
@@ -146,6 +176,58 @@ class Orchestrator:
                 )
 
                 self.persistence.save(self.state)
+
+                # Log worker outcome
+                if isinstance(outcome, WorkerSuccess):
+                    logger.info(
+                        "Worker succeeded for issue %s",
+                        issue_id,
+                        extra={
+                            "event": "worker_succeeded",
+                            "issue_id": issue_id,
+                            "result_outcome": outcome.result.get("outcome"),
+                        },
+                    )
+                else:
+                    logger.warning(
+                        "Worker failed for issue %s: %s",
+                        issue_id,
+                        outcome.error,
+                        extra={"event": "worker_failed", "issue_id": issue_id, "error": outcome.error},
+                    )
+
+                # Detect state transition
+                new_issue_state = self.state.issues[issue_id].state if issue_id in self.state.issues else None
+                if old_issue_state and new_issue_state and old_issue_state != new_issue_state:
+                    logger.info(
+                        "Issue %s transitioned from %s to %s",
+                        issue_id,
+                        old_issue_state,
+                        new_issue_state,
+                        extra={
+                            "event": "state_transitioned",
+                            "issue_id": issue_id,
+                            "from_state": old_issue_state,
+                            "to_state": new_issue_state,
+                        },
+                    )
+
+                # Detect new issues (decomposition)
+                new_issues = set(self.state.issues.keys()) - old_issues
+                for new_id in new_issues:
+                    new_issue = self.state.issues[new_id]
+                    logger.info(
+                        "Issue %s created: %s",
+                        new_id,
+                        new_issue.fields.get("title", ""),
+                        extra={
+                            "event": "issue_created",
+                            "issue_id": new_id,
+                            "parent_id": new_issue.decomposed_from,
+                            "title": new_issue.fields.get("title", ""),
+                        },
+                    )
+
                 self._route_effects(new_effects, pending)
 
         # Cancel any remaining in-flight tasks
