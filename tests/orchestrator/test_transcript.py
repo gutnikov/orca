@@ -132,17 +132,38 @@ class TestRenderTranscript:
         assert "$0.0500" in md
         assert "12.0s" in md
 
-    def test_skips_system_entries(self, tmp_path: Path) -> None:
-        """System entries are not rendered."""
+    def test_session_header(self, tmp_path: Path) -> None:
+        """System/init entry renders a session header with model and cwd."""
         path = self._write_jsonl(
             tmp_path,
             [
-                {"type": "system", "subtype": "init", "session_id": "abc"},
+                {
+                    "type": "system",
+                    "subtype": "init",
+                    "session_id": "abc-12345678",
+                    "model": "claude-opus-4-6",
+                    "cwd": "/Users/test/project",
+                },
                 {"type": "assistant", "message": {"content": [{"type": "text", "text": "Hi"}]}},
             ],
         )
         md = render_transcript(path)
-        assert "init" not in md
+        assert "# Session `abc-1234..." in md
+        assert "claude-opus-4-6" in md
+        assert "/Users/test/project" in md
+        assert "Hi" in md
+
+    def test_skips_non_init_system_entries(self, tmp_path: Path) -> None:
+        """Non-init system entries are skipped."""
+        path = self._write_jsonl(
+            tmp_path,
+            [
+                {"type": "system", "subtype": "hook_started", "hook_name": "test"},
+                {"type": "assistant", "message": {"content": [{"type": "text", "text": "Hi"}]}},
+            ],
+        )
+        md = render_transcript(path)
+        assert "hook" not in md
         assert "Hi" in md
 
     def test_thinking_block(self, tmp_path: Path) -> None:
@@ -213,3 +234,115 @@ class TestRenderTranscript:
         assert md.index("I'll create the file.") < md.index("Tool: Write")
         assert md.index("Tool: Write") < md.index("File created successfully")
         assert md.index("File created successfully") < md.index("Final Result")
+        # Session header present
+        assert "# Session" in md
+
+    def test_turn_separators(self, tmp_path: Path) -> None:
+        """Consecutive assistant turns get a --- separator."""
+        path = self._write_jsonl(
+            tmp_path,
+            [
+                {"type": "assistant", "message": {"content": [{"type": "text", "text": "First"}]}},
+                {"type": "assistant", "message": {"content": [{"type": "text", "text": "Second"}]}},
+            ],
+        )
+        md = render_transcript(path)
+        assert "First" in md
+        assert "Second" in md
+        # Separator between the two assistant blocks
+        first_idx = md.index("First")
+        second_idx = md.index("Second")
+        separator_section = md[first_idx:second_idx]
+        assert "---" in separator_section
+
+    def test_no_separator_between_tool_use_and_result(self, tmp_path: Path) -> None:
+        """No separator between assistant tool_use and user tool_result."""
+        path = self._write_jsonl(
+            tmp_path,
+            [
+                {
+                    "type": "assistant",
+                    "message": {"content": [{"type": "tool_use", "name": "Read", "input": {"file_path": "x.py"}}]},
+                },
+                {
+                    "type": "user",
+                    "message": {"content": [{"type": "tool_result", "content": "file contents"}]},
+                },
+            ],
+        )
+        md = render_transcript(path)
+        # No --- between tool call and result
+        assert md.count("---") == 0
+
+    def test_token_usage(self, tmp_path: Path) -> None:
+        """Token usage from assistant messages is rendered."""
+        path = self._write_jsonl(
+            tmp_path,
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [{"type": "text", "text": "Hello"}],
+                        "usage": {"input_tokens": 100, "output_tokens": 50, "cache_read_input_tokens": 200},
+                    },
+                },
+            ],
+        )
+        md = render_transcript(path)
+        assert "in: 100" in md
+        assert "out: 50" in md
+        assert "cache_read: 200" in md
+
+    def test_ansi_stripping(self, tmp_path: Path) -> None:
+        """ANSI escape codes are stripped from tool results."""
+        ansi_text = "\x1b[32mgreen\x1b[0m normal"
+        path = self._write_jsonl(
+            tmp_path,
+            [
+                {"type": "user", "message": {"content": [{"type": "tool_result", "content": ansi_text}]}},
+            ],
+        )
+        md = render_transcript(path)
+        assert "green normal" in md
+        assert "\x1b" not in md
+
+    def test_image_placeholder(self, tmp_path: Path) -> None:
+        """Image content blocks render as placeholders."""
+        path = self._write_jsonl(
+            tmp_path,
+            [
+                {
+                    "type": "assistant",
+                    "message": {
+                        "content": [{"type": "image", "source": {"type": "base64", "media_type": "image/png"}}]
+                    },
+                },
+            ],
+        )
+        md = render_transcript(path)
+        assert "[Image: image/png]" in md
+
+    def test_image_in_tool_result(self, tmp_path: Path) -> None:
+        """Image items in tool results render as placeholders."""
+        path = self._write_jsonl(
+            tmp_path,
+            [
+                {
+                    "type": "user",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "content": [
+                                    {"type": "text", "text": "screenshot taken"},
+                                    {"type": "image", "source": {"media_type": "image/jpeg"}},
+                                ],
+                            }
+                        ]
+                    },
+                },
+            ],
+        )
+        md = render_transcript(path)
+        assert "screenshot taken" in md
+        assert "[Image: image/jpeg]" in md

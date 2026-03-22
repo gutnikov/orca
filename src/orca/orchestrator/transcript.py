@@ -7,11 +7,15 @@ a readable markdown document showing the conversation flow, tool calls, and resu
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
 # Max characters to show for tool inputs/outputs before truncating
 _MAX_TOOL_CONTENT = 2000
+
+# ANSI escape code pattern
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
 
 
 def render_transcript(jsonl_path: Path) -> str:
@@ -31,24 +35,53 @@ def render_transcript(jsonl_path: Path) -> str:
 def _render_entries(entries: list[dict[str, Any]]) -> str:
     """Render a list of parsed JSONL entries to markdown."""
     parts: list[str] = []
+    last_type: str = ""
 
     for entry in entries:
         entry_type = entry.get("type", "")
 
+        if entry_type == "system" and entry.get("subtype") == "init":
+            parts.append(_render_session_header(entry))
+            continue
+
+        # Add separator between assistant turns (not between tool_use and tool_result)
+        if entry_type == "assistant" and last_type == "assistant":
+            parts.append("---")
+
         if entry_type == "assistant":
-            parts.extend(_render_assistant(entry))
+            rendered = _render_assistant(entry)
+            parts.extend(rendered)
         elif entry_type == "user":
             parts.extend(_render_user(entry))
         elif entry_type == "result":
             parts.extend(_render_result(entry))
 
+        if entry_type in ("assistant", "user", "result"):
+            last_type = entry_type
+
     return "\n\n".join(parts) + "\n" if parts else ""
+
+
+def _render_session_header(entry: dict[str, Any]) -> str:
+    """Render session metadata from the system/init entry."""
+    model = entry.get("model", "unknown")
+    cwd = entry.get("cwd", "")
+    session_id = entry.get("session_id", "")
+
+    lines = [f"# Session `{session_id[:8]}...`", ""]
+    lines.append(f"- **Model:** {model}")
+    if cwd:
+        lines.append(f"- **Working directory:** `{cwd}`")
+    lines.append("")
+    lines.append("---")
+    return "\n".join(lines)
 
 
 def _render_assistant(entry: dict[str, Any]) -> list[str]:
     """Render assistant message content blocks."""
     parts: list[str] = []
     content = entry.get("message", {}).get("content", [])
+    usage = entry.get("message", {}).get("usage")
 
     for block in content:
         block_type = block.get("type", "")
@@ -66,7 +99,37 @@ def _render_assistant(entry: dict[str, Any]) -> list[str]:
             if thinking.strip():
                 parts.append(f"*Thinking:*\n\n> {thinking.replace(chr(10), chr(10) + '> ')}")
 
+        elif block_type == "image":
+            source = block.get("source", {})
+            media_type = source.get("media_type", "image")
+            parts.append(f"*[Image: {media_type}]*")
+
+    # Append token usage if available
+    if usage and parts:
+        usage_str = _format_usage(usage)
+        if usage_str:
+            parts[-1] += f"\n\n{usage_str}"
+
     return parts
+
+
+def _format_usage(usage: dict[str, Any]) -> str:
+    """Format token usage as a compact italic line."""
+    input_tokens = usage.get("input_tokens", 0)
+    output_tokens = usage.get("output_tokens", 0)
+    cache_read = usage.get("cache_read_input_tokens", 0)
+    cache_create = usage.get("cache_creation_input_tokens", 0)
+
+    if not input_tokens and not output_tokens:
+        return ""
+
+    token_parts = [f"in: {input_tokens}", f"out: {output_tokens}"]
+    if cache_read:
+        token_parts.append(f"cache_read: {cache_read}")
+    if cache_create:
+        token_parts.append(f"cache_create: {cache_create}")
+
+    return f"*Tokens: {', '.join(token_parts)}*"
 
 
 def _render_tool_use(block: dict[str, Any]) -> str:
@@ -137,17 +200,23 @@ def _render_tool_result(block: dict[str, Any]) -> str:
     if isinstance(content, str):
         if not content.strip():
             return f"{prefix} *(empty)*"
-        return f"{prefix}\n\n```\n{_truncate(content)}\n```"
+        cleaned = _strip_ansi(content)
+        return f"{prefix}\n\n```\n{_truncate(cleaned)}\n```"
 
     if isinstance(content, list):
         text_parts: list[str] = []
         for item in content:
-            if isinstance(item, dict) and item.get("type") == "text":
-                text_parts.append(item.get("text", ""))
+            if isinstance(item, dict):
+                if item.get("type") == "text":
+                    text_parts.append(item.get("text", ""))
+                elif item.get("type") == "image":
+                    media_type = item.get("source", {}).get("media_type", "image")
+                    text_parts.append(f"[Image: {media_type}]")
         combined = "\n".join(text_parts)
         if not combined.strip():
             return f"{prefix} *(empty)*"
-        return f"{prefix}\n\n```\n{_truncate(combined)}\n```"
+        cleaned = _strip_ansi(combined)
+        return f"{prefix}\n\n```\n{_truncate(cleaned)}\n```"
 
     return f"{prefix} *(unknown format)*"
 
@@ -175,6 +244,11 @@ def _render_result(entry: dict[str, Any]) -> list[str]:
         parts.append(f"*{' | '.join(meta_parts)}*")
 
     return parts
+
+
+def _strip_ansi(text: str) -> str:
+    """Remove ANSI escape codes from text."""
+    return _ANSI_RE.sub("", text)
 
 
 def _truncate(text: str, max_len: int = _MAX_TOOL_CONTENT) -> str:
