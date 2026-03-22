@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -109,3 +110,45 @@ class SessionSync:
         if not target.exists():
             return True
         return entry["completed_at"] is None
+
+    def sync(self) -> None:
+        """Render new/updated session transcripts to markdown."""
+        entries = self.manifest.read()
+        for entry in entries:
+            try:
+                self._sync_entry(entry)
+            except Exception:
+                logger.exception("Failed to render session %s", entry.get("session_id"))
+
+    def _sync_entry(self, entry: dict[str, Any]) -> None:
+        target = self.output_path(entry["issue_id"], entry["state"], entry["started_at"])
+        if not self.needs_render(entry, target):
+            return
+
+        transcript = self.find_transcript(
+            session_id=entry["session_id"],
+            worktree_path=Path(entry["worktree_path"]),
+        )
+        if transcript is None:
+            logger.warning(
+                "Native transcript not found for session %s",
+                entry["session_id"],
+            )
+            return
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(
+            [
+                "uv",
+                "tool",
+                "run",
+                "claude-code-log",
+                str(transcript),
+                "--format",
+                "md",
+                "-o",
+                str(target),
+            ],
+            check=True,
+            capture_output=True,
+        )

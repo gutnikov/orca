@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 from orca.orchestrator.session_sync import SessionManifest, SessionSync
 
@@ -231,3 +233,140 @@ class TestSessionSync:
         entry: dict[str, Any] = {"completed_at": None}
 
         assert sync.needs_render(entry, target)
+
+
+class TestSessionSyncSync:
+    def test_sync_renders_new_session(self, tmp_path: Path) -> None:
+        """Sync invokes claude-code-log for a session that needs rendering."""
+        run_dir = tmp_path / "runs" / "main"
+        transcripts_dir = tmp_path / "transcripts"
+        claude_root = tmp_path / "claude-projects"
+        sync = SessionSync(
+            run_dir=run_dir,
+            transcripts_dir=transcripts_dir,
+            claude_projects_root=claude_root,
+        )
+
+        # Set up manifest with one entry
+        sync.manifest.append(
+            issue_id="issue-1",
+            state="implementing",
+            session_id="sess-aaa",
+            worktree_path=str(tmp_path / "worktrees" / "main"),
+            started_at="2026-03-22T10:00:00Z",
+        )
+
+        # Create the native transcript file
+        projects_path = sync.claude_projects_path(tmp_path / "worktrees" / "main")
+        projects_path.mkdir(parents=True, exist_ok=True)
+        transcript = projects_path / "sess-aaa.jsonl"
+        transcript.write_text('{"type":"system"}\n')
+
+        expected_output = sync.output_path("issue-1", "implementing", "2026-03-22T10:00:00Z")
+
+        with patch("orca.orchestrator.session_sync.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(args=[], returncode=0)
+            sync.sync()
+
+        mock_run.assert_called_once_with(
+            [
+                "uv",
+                "tool",
+                "run",
+                "claude-code-log",
+                str(transcript),
+                "--format",
+                "md",
+                "-o",
+                str(expected_output),
+            ],
+            check=True,
+            capture_output=True,
+        )
+
+    def test_sync_skips_completed_and_rendered(self, tmp_path: Path) -> None:
+        """Sync skips sessions that are completed and already rendered."""
+        run_dir = tmp_path / "runs" / "main"
+        transcripts_dir = tmp_path / "transcripts"
+        sync = SessionSync(
+            run_dir=run_dir,
+            transcripts_dir=transcripts_dir,
+            claude_projects_root=tmp_path / "claude-projects",
+        )
+
+        sync.manifest.append(
+            issue_id="issue-1",
+            state="implementing",
+            session_id="sess-aaa",
+            worktree_path=str(tmp_path / "worktrees" / "main"),
+            started_at="2026-03-22T10:00:00Z",
+        )
+        sync.manifest.mark_completed("sess-aaa", "2026-03-22T10:10:00Z")
+
+        # Pre-create the rendered output
+        output = sync.output_path("issue-1", "implementing", "2026-03-22T10:00:00Z")
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("already rendered")
+
+        with patch("orca.orchestrator.session_sync.subprocess.run") as mock_run:
+            sync.sync()
+
+        mock_run.assert_not_called()
+
+    def test_sync_skips_missing_transcript(self, tmp_path: Path) -> None:
+        """Sync skips sessions where native transcript doesn't exist."""
+        run_dir = tmp_path / "runs" / "main"
+        transcripts_dir = tmp_path / "transcripts"
+        sync = SessionSync(
+            run_dir=run_dir,
+            transcripts_dir=transcripts_dir,
+            claude_projects_root=tmp_path / "claude-projects",
+        )
+        (tmp_path / "claude-projects").mkdir(parents=True)
+
+        sync.manifest.append(
+            issue_id="issue-1",
+            state="implementing",
+            session_id="sess-aaa",
+            worktree_path=str(tmp_path / "worktrees" / "main"),
+            started_at="2026-03-22T10:00:00Z",
+        )
+
+        with patch("orca.orchestrator.session_sync.subprocess.run") as mock_run:
+            sync.sync()  # should not raise
+
+        mock_run.assert_not_called()
+
+    def test_sync_continues_on_per_entry_failure(self, tmp_path: Path) -> None:
+        """If one entry fails, remaining entries are still processed."""
+        run_dir = tmp_path / "runs" / "main"
+        transcripts_dir = tmp_path / "transcripts"
+        claude_root = tmp_path / "claude-projects"
+        sync = SessionSync(
+            run_dir=run_dir,
+            transcripts_dir=transcripts_dir,
+            claude_projects_root=claude_root,
+        )
+
+        # Two entries
+        for sid in ["sess-aaa", "sess-bbb"]:
+            sync.manifest.append(
+                issue_id=f"issue-{sid}",
+                state="implementing",
+                session_id=sid,
+                worktree_path=str(tmp_path / "worktrees" / "main"),
+                started_at="2026-03-22T10:00:00Z",
+            )
+            projects_path = sync.claude_projects_path(tmp_path / "worktrees" / "main")
+            projects_path.mkdir(parents=True, exist_ok=True)
+            (projects_path / f"{sid}.jsonl").write_text('{"type":"system"}\n')
+
+        with patch("orca.orchestrator.session_sync.subprocess.run") as mock_run:
+            # First call fails, second succeeds
+            mock_run.side_effect = [
+                subprocess.CalledProcessError(1, "claude-code-log"),
+                subprocess.CompletedProcess(args=[], returncode=0),
+            ]
+            sync.sync()  # should not raise
+
+        assert mock_run.call_count == 2
