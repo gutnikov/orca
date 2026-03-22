@@ -48,6 +48,8 @@ class SessionManifest:
             if entry["session_id"] == session_id:
                 entry["completed_at"] = completed_at
                 break
+        else:
+            logger.warning("mark_completed: session %s not found in manifest", session_id)
         self._write(entries)
 
     def _write(self, entries: list[dict[str, Any]]) -> None:
@@ -151,4 +153,5 @@ class SessionSync:
             ],
             check=True,
             capture_output=True,
+            timeout=60,
         )

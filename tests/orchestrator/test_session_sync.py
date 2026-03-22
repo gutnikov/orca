@@ -282,6 +282,7 @@ class TestSessionSyncSync:
             ],
             check=True,
             capture_output=True,
+            timeout=60,
         )
 
     def test_sync_skips_completed_and_rendered(self, tmp_path: Path) -> None:
