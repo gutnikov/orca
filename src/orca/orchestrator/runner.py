@@ -4,7 +4,6 @@ import argparse
 import asyncio
 import json
 import logging
-import subprocess
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -169,21 +168,13 @@ async def run(task_file: Path, branch_name: str) -> None:
 
         initial_effects.extend(recovered_effects)
     else:
-        # Fresh start
-        # Create the branch (don't switch to it)
-        subprocess.run(
-            ["git", "branch", branch_name],
-            cwd=repo_root,
-            check=True,
-            capture_output=True,
-        )
-
+        # Fresh start — worktree creation also creates the branch via -b
         # Create root worktree
         root_issue_id = _generate_id()
         worktree_path = await worktree_mgr.create(
             issue_id=root_issue_id,
             branch_name=branch_name,
-            parent_branch=branch_name,
+            parent_branch="HEAD",
         )
         _ = worktree_path  # worktree_path used internally by WorktreeManager
 
