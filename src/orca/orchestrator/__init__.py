@@ -1,6 +1,7 @@
 """Orca orchestrator — runs workers and manages the engine event loop."""
 
 from orca.orchestrator.branches import BranchMap
+from orca.orchestrator.log import JSONFormatter, setup_logging
 from orca.orchestrator.orchestrator import Orchestrator
 from orca.orchestrator.persistence import Persistence
 from orca.orchestrator.runner import main, parse_task_file, run
@@ -19,6 +20,7 @@ from orca.orchestrator.worktree import WorktreeManager
 __all__ = [
     "BranchMap",
     "ClaudeCodeWorker",
+    "JSONFormatter",
     "Orchestrator",
     "Persistence",
     "SessionManifest",
@@ -32,5 +34,6 @@ __all__ = [
     "parse_task_file",
     "render_prompt",
     "run",
+    "setup_logging",
     "validate_result",
 ]
