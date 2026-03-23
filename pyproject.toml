@@ -12,6 +12,9 @@ dependencies = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[project.optional-dependencies]
+tui = ["textual>=1.0"]
+
 [project.scripts]
 orca = "orca.orchestrator.runner:main"
 
@@ -35,5 +38,6 @@ dev = [
     "pytest>=9.0.2",
     "pytest-asyncio>=0.25.0",
     "ruff>=0.15.7",
+    "textual>=1.0",
     "types-pyyaml>=6.0.12.20250915",
 ]
