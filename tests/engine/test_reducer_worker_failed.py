@@ -198,10 +198,11 @@ class TestWorkerFailedNotActive:
 
 
 class TestWorkerFailedRepeated:
-    """Test 5: Worker failed 3 times in a row — slot retained each time, retry each time."""
+    """Test 5: Worker failures retry up to max_worker_retries, then give up."""
 
-    def test_three_consecutive_failures(self, simple_config_yaml: str) -> None:
+    def test_retries_then_exhausted(self, simple_config_yaml: str) -> None:
         config = parse_config(simple_config_yaml)
+        # Default max_worker_retries=3
         state = State(issues={}, worker_queues={})
         gen = _counter()
 
@@ -214,7 +215,8 @@ class TestWorkerFailedRepeated:
         )
         assert state.issues["A"].worker_active is True
 
-        for i in range(3):
+        # First 2 failures: retry dispatched, slot retained
+        for i in range(2):
             state, effects = reduce(
                 config,
                 state,
@@ -222,12 +224,63 @@ class TestWorkerFailedRepeated:
                 gen,
                 _clock(),
             )
-            # Slot retained every time
             assert state.issues["A"].worker_active is True
-            # Retry dispatched every time
+            assert state.issues["A"].failure_count == i + 1
             dispatch_effects = [e for e in effects if isinstance(e, DispatchWorkerEffect)]
             assert len(dispatch_effects) == 1
-            assert dispatch_effects[0].issue_id == "A"
-            assert dispatch_effects[0].state == "todo"
-            # No errors
             assert not any(isinstance(e, ErrorEffect) for e in effects)
+
+        # 3rd failure: retries exhausted, slot released, error emitted
+        state, effects = reduce(
+            config,
+            state,
+            WorkerFailedEvent(issue_id="A", error="failure-2", timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        assert state.issues["A"].worker_active is False
+        assert state.issues["A"].failure_count == 3
+        dispatch_effects = [e for e in effects if isinstance(e, DispatchWorkerEffect)]
+        assert len(dispatch_effects) == 0
+        error_effects = [e for e in effects if isinstance(e, ErrorEffect)]
+        assert len(error_effects) == 1
+        assert "retries exhausted" in error_effects[0].message
+
+    def test_failure_count_resets_on_success(self, simple_config_yaml: str) -> None:
+        config = parse_config(simple_config_yaml)
+        state = State(issues={}, worker_queues={})
+        gen = _counter()
+
+        state, _ = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="A", fields={"title": "T"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+
+        # Fail twice
+        for i in range(2):
+            state, _ = reduce(
+                config,
+                state,
+                WorkerFailedEvent(issue_id="A", error=f"failure-{i}", timestamp="2026-01-01T00:00:00Z"),
+                gen,
+                _clock(),
+            )
+        assert state.issues["A"].failure_count == 2
+
+        # Succeed with valid outcome for "todo" state — failure count resets
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(
+                issue_id="A",
+                result={"outcome": "start"},
+                timestamp="2026-01-01T00:00:00Z",
+            ),
+            gen,
+            _clock(),
+        )
+        assert state.issues["A"].failure_count == 0
+        assert state.issues["A"].state == "implementing"

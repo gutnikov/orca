@@ -8,14 +8,24 @@ from orca.engine.types import State
 class StateUpdated(Message):
     """Posted when state.json has changed on disk."""
 
-    def __init__(self, state: State) -> None:
+    def __init__(self, state: State, sessions: list[dict[str, object]]) -> None:
         super().__init__()
         self.state = state
+        self.sessions = sessions
 
 
 class IssueSelected(Message):
-    """Posted when the user selects an issue in the tree."""
+    """Posted when the user highlights an issue node in the tree."""
 
     def __init__(self, issue_id: str) -> None:
         super().__init__()
         self.issue_id = issue_id
+
+
+class WorkerRunSelected(Message):
+    """Posted when the user highlights a worker-run leaf in the tree."""
+
+    def __init__(self, session_id: str, active: bool = False) -> None:
+        super().__init__()
+        self.session_id = session_id
+        self.active = active

@@ -9,7 +9,6 @@ from orca.engine.types import EventLogEntry, Issue, State
 from orca.tui.app import OrcaApp
 from orca.tui.widgets.issue_detail import IssueDetail
 from orca.tui.widgets.issue_tree import IssueTree
-from orca.tui.widgets.status_history import StatusHistory
 
 
 def _make_state(title: str = "Root Task", state_name: str = "triage") -> State:
@@ -41,7 +40,7 @@ def _write_state(path: Path, state: State) -> None:
 
 class TestOrcaApp:
     @pytest.mark.asyncio
-    async def test_app_mounts_three_panels(self, tmp_path: Path) -> None:
+    async def test_app_mounts_two_panels(self, tmp_path: Path) -> None:
         run_dir = tmp_path / "run"
         _write_state(run_dir / "state.json", _make_state())
 
@@ -51,7 +50,6 @@ class TestOrcaApp:
 
             assert len(app.query(IssueTree)) == 1
             assert len(app.query(IssueDetail)) == 1
-            assert len(app.query(StatusHistory)) == 1
 
     @pytest.mark.asyncio
     async def test_app_loads_initial_state(self, tmp_path: Path) -> None:

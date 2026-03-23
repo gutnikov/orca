@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 from textual.app import App, ComposeResult
 
@@ -42,7 +44,7 @@ class TestIssueTree:
                 },
                 worker_queues={},
             )
-            tree.update_state(state)
+            tree.update_state(state, [])
             await pilot.pause()
             root_node = tree.root
             assert len(root_node.children) == 1
@@ -60,35 +62,64 @@ class TestIssueTree:
                 issues={"id-1": _make_issue("My Task", "work")},
                 worker_queues={},
             )
-            tree.update_state(state)
+            tree.update_state(state, [])
             await pilot.pause()
             label_text = str(tree.root.children[0].label)
             assert "work" in label_text
 
     @pytest.mark.asyncio
-    async def test_label_shows_worker_spinner(self) -> None:
+    async def test_worker_runs_shown_as_children(self) -> None:
         app = IssueTreeApp()
         async with app.run_test() as pilot:
             tree = app.query_one(IssueTree)
             state = State(
-                issues={"id-1": _make_issue("Active Task", "work", worker_active=True)},
+                issues={"id-1": _make_issue("My Task", "planning", worker_active=True)},
                 worker_queues={},
             )
-            tree.update_state(state)
+            sessions: list[dict[str, Any]] = [
+                {
+                    "issue_id": "id-1",
+                    "state": "scoping",
+                    "session_id": "s1",
+                    "started_at": "2026-01-01T00:00:00+00:00",
+                    "completed_at": "2026-01-01T00:01:00+00:00",
+                },
+                {
+                    "issue_id": "id-1",
+                    "state": "planning",
+                    "session_id": "s2",
+                    "started_at": "2026-01-01T00:01:00+00:00",
+                    "completed_at": None,
+                },
+            ]
+            tree.update_state(state, sessions)
             await pilot.pause()
-            label_text = str(tree.root.children[0].label)
-            assert "⟳" in label_text
+            issue_node = tree.root.children[0]
+            assert len(issue_node.children) == 2
+            # Active run should have a spinner character
+            active_label = str(issue_node.children[1].label)
+            assert "planning" in active_label
 
     @pytest.mark.asyncio
-    async def test_no_spinner_when_worker_inactive(self) -> None:
+    async def test_node_data_prefixed(self) -> None:
         app = IssueTreeApp()
         async with app.run_test() as pilot:
             tree = app.query_one(IssueTree)
             state = State(
-                issues={"id-1": _make_issue("Idle Task", "work", worker_active=False)},
+                issues={"id-1": _make_issue("My Task", "work")},
                 worker_queues={},
             )
-            tree.update_state(state)
+            sessions = [
+                {
+                    "issue_id": "id-1",
+                    "state": "scoping",
+                    "session_id": "s1",
+                    "started_at": "2026-01-01T00:00:00+00:00",
+                    "completed_at": "2026-01-01T00:01:00+00:00",
+                },
+            ]
+            tree.update_state(state, sessions)
             await pilot.pause()
-            label_text = str(tree.root.children[0].label)
-            assert "⟳" not in label_text
+            issue_node = tree.root.children[0]
+            assert issue_node.data == "issue:id-1"
+            assert issue_node.children[0].data == "session:s1"

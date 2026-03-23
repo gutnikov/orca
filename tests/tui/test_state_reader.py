@@ -47,8 +47,10 @@ class TestStateReader:
         reader = StateReader(run_dir)
         result = reader.read()
         assert result is not None
-        assert "issue-1" in result.issues
-        assert result.issues["issue-1"].fields["title"] == "Test Issue"
+        read_state, sessions = result
+        assert "issue-1" in read_state.issues
+        assert read_state.issues["issue-1"].fields["title"] == "Test Issue"
+        assert sessions == []
 
     def test_read_returns_none_when_mtime_unchanged(self, tmp_path: Path) -> None:
         run_dir = tmp_path / "run"
@@ -70,7 +72,8 @@ class TestStateReader:
         _write_state(state_path, _make_state("Updated"))
         result = reader.read()
         assert result is not None
-        assert result.issues["issue-1"].fields["title"] == "Updated"
+        read_state, _ = result
+        assert read_state.issues["issue-1"].fields["title"] == "Updated"
 
     def test_last_mtime_returns_zero_when_no_file(self, tmp_path: Path) -> None:
         reader = StateReader(tmp_path / "nonexistent")
@@ -95,3 +98,15 @@ class TestStateReader:
         reader.reset()
         third = reader.read()
         assert third is not None
+
+    def test_reads_sessions(self, tmp_path: Path) -> None:
+        run_dir = tmp_path / "run"
+        _write_state(run_dir / "state.json", _make_state())
+        sessions_path = run_dir / "sessions.json"
+        sessions_path.write_text(json.dumps([{"issue_id": "issue-1", "state": "scoping", "session_id": "s1"}]))
+        reader = StateReader(run_dir)
+        result = reader.read()
+        assert result is not None
+        _, sessions = result
+        assert len(sessions) == 1
+        assert sessions[0]["session_id"] == "s1"

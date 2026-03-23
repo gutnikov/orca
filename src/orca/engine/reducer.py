@@ -249,8 +249,9 @@ def _handle_worker_result(
 
     old_state_name = issue.state
 
-    # 1. Set worker_active = False (frees slot)
+    # 1. Set worker_active = False (frees slot), reset failure count
     issue.worker_active = False
+    issue.failure_count = 0
 
     # 2. Append worker_result log entry
     append_log(issue, event.timestamp, "worker_result", event.result)
@@ -336,14 +337,31 @@ def _handle_worker_failed(
         effects.append(ErrorEffect(issue_id=event.issue_id, message=f"State '{issue.state}' has no worker"))
         return
 
-    # Log the failure
+    # Log the failure and increment failure count
+    issue.failure_count += 1
     append_log(issue, event.timestamp, "worker_failed", {"state": issue.state, "error": event.error})
 
-    # Log the retry dispatch
-    append_log(issue, ts, "worker_dispatched", {"state": issue.state})
+    # Check retry limit
+    if config.max_worker_retries > 0 and issue.failure_count >= config.max_worker_retries:
+        # Give up — release the worker slot and log
+        issue.worker_active = False
+        append_log(
+            issue,
+            ts,
+            "worker_retries_exhausted",
+            {"state": issue.state, "failure_count": issue.failure_count},
+        )
+        effects.append(
+            ErrorEffect(
+                issue_id=event.issue_id,
+                message=f"Issue '{event.issue_id}' failed {issue.failure_count} times in state "
+                f"'{issue.state}' — retries exhausted",
+            )
+        )
+        return
 
-    # worker_active stays True — slot is RETAINED (not freed)
-    # Emit DispatchWorkerEffect unconditionally (retry), bypassing dispatch protocol
+    # Retry — worker_active stays True, slot is RETAINED
+    append_log(issue, ts, "worker_dispatched", {"state": issue.state})
     effects.append(
         DispatchWorkerEffect(
             issue_id=event.issue_id,

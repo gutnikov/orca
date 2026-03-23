@@ -6,14 +6,14 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
+from textual.timer import Timer
 from textual.widgets import Footer, Header
 
 from orca.engine.types import State, StateMachineConfig
-from orca.tui.messages import IssueSelected, StateUpdated
+from orca.tui.messages import IssueSelected, StateUpdated, WorkerRunSelected
 from orca.tui.state_reader import StateReader
 from orca.tui.widgets.issue_detail import IssueDetail
 from orca.tui.widgets.issue_tree import IssueTree
-from orca.tui.widgets.status_history import StatusHistory
 
 _STALE_THRESHOLD = 10.0
 _DEADLOCK_THRESHOLD = 30.0
@@ -21,6 +21,8 @@ _DEADLOCK_THRESHOLD = 30.0
 
 class OrcaApp(App[None]):
     """Orca TUI — interactive viewer for orchestrator runs."""
+
+    THEME = "gruvbox"
 
     CSS = """
     #main-panels {
@@ -44,26 +46,34 @@ class OrcaApp(App[None]):
         self._branch_name = branch_name
         self._config = config
         self._state: State | None = None
-        self._selected_issue_id: str | None = None
+        # run_dir is .orca/runs/{branch}, so repo_root is 3 levels up
+        repo_root = run_dir.parent.parent.parent
+        self._transcripts_dir = repo_root / ".orca" / "transcripts"
+        self._transcript_timer: Timer | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="main-panels"):
             yield IssueTree()
-            yield IssueDetail()
-            yield StatusHistory()
+            yield IssueDetail(transcripts_dir=self._transcripts_dir)
         yield Footer()
 
     def on_mount(self) -> None:
         self.title = f"orca watch — {self._branch_name}"
         self._poll_state()
         self.set_interval(1.5, self._poll_state)
+        self.set_interval(0.15, self._tick_spinners)
 
     def _poll_state(self) -> None:
-        state = self._reader.read()
-        if state is not None:
+        result = self._reader.read()
+        if result is not None:
+            state, sessions = result
             self._state = state
-            self.post_message(StateUpdated(state))
+            self.post_message(StateUpdated(state, sessions))
+
+    def _tick_spinners(self) -> None:
+        tree = self.query_one(IssueTree)
+        tree.refresh_tick()
 
     def action_force_refresh(self) -> None:
         self._reader.reset()
@@ -71,21 +81,30 @@ class OrcaApp(App[None]):
 
     def on_state_updated(self, message: StateUpdated) -> None:
         tree = self.query_one(IssueTree)
-        tree.update_state(message.state)
-        if self._selected_issue_id:
-            detail = self.query_one(IssueDetail)
-            detail.show_issue(self._selected_issue_id, message.state)
-            history = self.query_one(StatusHistory)
-            history.show_issue(self._selected_issue_id, message.state)
+        tree.update_state(message.state, message.sessions)
         self._update_status()
 
     def on_issue_selected(self, message: IssueSelected) -> None:
-        self._selected_issue_id = message.issue_id
+        self._stop_transcript_timer()
         if self._state:
             detail = self.query_one(IssueDetail)
             detail.show_issue(message.issue_id, self._state)
-            history = self.query_one(StatusHistory)
-            history.show_issue(message.issue_id, self._state)
+
+    def on_worker_run_selected(self, message: WorkerRunSelected) -> None:
+        detail = self.query_one(IssueDetail)
+        detail.show_transcript(message.session_id)
+        self._stop_transcript_timer()
+        if message.active:
+            self._transcript_timer = self.set_interval(3.0, self._poll_transcript)
+
+    def _poll_transcript(self) -> None:
+        detail = self.query_one(IssueDetail)
+        detail.refresh_transcript()
+
+    def _stop_transcript_timer(self) -> None:
+        if self._transcript_timer is not None:
+            self._transcript_timer.stop()
+            self._transcript_timer = None
 
     def _update_status(self) -> None:
         if self._state is None:

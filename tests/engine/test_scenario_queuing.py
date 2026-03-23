@@ -9,6 +9,7 @@ from orca.engine.reducer import reduce
 from orca.engine.types import (
     CreateEvent,
     DispatchWorkerEffect,
+    ErrorEffect,
     State,
     WorkerFailedEvent,
     WorkerResultEvent,
@@ -135,9 +136,9 @@ class TestMaxWorkersRespected:
 
 
 class TestWorkerFailureRetainsSlotInCappedState:
-    """5 issues, 3 active. Fail first active 3 times. Slot retained each time."""
+    """5 issues, 3 active. Fail first active — slot retained while retrying, released when exhausted."""
 
-    def test_worker_failure_retains_slot_in_capped_state(self) -> None:
+    def test_worker_failure_retains_slot_then_exhausts(self) -> None:
         config = parse_config(CAPPED_CONFIG_YAML)
         gen = _counter()
         state = _empty_state()
@@ -152,8 +153,8 @@ class TestWorkerFailureRetainsSlotInCappedState:
         active = [iid for iid in all_ids if state.issues[iid].worker_active]
         assert len(active) == 3
 
-        # Fail Q-1 three times
-        for _ in range(3):
+        # Fail Q-1 twice — slot retained, retry dispatched
+        for _ in range(2):
             state, effects = reduce(
                 config,
                 state,
@@ -161,21 +162,27 @@ class TestWorkerFailureRetainsSlotInCappedState:
                 gen,
                 _clock(),
             )
-            # Worker should be retried (DispatchWorkerEffect emitted)
-            assert len(effects) == 1
-            assert isinstance(effects[0], DispatchWorkerEffect)
-            assert effects[0].issue_id == "Q-1"
-
-            # worker_active stays True for Q-1 (slot retained)
+            dispatch_effects = [e for e in effects if isinstance(e, DispatchWorkerEffect)]
+            assert len(dispatch_effects) == 1
+            assert dispatch_effects[0].issue_id == "Q-1"
             assert state.issues["Q-1"].worker_active is True
 
             # Still exactly 3 active total
             active_now = [iid for iid in all_ids if state.issues[iid].worker_active]
             assert len(active_now) == 3
 
-            # Queued issues should NOT have been promoted
-            assert state.issues["Q-4"].worker_active is False
-            assert state.issues["Q-5"].worker_active is False
+        # 3rd failure — retries exhausted, slot released
+        state, effects = reduce(
+            config,
+            state,
+            WorkerFailedEvent(issue_id="Q-1", error="boom", timestamp=TS),
+            gen,
+            _clock(),
+        )
+        assert state.issues["Q-1"].worker_active is False
+        error_effects = [e for e in effects if isinstance(e, ErrorEffect)]
+        assert len(error_effects) == 1
+        assert "retries exhausted" in error_effects[0].message
 
 
 class TestSequentialDrain:

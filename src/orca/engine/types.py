@@ -71,6 +71,7 @@ class StateMachineConfig:
     initial: str
     states: dict[str, StateDef]
     max_hops: int | None = None
+    max_worker_retries: int = 3
 
 
 # --- Runtime state types (mutable, with serialization) ---
@@ -100,6 +101,7 @@ class Issue:
     event_log: list[EventLogEntry]
     visit_counts: dict[str, int] = field(default_factory=dict)
     hop_count: int = 0
+    failure_count: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -111,6 +113,7 @@ class Issue:
             "event_log": [entry.to_dict() for entry in self.event_log],
             "visit_counts": self.visit_counts,
             "hop_count": self.hop_count,
+            "failure_count": self.failure_count,
         }
 
     @classmethod
@@ -124,6 +127,7 @@ class Issue:
             event_log=[EventLogEntry.from_dict(e) for e in data.get("event_log", [])],
             visit_counts=data.get("visit_counts", {}),
             hop_count=data.get("hop_count", 0),
+            failure_count=data.get("failure_count", 0),
         )
 
 

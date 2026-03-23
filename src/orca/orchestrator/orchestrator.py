@@ -6,6 +6,7 @@ import logging
 import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from uuid import uuid4
 
 from orca.engine.reducer import reduce
 from orca.engine.types import (
@@ -62,8 +63,8 @@ class Orchestrator:
         self.worktree_mgr = worktree_mgr
         self.repo_root = repo_root
         self._session_sync = session_sync
-        # Maps asyncio.Task -> issue_id
-        self._in_flight: dict[asyncio.Task[WorkerOutcome], str] = {}
+        # Maps asyncio.Task -> (issue_id, tracking_id)
+        self._in_flight: dict[asyncio.Task[WorkerOutcome], tuple[str, str]] = {}
         # Track used branch slugs to avoid collisions
         self._used_slugs: set[str] = set()
         for branch in self.branches.values():
@@ -145,10 +146,23 @@ class Orchestrator:
             )
             return
 
+        # Record in-flight session so the TUI can show it
+        tracking_id = str(uuid4())
+        if self._session_sync is not None:
+            branch = self.branches.get(effect.issue_id) or effect.issue_id
+            workdir = self.worktree_mgr.resolve(branch)
+            self._session_sync.manifest.append(
+                issue_id=effect.issue_id,
+                state=effect.state,
+                session_id=tracking_id,
+                worktree_path=str(workdir),
+                started_at=self.now(),
+            )
+
         task: asyncio.Task[WorkerOutcome] = asyncio.create_task(
             self._run_worker(effect, worker, state_def.worker.prompt)
         )
-        self._in_flight[task] = effect.issue_id
+        self._in_flight[task] = (effect.issue_id, tracking_id)
         logger.info(
             "Worker dispatched for issue %s in state %s",
             effect.issue_id,
@@ -206,7 +220,7 @@ class Orchestrator:
     async def _sync_sessions_loop(self) -> None:
         """Periodically render session transcripts to markdown."""
         while True:
-            await asyncio.sleep(180)
+            await asyncio.sleep(5)
             if self._session_sync is not None:
                 await asyncio.to_thread(self._session_sync.sync)
 
@@ -241,7 +255,7 @@ class Orchestrator:
             )
 
             for task in done:
-                issue_id = self._in_flight.pop(task)
+                issue_id, tracking_id = self._in_flight.pop(task)
                 try:
                     outcome: WorkerOutcome = task.result()
                 except Exception as exc:
@@ -249,6 +263,10 @@ class Orchestrator:
                     outcome = WorkerFailure(error=f"task raised exception: {exc}")
 
                 ts = self.now()
+
+                # Mark the in-flight session as completed
+                if self._session_sync is not None:
+                    self._session_sync.manifest.mark_completed(tracking_id, ts)
 
                 if isinstance(outcome, WorkerSuccess):
                     event: WorkerResultEvent | WorkerFailedEvent = WorkerResultEvent(
@@ -275,18 +293,6 @@ class Orchestrator:
                 )
 
                 self.persistence.save(self.state)
-
-                # Record session in manifest for transcript rendering
-                if self._session_sync is not None and outcome.session_id is not None:
-                    branch = self.branches.get(issue_id) or issue_id
-                    workdir = self.worktree_mgr.resolve(branch)
-                    self._session_sync.manifest.append(
-                        issue_id=issue_id,
-                        state=old_issue_state or "unknown",
-                        session_id=outcome.session_id,
-                        worktree_path=str(workdir),
-                        started_at=ts,
-                    )
 
                 # Log worker outcome
                 if isinstance(outcome, WorkerSuccess):
