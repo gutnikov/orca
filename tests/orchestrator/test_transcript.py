@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from orca.orchestrator.transcript import render_transcript
+from orca.orchestrator.transcript import render_incremental, render_transcript
 
 
 class TestRenderTranscript:
@@ -359,3 +359,71 @@ class TestRenderTranscript:
         md = render_transcript(path)
         assert "def hello():" in md
         assert "1\u2192" not in md
+
+
+class TestRenderIncremental:
+    def _write_jsonl(self, tmp_path: Path, entries: list[dict[str, object]]) -> Path:
+        path = tmp_path / "test.jsonl"
+        path.write_text("\n".join(json.dumps(e) for e in entries) + "\n")
+        return path
+
+    def test_from_zero_matches_full_render(self, tmp_path: Path) -> None:
+        """render_incremental from offset=0 produces same output as render_transcript."""
+        entries: list[dict[str, object]] = [
+            {"type": "system", "subtype": "init", "session_id": "abc", "model": "claude"},
+            {"type": "assistant", "message": {"content": [{"type": "text", "text": "Hello"}]}},
+            {"type": "user", "message": {"content": [{"type": "tool_result", "content": "OK"}]}},
+        ]
+        path = self._write_jsonl(tmp_path, entries)
+        full = render_transcript(path)
+        md, new_offset, new_last_type = render_incremental(path, 0, "")
+        assert md == full
+        assert new_offset > 0
+        assert new_last_type == "user"
+
+    def test_incremental_two_chunks(self, tmp_path: Path) -> None:
+        """Two incremental calls produce same result as one full render."""
+        path = tmp_path / "test.jsonl"
+        entry1 = {"type": "assistant", "message": {"content": [{"type": "text", "text": "First"}]}}
+        path.write_text(json.dumps(entry1) + "\n")
+        md1, offset, last_type = render_incremental(path, 0, "")
+        assert "First" in md1
+
+        entry2 = {"type": "assistant", "message": {"content": [{"type": "text", "text": "Second"}]}}
+        with open(path, "a") as f:
+            f.write(json.dumps(entry2) + "\n")
+        md2, offset2, last_type2 = render_incremental(path, offset, last_type)
+        assert "Second" in md2
+        assert offset2 > offset
+        assert "---" in md2
+
+    def test_no_new_data_returns_empty(self, tmp_path: Path) -> None:
+        """When no new data exists, returns empty string."""
+        entry: dict[str, object] = {"type": "assistant", "message": {"content": [{"type": "text", "text": "Hi"}]}}
+        path = self._write_jsonl(tmp_path, [entry])
+        _, offset, last_type = render_incremental(path, 0, "")
+        md, offset2, last_type2 = render_incremental(path, offset, last_type)
+        assert md == ""
+        assert offset2 == offset
+        assert last_type2 == last_type
+
+    def test_truncated_line_not_consumed(self, tmp_path: Path) -> None:
+        """A partial line at EOF is not consumed -- offset stays before it."""
+        path = tmp_path / "test.jsonl"
+        complete = json.dumps({"type": "assistant", "message": {"content": [{"type": "text", "text": "Done"}]}})
+        partial = '{"type": "assistant", "message": {"content": [{"type": "te'
+        path.write_text(complete + "\n" + partial)
+        md, offset, _ = render_incremental(path, 0, "")
+        assert "Done" in md
+        assert offset == len(complete.encode("utf-8")) + 1
+
+    def test_file_smaller_than_offset(self, tmp_path: Path) -> None:
+        """If file is smaller than offset, reset to 0."""
+        path = self._write_jsonl(
+            tmp_path,
+            [{"type": "assistant", "message": {"content": [{"type": "text", "text": "Hi"}]}}],
+        )
+        md, offset, last_type = render_incremental(path, 99999, "assistant")
+        assert "Hi" in md
+        assert offset > 0
+        assert last_type == "assistant"

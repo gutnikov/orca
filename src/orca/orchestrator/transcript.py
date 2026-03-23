@@ -35,6 +35,62 @@ def render_transcript(jsonl_path: Path) -> str:
     return _render_entries(entries)
 
 
+def render_incremental(jsonl_path: Path, byte_offset: int, last_type: str) -> tuple[str, int, str]:
+    """Read new JSONL entries starting from byte_offset, render to markdown.
+
+    Returns:
+        (new_markdown, new_byte_offset, new_last_type) — the rendered fragment
+        for new entries only, the byte position after the last consumed line,
+        and the updated last_type for continuity across calls.
+    """
+    file_size = jsonl_path.stat().st_size
+    if byte_offset > file_size:
+        byte_offset = 0
+
+    entries: list[dict[str, Any]] = []
+    current_offset = byte_offset
+
+    with open(jsonl_path, "rb") as f:
+        f.seek(byte_offset)
+        for raw_line in f:
+            line = raw_line.decode("utf-8").strip()
+            if not line:
+                current_offset += len(raw_line)
+                continue
+            try:
+                entries.append(json.loads(line))
+                current_offset += len(raw_line)
+            except json.JSONDecodeError:
+                break
+
+    if not entries:
+        return "", current_offset, last_type
+
+    parts: list[str] = []
+    for entry in entries:
+        entry_type = entry.get("type", "")
+
+        if entry_type == "system" and entry.get("subtype") == "init":
+            parts.append(_render_session_header(entry))
+            continue
+
+        if entry_type == "assistant" and last_type == "assistant":
+            parts.append("---")
+
+        if entry_type == "assistant":
+            parts.extend(_render_assistant(entry))
+        elif entry_type == "user":
+            parts.extend(_render_user(entry))
+        elif entry_type == "result":
+            parts.extend(_render_result(entry))
+
+        if entry_type in ("assistant", "user", "result"):
+            last_type = entry_type
+
+    md = "\n\n".join(parts) + "\n" if parts else ""
+    return md, current_offset, last_type
+
+
 def _render_entries(entries: list[dict[str, Any]]) -> str:
     """Render a list of parsed JSONL entries to markdown."""
     parts: list[str] = []
