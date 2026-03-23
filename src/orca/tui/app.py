@@ -6,7 +6,6 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
-from textual.timer import Timer
 from textual.widgets import Footer, Header
 
 from orca.engine.types import State, StateMachineConfig
@@ -33,6 +32,7 @@ class OrcaApp(App[None]):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("r", "force_refresh", "Refresh"),
+        Binding("u", "update_transcript", "Update"),
         Binding("n", "retry_failed", "Retry"),
     ]
 
@@ -51,7 +51,6 @@ class OrcaApp(App[None]):
         # run_dir is .orca/runs/{branch}, so repo_root is 3 levels up
         repo_root = run_dir.parent.parent.parent
         self._transcripts_dir = repo_root / ".orca" / "transcripts"
-        self._transcript_timer: Timer | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -87,7 +86,6 @@ class OrcaApp(App[None]):
         self._update_status()
 
     def on_issue_selected(self, message: IssueSelected) -> None:
-        self._stop_transcript_timer()
         if self._state:
             detail = self.query_one(IssueDetail)
             detail.show_issue(message.issue_id, self._state)
@@ -95,18 +93,11 @@ class OrcaApp(App[None]):
     def on_worker_run_selected(self, message: WorkerRunSelected) -> None:
         detail = self.query_one(IssueDetail)
         detail.show_transcript(message.session_id, active=message.active, worktree_path=message.worktree_path)
-        self._stop_transcript_timer()
-        if message.active:
-            self._transcript_timer = self.set_interval(3.0, self._poll_transcript)
 
-    def _poll_transcript(self) -> None:
+    def action_update_transcript(self) -> None:
+        """Manually refresh the transcript panel."""
         detail = self.query_one(IssueDetail)
         detail.refresh_transcript()
-
-    def _stop_transcript_timer(self) -> None:
-        if self._transcript_timer is not None:
-            self._transcript_timer.stop()
-            self._transcript_timer = None
 
     def _update_status(self) -> None:
         if self._state is None:

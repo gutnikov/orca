@@ -74,6 +74,12 @@ def render_incremental(jsonl_path: Path, byte_offset: int, last_type: str) -> tu
             parts.append(_render_session_header(entry))
             continue
 
+        if entry_type == "queue-operation" and entry.get("operation") == "enqueue":
+            content = entry.get("content", "")
+            if content.strip():
+                parts.append(f"**Initial Prompt:**\n\n{content}")
+            continue
+
         if entry_type == "assistant" and last_type == "assistant":
             parts.append("---")
 
@@ -101,6 +107,12 @@ def _render_entries(entries: list[dict[str, Any]]) -> str:
 
         if entry_type == "system" and entry.get("subtype") == "init":
             parts.append(_render_session_header(entry))
+            continue
+
+        if entry_type == "queue-operation" and entry.get("operation") == "enqueue":
+            content = entry.get("content", "")
+            if content.strip():
+                parts.append(f"**Initial Prompt:**\n\n{content}")
             continue
 
         # Add separator between assistant turns (not between tool_use and tool_result)

@@ -106,12 +106,12 @@ class ClaudeCodeWorker:
         with session_log_path.open("wb") as log_file:
             async for line in proc.stdout:  # type: ignore[union-attr]
                 log_file.write(line)
-                # Extract session_id from the system/init message
+                # Extract session_id from the first message (usually queue-operation with sessionId)
                 if session_id is None:
                     try:
                         msg = json.loads(line)
-                        if msg.get("type") == "system" and msg.get("subtype") == "init":
-                            session_id = msg.get("session_id")
+                        # Try sessionId (queue-operation) or session_id (system/init)
+                        session_id = msg.get("sessionId") or msg.get("session_id")
                     except (json.JSONDecodeError, AttributeError):
                         pass
 
