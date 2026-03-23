@@ -225,7 +225,7 @@ async def run(task_file: Path, branch_name: str) -> None:
         workers={"claude-code": worker},
         generate_id=_generate_id,
         now=_now,
-        worktree_resolver=lambda issue_id: worktree_mgr.resolve(branches.get(issue_id) or issue_id),
+        worktree_mgr=worktree_mgr,
         repo_root=repo_root,
         session_sync=session_sync,
     )

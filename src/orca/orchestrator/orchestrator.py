@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+import re
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
@@ -20,8 +21,19 @@ from orca.orchestrator.branches import BranchMap
 from orca.orchestrator.persistence import Persistence
 from orca.orchestrator.session_sync import SessionSync
 from orca.orchestrator.worker import Worker, WorkerFailure, WorkerOutcome, WorkerSuccess
+from orca.orchestrator.worktree import WorktreeManager
 
 logger = logging.getLogger(__name__)
+
+
+def _slugify(title: str, max_len: int = 60) -> str:
+    """Convert an issue title to a git-branch-safe slug."""
+    slug = title.lower()
+    slug = re.sub(r"[^a-z0-9]+", "-", slug)
+    slug = slug.strip("-")
+    if len(slug) > max_len:
+        slug = slug[:max_len].rstrip("-")
+    return slug or "issue"
 
 
 class Orchestrator:
@@ -35,7 +47,7 @@ class Orchestrator:
         workers: Mapping[str, Worker],
         generate_id: Callable[[], str],
         now: Callable[[], str],
-        worktree_resolver: Callable[[str], Path],
+        worktree_mgr: WorktreeManager,
         repo_root: Path | None = None,
         session_sync: SessionSync | None = None,
     ) -> None:
@@ -47,11 +59,15 @@ class Orchestrator:
         self.workers: Mapping[str, Worker] = workers
         self.generate_id = generate_id
         self.now = now
-        self.worktree_resolver = worktree_resolver
+        self.worktree_mgr = worktree_mgr
         self.repo_root = repo_root
         self._session_sync = session_sync
         # Maps asyncio.Task -> issue_id
         self._in_flight: dict[asyncio.Task[WorkerOutcome], str] = {}
+        # Track used branch slugs to avoid collisions
+        self._used_slugs: set[str] = set()
+        for branch in self.branches.values():
+            self._used_slugs.add(branch)
 
     def _is_terminal(self, issue_id: str) -> bool:
         """Return True if the issue's current state is terminal in config."""
@@ -62,6 +78,51 @@ class Orchestrator:
         if state_def is None:
             return False
         return state_def.terminal
+
+    def _unique_branch_name(self, title: str, parent_branch: str) -> str:
+        """Generate a unique, human-readable branch name from an issue title."""
+        slug = _slugify(title)
+        branch = f"{parent_branch}/{slug}"
+        if branch not in self._used_slugs:
+            self._used_slugs.add(branch)
+            return branch
+        # Append a numeric suffix to disambiguate
+        for i in range(2, 1000):
+            candidate = f"{branch}-{i}"
+            if candidate not in self._used_slugs:
+                self._used_slugs.add(candidate)
+                return candidate
+        # Extremely unlikely fallback
+        fallback = f"{parent_branch}/{slug}-{self.generate_id()[:8]}"
+        self._used_slugs.add(fallback)
+        return fallback
+
+    async def _ensure_worktree(self, issue_id: str) -> Path:
+        """Ensure a worktree exists for the issue, creating one if needed."""
+        existing_branch = self.branches.get(issue_id)
+        if existing_branch is not None:
+            return self.worktree_mgr.resolve(existing_branch)
+
+        # Derive a human-readable branch name from the issue title
+        issue = self.state.issues[issue_id]
+        title = str(issue.fields.get("title", "issue"))
+
+        # Find parent branch to base the worktree on
+        parent_branch = self.root_branch
+        if issue.decomposed_from is not None:
+            parent_branch = self.branches.get(issue.decomposed_from) or self.root_branch
+
+        branch_name = self._unique_branch_name(title, parent_branch)
+        worktree_path = await self.worktree_mgr.create(
+            issue_id=issue_id,
+            branch_name=branch_name,
+            parent_branch=parent_branch,
+        )
+
+        self.branches.set(issue_id, branch_name)
+        self.branches.save()
+
+        return worktree_path
 
     def _spawn_worker(self, effect: DispatchWorkerEffect) -> None:
         """Resolve the worker for the effect and spawn an asyncio task."""
@@ -84,15 +145,8 @@ class Orchestrator:
             )
             return
 
-        workdir = self.worktree_resolver(effect.issue_id)
-        result_path = workdir / ".orca" / "result.json"
-
-        prompt_path: Path | None = None
-        if self.repo_root is not None:
-            prompt_path = self.repo_root / state_def.worker.prompt
-
         task: asyncio.Task[WorkerOutcome] = asyncio.create_task(
-            worker.execute(effect, workdir, result_path, prompt_path)
+            self._run_worker(effect, worker, state_def.worker.prompt)
         )
         self._in_flight[task] = effect.issue_id
         logger.info(
@@ -106,6 +160,17 @@ class Orchestrator:
                 "worker_kind": worker_kind,
             },
         )
+
+    async def _run_worker(self, effect: DispatchWorkerEffect, worker: Worker, prompt_template: str) -> WorkerOutcome:
+        """Create worktree if needed, then execute the worker."""
+        workdir = await self._ensure_worktree(effect.issue_id)
+        result_path = workdir / ".orca" / "result.json"
+
+        prompt_path: Path | None = None
+        if self.repo_root is not None:
+            prompt_path = self.repo_root / prompt_template
+
+        return await worker.execute(effect, workdir, result_path, prompt_path)
 
     def _route_effects(self, effects: list[Effect], pending: list[DispatchWorkerEffect]) -> None:
         """Separate effects: dispatch workers immediately or log errors."""
@@ -195,7 +260,8 @@ class Orchestrator:
 
                 # Record session in manifest for transcript rendering
                 if self._session_sync is not None and outcome.session_id is not None:
-                    workdir = self.worktree_resolver(issue_id)
+                    branch = self.branches.get(issue_id) or issue_id
+                    workdir = self.worktree_mgr.resolve(branch)
                     self._session_sync.manifest.append(
                         issue_id=issue_id,
                         state=old_issue_state or "unknown",

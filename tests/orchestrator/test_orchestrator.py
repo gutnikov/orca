@@ -11,6 +11,19 @@ from orca.orchestrator.branches import BranchMap
 from orca.orchestrator.orchestrator import Orchestrator
 from orca.orchestrator.persistence import Persistence
 from orca.orchestrator.worker import WorkerFailure, WorkerOutcome, WorkerSuccess
+from orca.orchestrator.worktree import WorktreeManager
+
+
+class FakeWorktreeManager(WorktreeManager):
+    """WorktreeManager substitute that creates plain directories instead of git worktrees."""
+
+    def __init__(self, base: Path) -> None:
+        super().__init__(base, "main")
+
+    async def create(self, issue_id: str, branch_name: str, parent_branch: str) -> Path:
+        p = self.resolve(branch_name)
+        p.mkdir(parents=True, exist_ok=True)
+        return p
 
 
 class MockWorker:
@@ -115,7 +128,7 @@ class TestOrchestrator:
             workers=workers,
             generate_id=_counter(),
             now=_now,
-            worktree_resolver=lambda iid: tmp_path,
+            worktree_mgr=FakeWorktreeManager(tmp_path),
         )
 
         await orchestrator.run("issue-1", initial_effects)
@@ -174,7 +187,7 @@ class TestOrchestrator:
             workers=workers,
             generate_id=_counter(),
             now=_now,
-            worktree_resolver=lambda iid: tmp_path,
+            worktree_mgr=FakeWorktreeManager(tmp_path),
         )
 
         await orchestrator.run("issue-1", initial_effects)

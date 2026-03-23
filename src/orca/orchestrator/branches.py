@@ -15,6 +15,9 @@ class BranchMap:
     def get(self, issue_id: str) -> str | None:
         return self._map.get(issue_id)
 
+    def values(self) -> list[str]:
+        return list(self._map.values())
+
     def save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")
