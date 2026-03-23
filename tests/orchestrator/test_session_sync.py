@@ -233,6 +233,83 @@ class TestSessionSync:
         assert sync.needs_render(entry, target)
 
 
+class TestSessionSyncIncremental:
+    def _setup_sync(self, tmp_path: Path) -> tuple[SessionSync, Path, Path]:
+        """Create a SessionSync with a transcript JSONL file ready to go."""
+        run_dir = tmp_path / "runs" / "main"
+        transcripts_dir = tmp_path / "transcripts"
+        claude_root = tmp_path / "claude-projects"
+        sync = SessionSync(run_dir=run_dir, transcripts_dir=transcripts_dir, claude_projects_root=claude_root)
+        sync.manifest.append(
+            issue_id="issue-1",
+            state="implementing",
+            session_id="sess-inc",
+            worktree_path=str(tmp_path / "worktrees" / "main"),
+            started_at="2026-03-22T10:00:00Z",
+        )
+        projects_path = sync.claude_projects_path(tmp_path / "worktrees" / "main")
+        projects_path.mkdir(parents=True, exist_ok=True)
+        jsonl_path = projects_path / "sess-inc.jsonl"
+        return sync, jsonl_path, sync.output_path("sess-inc")
+
+    def test_incremental_append(self, tmp_path: Path) -> None:
+        """Two syncs produce correct combined markdown via incremental append."""
+        sync, jsonl_path, output = self._setup_sync(tmp_path)
+        jsonl_path.write_text('{"type":"assistant","message":{"content":[{"type":"text","text":"Hello"}]}}\n')
+        sync.sync()
+        assert output.exists()
+        content1 = output.read_text()
+        assert "Hello" in content1
+
+        with open(jsonl_path, "a") as f:
+            f.write('{"type":"assistant","message":{"content":[{"type":"text","text":"World"}]}}\n')
+        sync.sync()
+        content2 = output.read_text()
+        assert "Hello" in content2
+        assert "World" in content2
+        assert "---" in content2
+
+    def test_no_new_data_no_change(self, tmp_path: Path) -> None:
+        """Sync with no new JSONL data does not modify the .md file."""
+        sync, jsonl_path, output = self._setup_sync(tmp_path)
+        jsonl_path.write_text('{"type":"assistant","message":{"content":[{"type":"text","text":"Hello"}]}}\n')
+        sync.sync()
+        mtime1 = output.stat().st_mtime
+        import time
+
+        time.sleep(0.05)
+        sync.sync()
+        mtime2 = output.stat().st_mtime
+        assert mtime1 == mtime2
+
+    def test_completed_session_final_render(self, tmp_path: Path) -> None:
+        """Completed session gets a final render to capture trailing entries."""
+        sync, jsonl_path, output = self._setup_sync(tmp_path)
+        jsonl_path.write_text('{"type":"assistant","message":{"content":[{"type":"text","text":"Start"}]}}\n')
+        sync.sync()
+        assert "Start" in output.read_text()
+
+        with open(jsonl_path, "a") as f:
+            f.write('{"type":"result","result":"Done!","duration_ms":5000}\n')
+        sync.manifest.mark_completed("sess-inc", "2026-03-22T10:10:00Z")
+
+        sync.sync()
+        content = output.read_text()
+        assert "Start" in content
+        assert "Done!" in content
+
+    def test_restart_truncates_stale_md(self, tmp_path: Path) -> None:
+        """A fresh SessionSync (offset=0) truncates an existing .md before re-rendering."""
+        sync, jsonl_path, output = self._setup_sync(tmp_path)
+        jsonl_path.write_text('{"type":"assistant","message":{"content":[{"type":"text","text":"Fresh"}]}}\n')
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("STALE CONTENT\n")
+        sync.sync()
+        content = output.read_text()
+        assert "Fresh" in content
+        assert "STALE" not in content
+
+
 class TestSessionSyncSync:
     def test_sync_renders_new_session(self, tmp_path: Path) -> None:
         """Sync renders a transcript to markdown for a new session."""

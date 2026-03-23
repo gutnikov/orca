@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from orca.orchestrator.transcript import render_transcript
+from orca.orchestrator.transcript import render_incremental
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _SessionRenderState:
+    byte_offset: int = 0
+    last_type: str = ""
 
 
 class SessionManifest:
@@ -72,6 +79,7 @@ class SessionSync:
         self.manifest = SessionManifest(run_dir)
         self.transcripts_dir = transcripts_dir
         self.claude_projects_root = claude_projects_root or Path.home() / ".claude" / "projects"
+        self._render_states: dict[str, _SessionRenderState] = {}
 
     def claude_projects_path(self, worktree_path: Path) -> Path:
         """Derive ~/.claude/projects/{hash}/ from worktree path."""
@@ -108,10 +116,24 @@ class SessionSync:
         return self.transcripts_dir / f"{session_id}.md"
 
     def needs_render(self, entry: dict[str, Any], target: Path) -> bool:
-        """True if session is still running or completed but not yet rendered."""
+        """True if session needs syncing: still running, or completed with unread bytes."""
         if not target.exists():
             return True
-        return entry["completed_at"] is None
+        if entry["completed_at"] is None:
+            return True
+        # Completed + .md exists: check if there are unread bytes (final render)
+        session_id = entry.get("session_id", "")
+        rs = self._render_states.get(session_id)
+        if rs is None:
+            return False  # No render state = never synced by us, skip
+        # If we have render state, check if JSONL has more bytes than we've read
+        transcript = self.find_transcript(
+            session_id=session_id,
+            worktree_path=Path(entry["worktree_path"]),
+        )
+        if transcript is None:
+            return False
+        return transcript.stat().st_size > rs.byte_offset
 
     def sync(self) -> None:
         """Render new/updated session transcripts to markdown."""
@@ -139,5 +161,26 @@ class SessionSync:
             return
 
         target.parent.mkdir(parents=True, exist_ok=True)
-        md = render_transcript(transcript)
-        target.write_text(md)
+        session_id = entry["session_id"]
+        rs = self._render_states.get(session_id)
+
+        if rs is None:
+            # First sync for this session — if stale .md exists, truncate it
+            rs = _SessionRenderState()
+            self._render_states[session_id] = rs
+            if target.exists():
+                target.write_text("")
+
+        md, new_offset, new_last_type = render_incremental(transcript, rs.byte_offset, rs.last_type)
+
+        if not md:
+            return
+
+        rs.byte_offset = new_offset
+        rs.last_type = new_last_type
+
+        if target.exists() and target.stat().st_size > 0:
+            with open(target, "a") as f:
+                f.write("\n\n" + md)
+        else:
+            target.write_text(md)
