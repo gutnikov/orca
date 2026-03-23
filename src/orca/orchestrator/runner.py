@@ -254,7 +254,7 @@ def main() -> None:
     run_parser = subparsers.add_parser("run", help="Run the orchestrator with a task file")
     run_parser.add_argument("task_file", type=Path, help="Path to the task file")
     run_parser.add_argument("branch_name", type=str, help="Git branch name for this run")
-    run_parser.add_argument("--watch", action="store_true", help="Open TUI dashboard alongside the run")
+    run_parser.add_argument("--headless", action="store_true", help="Run without TUI (headless mode)")
 
     watch_parser = subparsers.add_parser("watch", help="Watch orchestrator state in a TUI dashboard")
     watch_parser.add_argument("branch_name", type=str, help="Git branch name of the run to watch")
@@ -262,7 +262,9 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "run":
-        if args.watch:
+        if args.headless:
+            asyncio.run(run(args.task_file, args.branch_name))
+        else:
             import threading
 
             run_error: BaseException | None = None
@@ -294,11 +296,11 @@ def main() -> None:
             app = OrcaApp(run_dir=run_dir, branch_name=args.branch_name, config=config)
             app.run()
 
-            thread.join(timeout=5.0)
-            if run_error is not None:
-                raise run_error
-        else:
-            asyncio.run(run(args.task_file, args.branch_name))
+            # TUI closed — force exit to kill orchestrator thread and any subprocesses
+            import os
+            import signal
+
+            os.kill(os.getpid(), signal.SIGTERM)
     elif args.command == "watch":
         try:
             from orca.tui.app import OrcaApp

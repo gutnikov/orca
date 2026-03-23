@@ -127,7 +127,7 @@ class TestSessionSync:
 
         result = sync.claude_projects_path(Path("/Users/alice/work/myproject/.orca/worktrees/feat/db"))
 
-        expected = Path.home() / ".claude" / "projects" / "-Users-alice-work-myproject-.orca-worktrees-feat-db"
+        expected = Path.home() / ".claude" / "projects" / "-Users-alice-work-myproject--orca-worktrees-feat-db"
         assert result == expected
 
     def test_find_transcript_direct_path(self, tmp_path: Path) -> None:

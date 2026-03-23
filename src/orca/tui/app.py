@@ -33,6 +33,7 @@ class OrcaApp(App[None]):
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("r", "force_refresh", "Refresh"),
+        Binding("n", "retry_failed", "Retry"),
     ]
 
     def __init__(
@@ -43,6 +44,7 @@ class OrcaApp(App[None]):
     ) -> None:
         super().__init__()
         self._reader = StateReader(run_dir)
+        self._run_dir = run_dir
         self._branch_name = branch_name
         self._config = config
         self._state: State | None = None
@@ -92,7 +94,7 @@ class OrcaApp(App[None]):
 
     def on_worker_run_selected(self, message: WorkerRunSelected) -> None:
         detail = self.query_one(IssueDetail)
-        detail.show_transcript(message.session_id)
+        detail.show_transcript(message.session_id, active=message.active, worktree_path=message.worktree_path)
         self._stop_transcript_timer()
         if message.active:
             self._transcript_timer = self.set_interval(3.0, self._poll_transcript)
@@ -123,6 +125,25 @@ class OrcaApp(App[None]):
             self.sub_title = "running (stale)"
         else:
             self.sub_title = "idle"
+
+    def action_retry_failed(self) -> None:
+        """Retry the currently highlighted failed issue."""
+        if self._state is None:
+            return
+        tree = self.query_one(IssueTree)
+        node = tree.cursor_node
+        if node is None or node.data is None or not node.data.startswith("issue:"):
+            self.notify("Select a failed issue to retry", severity="warning")
+            return
+        issue_id = node.data[6:]
+        issue = self._state.issues.get(issue_id)
+        if issue is None or issue.failure_count == 0 or issue.worker_active:
+            self.notify("Issue is not in a failed state", severity="warning")
+            return
+        retry_dir = self._run_dir / "retry"
+        retry_dir.mkdir(parents=True, exist_ok=True)
+        (retry_dir / issue_id).touch()
+        self.notify(f"Retry requested for {issue_id[:8]}...")
 
     def _find_root_issue(self) -> str | None:
         if self._state is None:

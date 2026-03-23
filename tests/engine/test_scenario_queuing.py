@@ -153,8 +153,8 @@ class TestWorkerFailureRetainsSlotInCappedState:
         active = [iid for iid in all_ids if state.issues[iid].worker_active]
         assert len(active) == 3
 
-        # Fail Q-1 twice — slot retained, retry dispatched
-        for _ in range(2):
+        # Fail Q-1 four times — slot retained, retry dispatched (default max_worker_retries=5)
+        for _ in range(4):
             state, effects = reduce(
                 config,
                 state,
@@ -171,7 +171,7 @@ class TestWorkerFailureRetainsSlotInCappedState:
             active_now = [iid for iid in all_ids if state.issues[iid].worker_active]
             assert len(active_now) == 3
 
-        # 3rd failure — retries exhausted, slot released
+        # 5th failure — retries exhausted, slot released
         state, effects = reduce(
             config,
             state,

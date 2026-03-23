@@ -71,7 +71,7 @@ class StateMachineConfig:
     initial: str
     states: dict[str, StateDef]
     max_hops: int | None = None
-    max_worker_retries: int = 3
+    max_worker_retries: int = 5
 
 
 # --- Runtime state types (mutable, with serialization) ---

@@ -83,7 +83,7 @@ class SessionSync:
 
     def claude_projects_path(self, worktree_path: Path) -> Path:
         """Derive ~/.claude/projects/{hash}/ from worktree path."""
-        project_hash = str(worktree_path).replace("/", "-")
+        project_hash = str(worktree_path).replace("/", "-").replace(".", "-")
         return self.claude_projects_root / project_hash
 
     def find_transcript(self, *, session_id: str, worktree_path: Path) -> Path | None:

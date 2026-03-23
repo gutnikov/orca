@@ -255,7 +255,7 @@ def parse_config(yaml_str: str) -> StateMachineConfig:
 
     initial: str = raw.get("initial", "")
     max_hops = raw.get("max_hops")
-    max_worker_retries = raw.get("max_worker_retries", 3)
+    max_worker_retries = raw.get("max_worker_retries", 5)
 
     config = StateMachineConfig(
         issue_fields=issue_fields,

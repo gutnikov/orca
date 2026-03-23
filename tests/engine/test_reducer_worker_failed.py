@@ -202,7 +202,7 @@ class TestWorkerFailedRepeated:
 
     def test_retries_then_exhausted(self, simple_config_yaml: str) -> None:
         config = parse_config(simple_config_yaml)
-        # Default max_worker_retries=3
+        # Default max_worker_retries=5
         state = State(issues={}, worker_queues={})
         gen = _counter()
 
@@ -215,8 +215,8 @@ class TestWorkerFailedRepeated:
         )
         assert state.issues["A"].worker_active is True
 
-        # First 2 failures: retry dispatched, slot retained
-        for i in range(2):
+        # First 4 failures: retry dispatched, slot retained
+        for i in range(4):
             state, effects = reduce(
                 config,
                 state,
@@ -230,16 +230,16 @@ class TestWorkerFailedRepeated:
             assert len(dispatch_effects) == 1
             assert not any(isinstance(e, ErrorEffect) for e in effects)
 
-        # 3rd failure: retries exhausted, slot released, error emitted
+        # 5th failure: retries exhausted, slot released, error emitted
         state, effects = reduce(
             config,
             state,
-            WorkerFailedEvent(issue_id="A", error="failure-2", timestamp="2026-01-01T00:00:00Z"),
+            WorkerFailedEvent(issue_id="A", error="failure-4", timestamp="2026-01-01T00:00:00Z"),
             gen,
             _clock(),
         )
         assert state.issues["A"].worker_active is False
-        assert state.issues["A"].failure_count == 3
+        assert state.issues["A"].failure_count == 5
         dispatch_effects = [e for e in effects if isinstance(e, DispatchWorkerEffect)]
         assert len(dispatch_effects) == 0
         error_effects = [e for e in effects if isinstance(e, ErrorEffect)]

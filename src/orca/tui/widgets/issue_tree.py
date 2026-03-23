@@ -50,19 +50,21 @@ class IssueTree(Tree[str]):
         self.show_root = False
         self.show_guides = False
         self._sessions: list[dict[str, Any]] = []
+        self._state: State | None = None
         self._tick: int = 0
 
     def _issue_label(self, issue: Issue) -> Text:
         title = str(issue.fields.get("title", "untitled"))
         label = Text()
-        label.append(title)
-        # Detect retries exhausted: failed, not active, not terminal
         if issue.failure_count > 0 and not issue.worker_active:
-            label.append(f" [{issue.state}]", style="bold red")
-            label.append(" FAILED", style="bold red")
+            label.append("* ", style="bold red")
+            label.append(title)
         elif issue.state == "done":
-            label.append(f" [{issue.state}]", style="bold green")
+            label.append("* ", style="bold green")
+            label.append(title)
         else:
+            label.append("* ", style="dim")
+            label.append(title)
             label.append(f" [{issue.state}]", style="dim")
         return label
 
@@ -82,6 +84,7 @@ class IssueTree(Tree[str]):
         return label
 
     def update_state(self, state: State, sessions: list[dict[str, Any]]) -> None:
+        self._state = state
         self._sessions = sessions
         self._tick += 1
 
@@ -99,11 +102,22 @@ class IssueTree(Tree[str]):
 
         self.root.expand()
 
-        # Restore cursor, or select first root issue on initial load
+        # Restore cursor, or select first root issue on initial load.
         # Use move_cursor instead of select_node to avoid triggering
         # auto_expand which toggles (collapses) already-expanded nodes.
         if cursor_data:
-            self._restore_cursor(cursor_data)
+            restored = self._restore_cursor(cursor_data)
+            if not restored and cursor_data.startswith("session:"):
+                # Session leaf may have been truncated from the visible list.
+                # Try to find the parent issue node instead.
+                # Session nodes are children of issue nodes, so search for
+                # the issue that owns this session.
+                session_id = cursor_data[8:]
+                for s in self._sessions:
+                    if s.get("session_id") == session_id:
+                        issue_data = f"issue:{s.get('issue_id', '')}"
+                        self._restore_cursor(issue_data)
+                        break
         elif roots and self.root.children:
             self.move_cursor(self.root.children[0])
             first_id = roots[0][0]
@@ -129,10 +143,12 @@ class IssueTree(Tree[str]):
                 session_id = str(session.get("session_id", ""))
                 node.add_leaf(run_label, data=f"session:{session_id}")
 
-    def _restore_cursor(self, data: str) -> None:
+    def _restore_cursor(self, data: str) -> bool:
         found = self._find_by_data(self.root, data)
         if found:
             self.move_cursor(found)
+            return True
+        return False
 
     def _find_by_data(self, node: TreeNode[str], data: str) -> TreeNode[str] | None:
         if node.data == data:
@@ -152,8 +168,10 @@ class IssueTree(Tree[str]):
             self.post_message(IssueSelected(data[6:]))
         elif data.startswith("session:"):
             session_id = data[8:]
-            active = any(s.get("session_id") == session_id and s.get("completed_at") is None for s in self._sessions)
-            self.post_message(WorkerRunSelected(session_id, active=active))
+            session = next((s for s in self._sessions if s.get("session_id") == session_id), None)
+            active = session is not None and session.get("completed_at") is None
+            worktree_path = str(session.get("worktree_path", "")) if session else ""
+            self.post_message(WorkerRunSelected(session_id, active=active, worktree_path=worktree_path))
 
     def refresh_tick(self) -> None:
         """Called by the app timer to advance the spinner without full rebuild."""

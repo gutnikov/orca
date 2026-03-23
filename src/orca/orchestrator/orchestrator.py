@@ -81,20 +81,23 @@ class Orchestrator:
         return state_def.terminal
 
     def _unique_branch_name(self, title: str, parent_branch: str) -> str:
-        """Generate a unique, human-readable branch name from an issue title."""
+        """Generate a unique, human-readable branch name from an issue title.
+
+        Uses '-' as separator (not '/') so the logical branch name matches
+        the git branch name. Hierarchical '/' separators cause git ref
+        conflicts when parent and child branches coexist.
+        """
         slug = _slugify(title)
-        branch = f"{parent_branch}/{slug}"
+        branch = f"{parent_branch}-{slug}"
         if branch not in self._used_slugs:
             self._used_slugs.add(branch)
             return branch
-        # Append a numeric suffix to disambiguate
         for i in range(2, 1000):
             candidate = f"{branch}-{i}"
             if candidate not in self._used_slugs:
                 self._used_slugs.add(candidate)
                 return candidate
-        # Extremely unlikely fallback
-        fallback = f"{parent_branch}/{slug}-{self.generate_id()[:8]}"
+        fallback = f"{parent_branch}-{slug}-{self.generate_id()[:8]}"
         self._used_slugs.add(fallback)
         return fallback
 
@@ -159,8 +162,13 @@ class Orchestrator:
                 started_at=self.now(),
             )
 
+        # Exponential backoff for retries: 5s, 10s, 20s, 40s, ...
+        issue = self.state.issues.get(effect.issue_id)
+        failures = issue.failure_count if issue else 0
+        backoff = 5.0 * (2**failures) if failures > 0 else 0.0
+
         task: asyncio.Task[WorkerOutcome] = asyncio.create_task(
-            self._run_worker(effect, worker, state_def.worker.prompt)
+            self._run_worker_with_backoff(effect, worker, state_def.worker.prompt, backoff)
         )
         self._in_flight[task] = (effect.issue_id, tracking_id)
         logger.info(
@@ -184,6 +192,20 @@ class Orchestrator:
                 return parent_branch
         return self.root_branch
 
+    async def _run_worker_with_backoff(
+        self, effect: DispatchWorkerEffect, worker: Worker, prompt_template: str, backoff: float
+    ) -> WorkerOutcome:
+        """Wait for backoff delay, then run the worker."""
+        if backoff > 0:
+            logger.info(
+                "Backing off %.0fs before retrying issue %s",
+                backoff,
+                effect.issue_id,
+                extra={"event": "worker_backoff", "issue_id": effect.issue_id, "backoff_seconds": backoff},
+            )
+            await asyncio.sleep(backoff)
+        return await self._run_worker(effect, worker, prompt_template)
+
     async def _run_worker(self, effect: DispatchWorkerEffect, worker: Worker, prompt_template: str) -> WorkerOutcome:
         """Create worktree if needed, then execute the worker."""
         workdir = await self._ensure_worktree(effect.issue_id)
@@ -204,6 +226,53 @@ class Orchestrator:
 
         return await worker.execute(enriched_effect, workdir, result_path, prompt_path)
 
+    def _process_retry_signals(self, pending: list[DispatchWorkerEffect]) -> bool:
+        """Check for retry signal files from the TUI. Returns True if any retries were queued."""
+        retry_dir = self.persistence.state_path.parent / "retry"
+        if not retry_dir.exists():
+            return False
+
+        retried = False
+        for signal_file in retry_dir.iterdir():
+            issue_id = signal_file.name
+            signal_file.unlink()
+
+            issue = self.state.issues.get(issue_id)
+            if issue is None:
+                continue
+            if issue.worker_active:
+                continue  # already running
+            if issue.failure_count == 0:
+                continue  # not failed
+
+            # Reset failure count and re-dispatch
+            issue.failure_count = 0
+            issue.worker_active = True
+
+            state_def = self.config.states.get(issue.state)
+            if state_def is None or state_def.worker is None:
+                continue
+
+            from orca.engine.dispatch import build_issue_context, build_result_format
+
+            pending.append(
+                DispatchWorkerEffect(
+                    issue_id=issue_id,
+                    state=issue.state,
+                    result_format=build_result_format(self.config, issue.state),
+                    issue=build_issue_context(self.state, issue_id),
+                )
+            )
+            self.persistence.save(self.state)
+            logger.info(
+                "Retry signal processed for issue %s",
+                issue_id,
+                extra={"event": "retry_signal", "issue_id": issue_id, "state": issue.state},
+            )
+            retried = True
+
+        return retried
+
     def _route_effects(self, effects: list[Effect], pending: list[DispatchWorkerEffect]) -> None:
         """Separate effects: dispatch workers immediately or log errors."""
         for effect in effects:
@@ -220,7 +289,7 @@ class Orchestrator:
     async def _sync_sessions_loop(self) -> None:
         """Periodically render session transcripts to markdown."""
         while True:
-            await asyncio.sleep(5)
+            await asyncio.sleep(60)
             if self._session_sync is not None:
                 await asyncio.to_thread(self._session_sync.sync)
 
@@ -240,19 +309,29 @@ class Orchestrator:
                 self._spawn_worker(effect)
             pending.clear()
 
-            # Deadlock protection: nothing running and nothing pending
+            # Nothing in flight — check for retry signals before declaring deadlock
             if not self._in_flight:
+                retried = self._process_retry_signals(pending)
+                if retried:
+                    continue
                 logger.warning(
                     "Deadlock detected: no tasks in flight and no pending effects. Stopping.",
                     extra={"event": "deadlock_detected"},
                 )
                 break
 
-            # Wait for at least one task to complete
+            # Wait for at least one task to complete, with timeout to check for retry signals
             done, _ = await asyncio.wait(
                 list(self._in_flight.keys()),
+                timeout=5.0,
                 return_when=asyncio.FIRST_COMPLETED,
             )
+
+            # Check for retry signals on each wakeup (timeout or completion)
+            self._process_retry_signals(pending)
+
+            if not done:
+                continue  # timeout — loop back to spawn any retried tasks
 
             for task in done:
                 issue_id, tracking_id = self._in_flight.pop(task)
