@@ -208,3 +208,6 @@ __marimo__/
 
 # Orca runtime
 .orca/
+
+# Superpowers brainstorming
+.superpowers/
