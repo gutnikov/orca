@@ -161,6 +161,15 @@ class Orchestrator:
             },
         )
 
+    def _resolve_base_branch(self, issue_id: str) -> str:
+        """Resolve the base branch for an issue (parent's branch or root_branch)."""
+        issue = self.state.issues.get(issue_id)
+        if issue is not None and issue.decomposed_from is not None:
+            parent_branch = self.branches.get(issue.decomposed_from)
+            if parent_branch is not None:
+                return parent_branch
+        return self.root_branch
+
     async def _run_worker(self, effect: DispatchWorkerEffect, worker: Worker, prompt_template: str) -> WorkerOutcome:
         """Create worktree if needed, then execute the worker."""
         workdir = await self._ensure_worktree(effect.issue_id)
@@ -170,7 +179,16 @@ class Orchestrator:
         if self.repo_root is not None:
             prompt_path = self.repo_root / prompt_template
 
-        return await worker.execute(effect, workdir, result_path, prompt_path)
+        # Enrich issue context with base_branch for the prompt template
+        base_branch = self._resolve_base_branch(effect.issue_id)
+        enriched_effect = DispatchWorkerEffect(
+            issue_id=effect.issue_id,
+            state=effect.state,
+            result_format=effect.result_format,
+            issue={**effect.issue, "base_branch": base_branch},
+        )
+
+        return await worker.execute(enriched_effect, workdir, result_path, prompt_path)
 
     def _route_effects(self, effects: list[Effect], pending: list[DispatchWorkerEffect]) -> None:
         """Separate effects: dispatch workers immediately or log errors."""
