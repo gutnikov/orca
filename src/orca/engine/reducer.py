@@ -460,6 +460,17 @@ def _apply_decompose(
                     append_log(child_issue, ts, "worker_dispatched", {"state": child_issue.state})
 
 
+def _find_decompose_rule(config: StateMachineConfig, state_name: str) -> OnDecompose | None:
+    """Find the OnDecompose rule in the given state's on-rules, if any."""
+    state_def = config.states.get(state_name)
+    if state_def is None:
+        return None
+    for rule in state_def.on.values():
+        if isinstance(rule, OnDecompose):
+            return rule
+    return None
+
+
 def _cascading_unblock(
     config: StateMachineConfig,
     state: State,
@@ -478,11 +489,19 @@ def _cascading_unblock(
         if all_terminal and not parent.worker_active:
             # Log unblocked on parent
             append_log(parent, ts, "unblocked", {"reason": "decomposition"})
-            # Parent is no longer decomposition-blocked -> dispatch
-            prev_len = len(effects)
-            try_dispatch(config, state, parent_id, effects)
-            if len(effects) > prev_len:
-                append_log(parent, ts, "worker_dispatched", {"state": parent.state})
+
+            # Find the decompose rule that created these children to check for `then`
+            decompose_rule = _find_decompose_rule(config, parent.state)
+            if decompose_rule is not None and decompose_rule.then is not None:
+                # Transition parent to the `then` target
+                old_state = parent.state
+                _apply_transition(config, state, parent_id, parent, old_state, decompose_rule.then, effects, ts)
+            else:
+                # No `then` — re-dispatch parent in its current state (legacy behavior)
+                prev_len = len(effects)
+                try_dispatch(config, state, parent_id, effects)
+                if len(effects) > prev_len:
+                    append_log(parent, ts, "worker_dispatched", {"state": parent.state})
 
     # 2. Dependency unblock: find all issues that depend on the terminal issue
     for iid, iss in state.issues.items():

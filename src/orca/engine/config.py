@@ -66,7 +66,8 @@ def _parse_on_rule(key: str, value: Any) -> OnRule:
     if isinstance(value, dict):
         action = value.get("action")
         if action == "decompose":
-            return OnDecompose()
+            then = value.get("then")
+            return OnDecompose(then=then)
         msg = f"Unknown action '{action}' in on.{key}"
         raise ConfigValidationError(msg)
     msg = f"Invalid on rule for key '{key}': expected string or dict"
@@ -199,6 +200,14 @@ def _validate(config: StateMachineConfig) -> None:
                     msg = f"on.{key} target '{rule.target}' in state '{name}' does not reference an existing state"
                     raise ConfigValidationError(msg)
                 reachable.add(rule.target)
+            elif isinstance(rule, OnDecompose) and rule.then is not None:
+                if rule.then not in state_names:
+                    msg = (
+                        f"on.{key} decompose 'then' target '{rule.then}' in state '{name}' "
+                        f"does not reference an existing state"
+                    )
+                    raise ConfigValidationError(msg)
+                reachable.add(rule.then)
 
         # Rule 7: action decompose requires sub_issues with items=$issue
         for _key, rule in state.on.items():

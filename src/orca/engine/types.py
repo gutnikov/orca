@@ -50,7 +50,7 @@ class OnTransition:
 
 @dataclass(frozen=True)
 class OnDecompose:
-    pass
+    then: str | None = None
 
 
 OnRule = OnTransition | OnDecompose
