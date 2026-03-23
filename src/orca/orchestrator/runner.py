@@ -254,6 +254,7 @@ def main() -> None:
     run_parser = subparsers.add_parser("run", help="Run the orchestrator with a task file")
     run_parser.add_argument("task_file", type=Path, help="Path to the task file")
     run_parser.add_argument("branch_name", type=str, help="Git branch name for this run")
+    run_parser.add_argument("--watch", action="store_true", help="Open TUI dashboard alongside the run")
 
     watch_parser = subparsers.add_parser("watch", help="Watch orchestrator state in a TUI dashboard")
     watch_parser.add_argument("branch_name", type=str, help="Git branch name of the run to watch")
@@ -261,7 +262,43 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "run":
-        asyncio.run(run(args.task_file, args.branch_name))
+        if args.watch:
+            import threading
+
+            run_error: BaseException | None = None
+
+            def run_orchestrator() -> None:
+                nonlocal run_error
+                try:
+                    asyncio.run(run(args.task_file, args.branch_name))
+                except BaseException as e:
+                    run_error = e
+
+            thread = threading.Thread(target=run_orchestrator, daemon=True)
+            thread.start()
+
+            try:
+                from orca.tui.app import OrcaApp
+            except ImportError:
+                print("Error: textual is not installed. Install with: uv pip install 'orca[tui]'")
+                raise SystemExit(1) from None
+
+            repo_root = Path.cwd()
+            run_dir = repo_root / ".orca" / "runs" / args.branch_name
+
+            config = None
+            config_path = repo_root / "orca.yml"
+            if config_path.exists():
+                config = parse_config(config_path.read_text())
+
+            app = OrcaApp(run_dir=run_dir, branch_name=args.branch_name, config=config)
+            app.run()
+
+            thread.join(timeout=5.0)
+            if run_error is not None:
+                raise run_error
+        else:
+            asyncio.run(run(args.task_file, args.branch_name))
     elif args.command == "watch":
         try:
             from orca.tui.app import OrcaApp
