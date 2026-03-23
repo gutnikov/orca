@@ -255,7 +255,32 @@ def main() -> None:
     run_parser.add_argument("task_file", type=Path, help="Path to the task file")
     run_parser.add_argument("branch_name", type=str, help="Git branch name for this run")
 
+    watch_parser = subparsers.add_parser("watch", help="Watch orchestrator state in a TUI dashboard")
+    watch_parser.add_argument("branch_name", type=str, help="Git branch name of the run to watch")
+
     args = parser.parse_args()
 
     if args.command == "run":
         asyncio.run(run(args.task_file, args.branch_name))
+    elif args.command == "watch":
+        try:
+            from orca.tui.app import OrcaApp
+        except ImportError as e:
+            print("Error: textual is not installed. Install with: uv pip install 'orca[tui]'")
+            raise SystemExit(1) from e
+
+        repo_root = Path.cwd()
+        run_dir = repo_root / ".orca" / "runs" / args.branch_name
+
+        if not run_dir.exists():
+            print(f"Error: no run found at {run_dir}")
+            raise SystemExit(1)
+
+        # Load config for terminal state detection
+        config = None
+        config_path = repo_root / "orca.yml"
+        if config_path.exists():
+            config = parse_config(config_path.read_text())
+
+        app = OrcaApp(run_dir=run_dir, branch_name=args.branch_name, config=config)
+        app.run()
