@@ -85,20 +85,26 @@ class TestClaudeCodeWorkerExecuteRaw:
         assert isinstance(outcome, WorkerSuccess)
         assert outcome.session_id == "sess-abc"
 
-    async def test_raw_timeout(self, tmp_path: Path) -> None:
-        """Worker killed after timeout -> WorkerFailure."""
+    async def test_raw_timeout_during_streaming(self, tmp_path: Path) -> None:
+        """Worker killed after timeout during stdout streaming -> WorkerFailure."""
+
+        class SlowLineIterator:
+            """Simulates a subprocess that never finishes writing stdout."""
+
+            def __aiter__(self) -> SlowLineIterator:
+                return self
+
+            async def __anext__(self) -> bytes:
+                await asyncio.sleep(100)  # hang forever
+                return b""
+
         proc = MagicMock()
         proc.returncode = -9
-        proc.stdout = AsyncLineIterator([])
+        proc.stdout = SlowLineIterator()
         proc.stdin = MagicMock()
         proc.stdin.close = MagicMock()
         proc.kill = MagicMock()
-
-        async def slow_wait() -> int:
-            await asyncio.sleep(10)
-            return 0
-
-        proc.wait = slow_wait
+        proc.wait = AsyncMock(return_value=-9)
 
         session_log = tmp_path / "session.jsonl"
 
@@ -108,6 +114,7 @@ class TestClaudeCodeWorkerExecuteRaw:
 
         assert isinstance(outcome, WorkerFailure)
         assert "timeout" in outcome.error.lower() or "timed out" in outcome.error.lower()
+        proc.kill.assert_called_once()
 ```
 
 Add `import asyncio` to the test file imports if not already present.
@@ -119,7 +126,9 @@ Expected: FAIL -- `execute_raw` does not exist yet.
 
 - [ ] **Step 3: Implement `execute_raw()`**
 
-Add this method to `ClaudeCodeWorker` in `src/orca/orchestrator/worker.py`, after the existing `execute()` method (after line 154). Uses `asyncio.create_subprocess_exec` (safe, no shell interpolation):
+Add this method to `ClaudeCodeWorker` in `src/orca/orchestrator/worker.py`, after the existing `execute()` method (after line 154). Uses `asyncio.create_subprocess_exec` (safe, no shell interpolation).
+
+**Important:** The timeout wraps the entire operation (stdout streaming + wait), not just `proc.wait()`. A subprocess that hangs during stdout output will be killed after the timeout.
 
 ```python
     async def execute_raw(
@@ -159,18 +168,22 @@ Add this method to `ClaudeCodeWorker` in `src/orca/orchestrator/worker.py`, afte
             proc.stdin.close()
 
         session_id: str | None = None
-        with session_log_path.open("wb") as log_file:
-            async for line in proc.stdout:  # type: ignore[union-attr]
-                log_file.write(line)
-                if session_id is None:
-                    try:
-                        msg = json.loads(line)
-                        session_id = msg.get("sessionId") or msg.get("session_id")
-                    except (json.JSONDecodeError, AttributeError):
-                        pass
+
+        async def _stream_and_wait() -> None:
+            nonlocal session_id
+            with session_log_path.open("wb") as log_file:
+                async for line in proc.stdout:  # type: ignore[union-attr]
+                    log_file.write(line)
+                    if session_id is None:
+                        try:
+                            msg = json.loads(line)
+                            session_id = msg.get("sessionId") or msg.get("session_id")
+                        except (json.JSONDecodeError, AttributeError):
+                            pass
+            await proc.wait()
 
         try:
-            await asyncio.wait_for(proc.wait(), timeout=timeout)
+            await asyncio.wait_for(_stream_and_wait(), timeout=timeout)
         except asyncio.TimeoutError:
             proc.kill()
             return WorkerFailure(error="insights worker timed out", session_id=session_id)
@@ -411,12 +424,16 @@ There are {{ state.issues | length }} issues in the workflow.
 IMPORTANT: Write your output to `{{ output_path }}` using the Write tool. Do not output the insights as a response -- write them to the file.
 ```
 
-- [ ] **Step 2: Verify template renders**
+- [ ] **Step 2: Ensure template is included in package distribution**
+
+The project uses hatchling as the build backend. By default, hatchling includes all non-hidden files under source directories. Verify the `.j2` file will be distributed by checking that `pyproject.toml` does not have an explicit `[tool.hatch.build.targets.wheel]` exclude pattern that would filter it out. If it does, add an include for `*.j2` files. The current `pyproject.toml` has no such exclusion, so no changes are needed.
+
+- [ ] **Step 3: Verify template renders**
 
 Run: `uv run python -c "from orca.orchestrator.template import render_insights_prompt; from pathlib import Path; print(render_insights_prompt(Path('src/orca/orchestrator/prompts/insights.md.j2'), state={'issues': {}}, transcripts={}, mode='incremental', insights_so_far='', output_path='/tmp/test.md')[:100])"`
 Expected: Prints first 100 chars of rendered template without error.
 
-- [ ] **Step 3: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add src/orca/orchestrator/prompts/insights.md.j2
@@ -692,28 +709,38 @@ Add to `tests/orchestrator/test_orchestrator.py`. First check existing test fixt
 class TestInsightsLoop:
     """Tests for the insights sidecar loop in the orchestrator."""
 
-    async def test_insights_not_started_when_disabled(self, tmp_path: Path) -> None:
-        """When insights_enabled=False (default), no insights loop runs."""
-        # Create a minimal orchestrator with insights_enabled=False (default)
-        # Run for a short time, verify no insights.md is created
-        # Implementation: create orchestrator, check _insights_task is None after run()
+    async def test_insights_not_started_when_no_worker(self, tmp_path: Path) -> None:
+        """When insights_worker=None (default), no insights loop runs."""
+        # Create a minimal orchestrator with insights_worker=None (default)
+        # using the existing test fixtures in test_orchestrator.py
+        # After orchestrator.run() completes, assert:
+        #   - No insights.md file in run_dir
+        #   - orchestrator._insights_in_flight is False
         ...
 
-    async def test_insights_loop_runs_when_enabled(self, tmp_path: Path) -> None:
-        """When insights_enabled=True, the insights loop is started."""
-        # Create orchestrator with insights_enabled=True
-        # Verify _insights_task is created in run()
+    async def test_insights_loop_runs_when_worker_provided(self, tmp_path: Path) -> None:
+        """When insights_worker is provided, the insights loop runs."""
+        # Create a mock ClaudeCodeWorker with execute_raw() mocked:
+        #   mock_worker = MagicMock(spec=ClaudeCodeWorker)
+        #   mock_worker.execute_raw = AsyncMock(return_value=WorkerSuccess(result={}))
+        # Pass insights_worker=mock_worker, insights_interval=0.1 (fast)
+        # After run(), assert mock_worker.execute_raw was called
         ...
 
     async def test_insights_skips_when_in_flight(self, tmp_path: Path) -> None:
         """When an insights worker is already running, the next tick is skipped."""
+        # Create a mock worker whose execute_raw sleeps for 1s
+        # Set insights_interval=0.05 so multiple ticks fire during one run
+        # After run(), assert execute_raw was called only once (second tick skipped)
         ...
 ```
 
-Note: The exact test implementation depends on the existing test fixtures in `test_orchestrator.py`. Read that file first and follow its patterns. The key assertions are:
-1. `insights_enabled=False` -> no insights task created
-2. `insights_enabled=True` -> insights task created
-3. Concurrency guard prevents double-runs
+Note: Read `test_orchestrator.py` first and follow its existing fixture patterns for creating orchestrator instances. The mock insights worker should be:
+```python
+mock_insights_worker = MagicMock(spec=ClaudeCodeWorker)
+mock_insights_worker.execute_raw = AsyncMock(return_value=WorkerSuccess(result={}))
+```
+This avoids the `isinstance` coupling problem -- the orchestrator only calls `self._insights_worker.execute_raw()`.
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -738,7 +765,7 @@ Expected: FAIL.
         worktree_mgr: WorktreeManager,
         repo_root: Path | None = None,
         session_sync: SessionSync | None = None,
-        insights_enabled: bool = False,
+        insights_worker: ClaudeCodeWorker | None = None,
         insights_interval: float = 90.0,
         insights_timeout: float = 120.0,
     ) -> None:
@@ -747,11 +774,13 @@ Expected: FAIL.
 Add to `__init__` body:
 
 ```python
-        self._insights_enabled = insights_enabled
+        self._insights_worker = insights_worker
         self._insights_interval = insights_interval
         self._insights_timeout = insights_timeout
         self._insights_in_flight = False
 ```
+
+Note: `insights_worker` is a separate parameter (not pulled from `self.workers`) to avoid coupling the orchestrator to a concrete type via `isinstance` checks. When `insights_worker is not None`, insights are enabled.
 
 **3b. Add `_run_insights_once()` helper method** (after `_sync_sessions_loop()`):
 
@@ -765,18 +794,13 @@ Add to `__init__` body:
         )
         from orca.orchestrator.template import render_insights_prompt
 
-        if self.repo_root is None:
+        if self.repo_root is None or self._insights_worker is None:
             return
 
         run_dir = self.persistence.state_path.parent
         insights_path = run_dir / "insights.md"
         template_path = Path(__file__).parent / "prompts" / "insights.md.j2"
         transcripts_dir = self.repo_root / ".orca" / "transcripts"
-
-        worker = self.workers.get("claude-code")
-        if worker is None or not isinstance(worker, ClaudeCodeWorker):
-            logger.warning("No claude-code worker available for insights")
-            return
 
         is_final = self._is_terminal(root_issue_id)
         mode = "final" if is_final else "incremental"
@@ -816,7 +840,7 @@ Add to `__init__` body:
         # Run worker
         self._insights_in_flight = True
         try:
-            outcome = await worker.execute_raw(
+            outcome = await self._insights_worker.execute_raw(
                 prompt, self.repo_root, session_log_path, timeout=self._insights_timeout
             )
 
@@ -835,17 +859,21 @@ Add to `__init__` body:
             self._insights_in_flight = False
 ```
 
-Add required imports at top of file:
+Add required imports at top of `orchestrator.py`:
 
 ```python
 from datetime import UTC, datetime
-```
 
-And add `ClaudeCodeWorker` import:
-
-```python
+from orca.orchestrator.insights import (
+    gather_transcripts,
+    serialize_state_for_insights,
+    truncate_insights_so_far,
+)
+from orca.orchestrator.template import render_insights_prompt
 from orca.orchestrator.worker import ClaudeCodeWorker, Worker, WorkerFailure, WorkerOutcome, WorkerSuccess
 ```
+
+Then remove the deferred `from orca.orchestrator.insights import ...` and `from orca.orchestrator.template import ...` lines inside `_run_insights_once()` since these are now top-level imports.
 
 **3c. Add `_insights_loop()` method:**
 
@@ -870,7 +898,7 @@ from orca.orchestrator.worker import ClaudeCodeWorker, Worker, WorkerFailure, Wo
 ```python
         # Start background insights loop
         insights_task: asyncio.Task[None] | None = None
-        if self._insights_enabled:
+        if self._insights_worker is not None:
             insights_task = asyncio.create_task(self._insights_loop(root_issue_id))
 ```
 
@@ -943,10 +971,16 @@ In the `run()` function signature (line 143), add `insights_enabled: bool = Fals
 async def run(task_file: Path, branch_name: str, insights_enabled: bool = False) -> None:
 ```
 
+In the `run()` function body, after `worker = ClaudeCodeWorker(repo_root)` (line 227), add:
+
+```python
+    insights_worker = worker if insights_enabled else None
+```
+
 In the `Orchestrator(...)` constructor call (around line 236), add:
 
 ```python
-        insights_enabled=insights_enabled,
+        insights_worker=insights_worker,
 ```
 
 - [ ] **Step 3: Update the CLI callsites**
@@ -1011,7 +1045,7 @@ In `update_state()`, after the loop that adds root issue nodes (after line 122: 
         insights_sessions = [s for s in sessions if s.get("issue_id") == "__insights__"]
         if insights_sessions:
             insights_label = Text()
-            insights_label.append("# ", style="bold cyan")
+            insights_label.append("◆ ", style="bold cyan")
             insights_label.append("Insights", style="cyan")
             insights_node = self.root.add(insights_label, data="insights")
             insights_node.expand()
