@@ -59,14 +59,30 @@ This is the only source file that changes.
 - Add `-w` / `--workflow` as optional string
 - Keep `--headless` and `--insights` flags
 
-**Config path resolution** (line 151):
-- Replace `config_path = repo_root / "orca.yml"` with:
-  ```python
-  workflow = args.workflow
-  config_name = f"orca.{workflow}.yml" if workflow else "orca.yml"
-  config_path = repo_root / config_name
-  ```
-- If file missing, list available `orca*.yml` files in the error message.
+**Config path resolution in `main()`:**
+
+Resolve `config_path` in `main()` (where `args` is available), then pass it to `run()` as a `Path` parameter. This replaces the hardcoded `repo_root / "orca.yml"` inside `run()` (~line 151).
+
+```python
+workflow = args.workflow
+config_name = f"orca.{workflow}.yml" if workflow else "orca.yml"
+config_path = repo_root / config_name
+```
+
+If file missing, list available `orca*.yml` files (including bare `orca.yml`) in the error message.
+
+The `run()` function signature changes from:
+```python
+async def run(task_file: Path, branch_name: str, insights_enabled: bool = False) -> None:
+```
+to:
+```python
+async def run(task_file: Path, branch_name: str, config_path: Path, insights_enabled: bool = False) -> None:
+```
+
+**TUI code path** (~lines 319-322):
+
+The TUI branch in `main()` also loads `orca.yml` independently to pass to `OrcaApp`. This must use the same resolved `config_path` instead of hardcoding `orca.yml`.
 
 **Branch default** (~line 157):
 - If `args.branch` is None, run `git rev-parse --abbrev-ref HEAD` in `repo_root`
