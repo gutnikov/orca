@@ -51,6 +51,32 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def resolve_config_path(repo_root: Path, workflow: str | None) -> Path:
+    """Resolve the workflow config file path.
+
+    Args:
+        repo_root: Repository root directory.
+        workflow: Shorthand name (e.g. "develop" -> "orca.develop.yml"), or None for "orca.yml".
+
+    Returns:
+        Resolved config file path.
+
+    Raises:
+        SystemExit: If the resolved file does not exist.
+    """
+    import sys
+
+    config_name = f"orca.{workflow}.yml" if workflow else "orca.yml"
+    config_path = repo_root / config_name
+    if config_path.exists():
+        return config_path
+
+    available = sorted({*repo_root.glob("orca.yml"), *repo_root.glob("orca.*.yml")})
+    available_str = ", ".join(p.name for p in available) if available else "(none found)"
+    print(f"Error: {config_name} not found in {repo_root}. Available: {available_str}", file=sys.stderr)
+    raise SystemExit(1)
+
+
 def _find_root_issue(state: State) -> str:
     """Find the issue with decomposed_from is None (the root issue)."""
     for issue_id, issue in state.issues.items():
