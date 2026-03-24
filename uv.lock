@@ -299,10 +299,6 @@ source = { editable = "." }
 dependencies = [
     { name = "jinja2" },
     { name = "pyyaml" },
-]
-
-[package.optional-dependencies]
-tui = [
     { name = "textual" },
 ]
 
@@ -321,9 +317,8 @@ dev = [
 requires-dist = [
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "pyyaml", specifier = ">=6.0.3" },
-    { name = "textual", marker = "extra == 'tui'", specifier = ">=1.0" },
+    { name = "textual", specifier = ">=1.0" },
 ]
-provides-extras = ["tui"]
 
 [package.metadata.requires-dev]
 dev = [
