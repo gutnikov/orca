@@ -5,6 +5,7 @@ import contextlib
 import logging
 import re
 from collections.abc import Callable, Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -19,9 +20,15 @@ from orca.engine.types import (
     WorkerResultEvent,
 )
 from orca.orchestrator.branches import BranchMap
+from orca.orchestrator.insights import (
+    gather_transcripts,
+    serialize_state_for_insights,
+    truncate_insights_so_far,
+)
 from orca.orchestrator.persistence import Persistence
 from orca.orchestrator.session_sync import SessionSync
-from orca.orchestrator.worker import Worker, WorkerFailure, WorkerOutcome, WorkerSuccess
+from orca.orchestrator.template import render_insights_prompt
+from orca.orchestrator.worker import ClaudeCodeWorker, Worker, WorkerFailure, WorkerOutcome, WorkerSuccess
 from orca.orchestrator.worktree import WorktreeManager
 
 logger = logging.getLogger(__name__)
@@ -51,6 +58,9 @@ class Orchestrator:
         worktree_mgr: WorktreeManager,
         repo_root: Path | None = None,
         session_sync: SessionSync | None = None,
+        insights_worker: ClaudeCodeWorker | None = None,
+        insights_interval: float = 90.0,
+        insights_timeout: float = 120.0,
     ) -> None:
         self.config = config
         self.state = state
@@ -63,6 +73,10 @@ class Orchestrator:
         self.worktree_mgr = worktree_mgr
         self.repo_root = repo_root
         self._session_sync = session_sync
+        self._insights_worker = insights_worker
+        self._insights_interval = insights_interval
+        self._insights_timeout = insights_timeout
+        self._insights_in_flight = False
         # Maps asyncio.Task -> (issue_id, tracking_id)
         self._in_flight: dict[asyncio.Task[WorkerOutcome], tuple[str, str]] = {}
         # Track used branch slugs to avoid collisions
@@ -293,12 +307,90 @@ class Orchestrator:
             if self._session_sync is not None:
                 await asyncio.to_thread(self._session_sync.sync)
 
+    async def _run_insights_once(self, root_issue_id: str) -> None:
+        """Run a single insights worker invocation."""
+        if self.repo_root is None or self._insights_worker is None:
+            return
+
+        run_dir = self.persistence.state_path.parent
+        insights_path = run_dir / "insights.md"
+        template_path = Path(__file__).parent / "prompts" / "insights.md.j2"
+        transcripts_dir = self.repo_root / ".orca" / "transcripts"
+
+        is_final = self._is_terminal(root_issue_id)
+        mode = "final" if is_final else "incremental"
+
+        state_data = serialize_state_for_insights(self.state)
+        sessions = self._session_sync.manifest.read() if self._session_sync else []
+        transcripts = gather_transcripts(transcripts_dir, sessions) if transcripts_dir.exists() else {}
+        insights_so_far = truncate_insights_so_far(insights_path.read_text()) if insights_path.exists() else ""
+
+        prompt = render_insights_prompt(
+            template_path=template_path,
+            state=state_data,
+            transcripts=transcripts,
+            mode=mode,
+            insights_so_far=insights_so_far,
+            output_path=str(insights_path),
+        )
+
+        tracking_id = str(uuid4())
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+        session_log_dir = self.repo_root / ".orca" / "sessions"
+        session_log_dir.mkdir(parents=True, exist_ok=True)
+        session_log_path = session_log_dir / f"insights-{timestamp}.jsonl"
+
+        if self._session_sync is not None:
+            self._session_sync.manifest.append(
+                issue_id="__insights__",
+                state=mode,
+                session_id=tracking_id,
+                worktree_path=str(self.repo_root),
+                started_at=self.now(),
+            )
+
+        self._insights_in_flight = True
+        try:
+            outcome = await self._insights_worker.execute_raw(
+                prompt, self.repo_root, session_log_path, timeout=self._insights_timeout
+            )
+
+            if self._session_sync is not None:
+                self._session_sync.manifest.mark_completed(tracking_id, self.now())
+
+            if isinstance(outcome, WorkerFailure):
+                logger.warning("Insights worker failed: %s", outcome.error)
+            else:
+                logger.info("Insights worker completed successfully")
+        except Exception:
+            logger.exception("Insights worker raised exception")
+        finally:
+            self._insights_in_flight = False
+
+    async def _insights_loop(self, root_issue_id: str) -> None:
+        """Periodically run the insights agent to analyze progress."""
+        while True:
+            await asyncio.sleep(self._insights_interval)
+
+            if self._insights_in_flight:
+                logger.debug("Insights worker still in flight, skipping tick")
+                continue
+
+            await self._run_insights_once(root_issue_id)
+
+            if self._is_terminal(root_issue_id):
+                break
+
     async def run(self, root_issue_id: str, initial_effects: list[Effect]) -> None:
         """Drive the orchestrator event loop until the root issue is terminal."""
         # Start background session sync
         sync_task: asyncio.Task[None] | None = None
         if self._session_sync is not None:
             sync_task = asyncio.create_task(self._sync_sessions_loop())
+
+        insights_task: asyncio.Task[None] | None = None
+        if self._insights_worker is not None:
+            insights_task = asyncio.create_task(self._insights_loop(root_issue_id))
 
         pending: list[DispatchWorkerEffect] = []
         self._route_effects(initial_effects, pending)
@@ -438,5 +530,19 @@ class Orchestrator:
             sync_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await sync_task
+
+        if insights_task is not None:
+            insights_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await insights_task
+
         if self._session_sync is not None:
             await asyncio.to_thread(self._session_sync.sync)
+
+        if self._insights_worker is not None and self._is_terminal(root_issue_id):
+            try:
+                await asyncio.wait_for(self._run_insights_once(root_issue_id), timeout=self._insights_timeout)
+            except TimeoutError:
+                logger.warning("Final insights summary timed out")
+            except Exception:
+                logger.exception("Final insights summary failed")
