@@ -172,6 +172,17 @@ class IssueDetail(VerticalScroll):
 
         return None
 
+    def show_insights(self, insights_path: Path) -> None:
+        """Display the contents of insights.md."""
+        self.stop_auto_refresh()
+        if not insights_path.exists():
+            self._markdown.update("*No insights generated yet*")
+            return
+        self._current_transcript_path = insights_path
+        self._transcript_mtime = insights_path.stat().st_mtime
+        content = insights_path.read_text()
+        self._markdown.update(content or "*Insights file is empty -- waiting for first analysis*")
+
     def clear(self) -> None:
         self.stop_auto_refresh()
         self._markdown.update(_PLACEHOLDER)

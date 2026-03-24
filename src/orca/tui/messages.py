@@ -38,3 +38,10 @@ class RetryIssue(Message):
     def __init__(self, issue_id: str) -> None:
         super().__init__()
         self.issue_id = issue_id
+
+
+class InsightsSelected(Message):
+    """Posted when the user highlights the Insights root node."""
+
+    def __init__(self) -> None:
+        super().__init__()
