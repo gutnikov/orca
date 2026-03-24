@@ -39,6 +39,13 @@ class AsyncLineIterator:
         self._index += 1
         return line
 
+    async def readline(self) -> bytes:
+        if self._index >= len(self._lines):
+            return b""
+        line = self._lines[self._index]
+        self._index += 1
+        return line
+
 
 def _make_mock_proc(returncode: int, stdout_lines: list[bytes] | None = None) -> MagicMock:
     proc = MagicMock()

@@ -174,6 +174,12 @@ async def run(task_file: Path, branch_name: str, insights_enabled: bool = False)
             extra={"event": "run_resumed", "branch": branch_name},
         )
 
+        # Mark orphan sessions from the previous (crashed) run as completed
+        from orca.orchestrator.session_sync import SessionManifest
+
+        run_dir = repo_root / ".orca" / "runs" / branch_name
+        SessionManifest(run_dir).mark_orphans_completed(_now())
+
         recovered_events, recovered_effects = _recover_effects(
             config, state, branches, worktree_mgr, repo_root, _generate_id, _now
         )

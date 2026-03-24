@@ -62,6 +62,19 @@ class SessionManifest:
             logger.warning("mark_completed: session %s not found in manifest", session_id)
         self._write(entries)
 
+    def mark_orphans_completed(self, completed_at: str) -> int:
+        """Mark all incomplete sessions as completed (orphans from a crashed run)."""
+        entries = self.read()
+        count = 0
+        for entry in entries:
+            if entry["completed_at"] is None:
+                entry["completed_at"] = completed_at
+                count += 1
+        if count:
+            self._write(entries)
+            logger.info("Marked %d orphan session(s) as completed", count)
+        return count
+
     def _write(self, entries: list[dict[str, Any]]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_suffix(".tmp")

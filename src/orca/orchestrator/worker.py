@@ -14,6 +14,9 @@ from orca.orchestrator.validation import validate_result
 
 logger = logging.getLogger(__name__)
 
+# Kill the worker if no stdout output is received for this long.
+_INACTIVITY_TIMEOUT = 300.0  # 5 minutes
+
 
 @dataclass(frozen=True)
 class WorkerSuccess:
@@ -104,20 +107,39 @@ class ClaudeCodeWorker:
 
         # e. Stream stdout lines to session log file, extract session_id
         session_id: str | None = None
+        timed_out = False
+        assert proc.stdout is not None
         with session_log_path.open("wb") as log_file:
-            async for line in proc.stdout:  # type: ignore[union-attr]
+            while True:
+                try:
+                    line = await asyncio.wait_for(proc.stdout.readline(), timeout=_INACTIVITY_TIMEOUT)
+                except TimeoutError:
+                    logger.warning(
+                        "Worker for issue %s inactive for %ds — killing",
+                        effect.issue_id,
+                        int(_INACTIVITY_TIMEOUT),
+                        extra={"event": "inactivity_timeout", "issue_id": effect.issue_id, "pid": proc.pid},
+                    )
+                    proc.kill()
+                    timed_out = True
+                    break
+                if not line:
+                    break  # EOF
                 log_file.write(line)
-                # Extract session_id from the first message (usually queue-operation with sessionId)
                 if session_id is None:
                     try:
                         msg = json.loads(line)
-                        # Try sessionId (queue-operation) or session_id (system/init)
                         session_id = msg.get("sessionId") or msg.get("session_id")
                     except (json.JSONDecodeError, AttributeError):
                         pass
 
         # f. Wait for process, check returncode
         await proc.wait()
+        if timed_out:
+            return WorkerFailure(
+                error=f"worker killed after {int(_INACTIVITY_TIMEOUT)}s of inactivity",
+                session_id=session_id,
+            )
         logger.debug(
             "Subprocess exited for issue %s with code %s",
             effect.issue_id,
