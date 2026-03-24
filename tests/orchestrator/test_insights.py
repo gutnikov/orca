@@ -2,8 +2,17 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
-from orca.engine.types import EventLogEntry, Issue, State
+import pytest
+
+from orca.engine import parse_config, reduce
+from orca.engine.types import CreateEvent, EventLogEntry, Issue, State
+from orca.orchestrator.branches import BranchMap
+from orca.orchestrator.orchestrator import Orchestrator
+from orca.orchestrator.persistence import Persistence
+from orca.orchestrator.worker import WorkerOutcome, WorkerSuccess
+from orca.orchestrator.worktree import WorktreeManager
 
 
 class TestSerializeStateForInsights:
@@ -128,3 +137,98 @@ class TestTruncateInsightsSoFar:
 
         content = "just a few lines\nof content"
         assert truncate_insights_so_far(content, max_lines=3000) == content
+
+
+class _FakeWorktreeManager(WorktreeManager):  # type: ignore[misc]
+    def __init__(self, base: Path) -> None:
+        super().__init__(base, "main")
+
+    async def create(self, issue_id: str, branch_name: str, parent_branch: str) -> Path:
+        p = self.resolve(branch_name)
+        p.mkdir(parents=True, exist_ok=True)
+        return p  # type: ignore[no-any-return]
+
+
+SIMPLE_CONFIG = """\
+issue:
+  fields:
+    title:
+      type: string
+      description: Title
+states:
+  todo:
+    worker:
+      kind: claude-code
+      prompt: prompts/todo.md
+      result_format:
+        outcome:
+          type: enum
+          values: [done]
+          description: Decision
+    on:
+      done: complete
+  complete:
+    terminal: true
+initial: todo
+"""
+
+
+class _MockWorker:
+    async def execute(
+        self,
+        effect: Any,
+        workdir: Path,
+        result_path: Path,
+        prompt_path: Path | None = None,
+    ) -> WorkerOutcome:
+        return WorkerSuccess(result={"outcome": "done"})
+
+
+class TestInsightsIntegration:
+    @pytest.mark.asyncio()
+    async def test_insights_worker_invoked_during_run(self, tmp_path: Path) -> None:
+        """Full flow: orchestrator with insights_worker calls execute_raw."""
+        config = parse_config(SIMPLE_CONFIG)
+        state = State(issues={}, worker_queues={})
+
+        _id_counter = 0
+
+        def _gen_id() -> str:
+            nonlocal _id_counter
+            _id_counter += 1
+            return f"issue-{_id_counter}"
+
+        def _now() -> str:
+            return "2026-01-01T00:00:00Z"
+
+        create_event = CreateEvent(issue_id="issue-1", fields={"title": "Test"}, timestamp=_now())
+        state, initial_effects = reduce(config, state, create_event, _gen_id, _now)
+
+        persistence = Persistence(tmp_path, "main")
+        persistence.save(state)
+        branches = BranchMap(tmp_path, "main")
+
+        mock_insights = MagicMock()
+        mock_insights.execute_raw = AsyncMock(return_value=WorkerSuccess(result={}))
+
+        orchestrator = Orchestrator(
+            config=config,
+            state=state,
+            root_branch="main",
+            persistence=persistence,
+            branches=branches,
+            workers={"claude-code": _MockWorker()},
+            generate_id=_gen_id,
+            now=_now,
+            worktree_mgr=_FakeWorktreeManager(tmp_path),
+            repo_root=tmp_path,
+            insights_worker=mock_insights,
+            insights_interval=0.05,
+        )
+
+        await orchestrator.run("issue-1", initial_effects)
+
+        # Root issue should reach terminal state
+        assert orchestrator.state.issues["issue-1"].state == "complete"
+        # Insights worker should have been called (at least the final run)
+        assert mock_insights.execute_raw.call_count >= 1
