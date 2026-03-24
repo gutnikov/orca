@@ -6,8 +6,7 @@
 
 Orca runs multi-agent workflows on your codebase. You define a state machine in YAML — states, transitions, worker prompts — and Orca orchestrates Claude Code agents through it. Each agent gets its own git worktree, so they work in parallel without stepping on each other.
 
-![Orca TUI overview](docs/screenshots/tui-overview.png)
-<!-- screenshot: full TUI with tree on left, transcript on right, header showing status -->
+![Orca TUI](docs/screenshots/tui.png)
 
 ## Install
 
@@ -19,6 +18,14 @@ Update to latest:
 
 ```bash
 pipx install --force "git+ssh://git@github.com/gutnikov/orca.git"
+```
+
+## Example
+
+See [`example/`](example/) for a complete working setup — config, prompts, and a sample task file. Copy it into your repo to get started:
+
+```bash
+cp -r example/* your-repo/
 ```
 
 ## Setup
@@ -87,9 +94,6 @@ Save it as `task.md` (or any filename).
 orca run task.md my-feature-branch
 ```
 
-![Orca running a workflow](docs/screenshots/running.png)
-<!-- screenshot: TUI mid-run, tree showing active workers with spinners -->
-
 Orca will:
 - Create a git branch `my-feature-branch`
 - Spawn a worktree per agent
@@ -145,9 +149,6 @@ states:
         then: todo
       implement: implementing
 ```
-
-![Decomposed issues in tree view](docs/screenshots/decompose.png)
-<!-- screenshot: tree showing parent issue with child sub-issues -->
 
 **Serialized execution** — limit parallel workers per state:
 

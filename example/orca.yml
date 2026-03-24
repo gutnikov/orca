@@ -1,0 +1,131 @@
+# Orca workflow configuration
+#
+# This example implements a 4-stage pipeline:
+#   scoping -> planning -> implementing -> applying -> done
+#
+# A large task enters "scoping" where an agent decides whether to break it
+# into sub-issues (decompose) or pass it straight to planning. Each sub-issue
+# then flows independently through planning -> implementing -> applying.
+#
+# The "applying" state has max_workers: 1 so merges happen one at a time,
+# avoiding merge conflicts on the base branch.
+
+# --- Issue schema ---
+# Fields that every issue carries through the workflow.
+# Workers read these via Jinja2 templates (e.g. {{ issue.fields.title }}).
+issue:
+  fields:
+    title:
+      type: string
+      description: "Short title for the issue"
+    description:
+      type: string
+      description: "Detailed description of what needs to be done"
+    scope_boundary:
+      type: string
+      description: "Files and directories this issue owns — other issues must not modify these paths"
+
+# The state every new issue starts in.
+initial: scoping
+
+# Maximum decomposition depth. Prevents infinite scoping loops.
+max_hops: 15
+
+# --- States ---
+states:
+
+  # Stage 1: Decide whether to split the issue into smaller pieces.
+  # Large specs get decomposed; small ones go straight to planning.
+  scoping:
+    worker:
+      kind: claude-code
+      prompt: prompts/scoping.md
+      timeout: 600                     # 10 minutes
+      result_format:
+        outcome:
+          type: enum
+          values: [decompose, ready]
+          description: "Whether to decompose into sub-issues or proceed to planning"
+          values_description:
+            decompose: "The spec is too large — break into isolated, non-overlapping sub-issues"
+            ready: "Small enough for a single worker to plan and implement"
+        sub_issues:
+          type: list
+          items: "$issue"              # each sub-issue gets the same fields as the parent
+          required_when: [decompose]   # only required when outcome is "decompose"
+          description: "List of sub-issues to create"
+    on:
+      decompose:
+        action: decompose              # built-in: creates child issues from sub_issues
+        then: done                     # parent is done once children are created
+      ready: planning                  # small issues skip straight to planning
+
+  # Stage 2: Create an implementation plan and write test files.
+  # Tests define the acceptance criteria before any code is written.
+  planning:
+    worker:
+      kind: claude-code
+      prompt: prompts/planning.md
+      timeout: 600
+      result_format:
+        outcome:
+          type: enum
+          values: [ready, needs_rescope]
+          description: "Whether the plan is ready for implementation"
+          values_description:
+            ready: "Plan and tests are committed and ready"
+            needs_rescope: "Issue is too large or ambiguous, needs to go back to scoping"
+        summary:
+          type: string
+          description: "Brief summary of the plan or reason for rescoping"
+    on:
+      ready: implementing
+      needs_rescope: scoping           # loop back if planning discovers the issue is too big
+
+  # Stage 3: Implement the feature following the plan, making all tests pass.
+  implementing:
+    worker:
+      kind: claude-code
+      prompt: prompts/implementing.md
+      timeout: 1200                    # 20 minutes — implementation takes longer
+      result_format:
+        outcome:
+          type: enum
+          values: [done, blocked]
+          description: "Whether implementation is complete"
+          values_description:
+            done: "All tests pass, pre-commit hooks pass, changes committed"
+            blocked: "Cannot proceed — plan is insufficient or issue is unclear"
+        summary:
+          type: string
+          description: "Brief summary of what was implemented or what is blocking"
+    on:
+      done: applying
+      blocked: planning                # loop back to revise the plan
+
+  # Stage 4: Merge the worktree branch into the base branch.
+  # max_workers: 1 ensures merges are serialized (no parallel merges).
+  applying:
+    max_workers: 1
+    worker:
+      kind: claude-code
+      prompt: prompts/applying.md
+      timeout: 600
+      result_format:
+        outcome:
+          type: enum
+          values: [applied, failed]
+          description: "Whether the merge to base branch succeeded"
+          values_description:
+            applied: "Changes merged to base branch, hooks pass"
+            failed: "Merge failed due to conflicts or broken hooks"
+        summary:
+          type: string
+          description: "Brief summary of the merge result"
+    on:
+      applied: done
+      failed: implementing             # go back to fix conflicts
+
+  # Terminal state — issue is complete.
+  done:
+    terminal: true
