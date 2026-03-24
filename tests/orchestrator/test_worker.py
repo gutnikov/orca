@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -167,3 +168,75 @@ class TestClaudeCodeWorker:
         session_files = list(sessions_dir.glob("implementing-*.jsonl"))
         assert len(session_files) == 1
         assert session_files[0].read_bytes() == output_line
+
+
+@pytest.mark.asyncio()
+class TestClaudeCodeWorkerExecuteRaw:
+    async def test_successful_raw_execution(self, tmp_path: Path) -> None:
+        """exit code 0 -> WorkerSuccess with empty result dict."""
+        proc = _make_mock_proc(0)
+        session_log = tmp_path / "session.jsonl"
+
+        with patch("orca.orchestrator.worker.asyncio.create_subprocess_exec", return_value=proc):
+            worker = ClaudeCodeWorker(repo_root=tmp_path)
+            outcome = await worker.execute_raw("analyze this", tmp_path, session_log)
+
+        assert isinstance(outcome, WorkerSuccess)
+        assert outcome.result == {}
+        assert session_log.exists()
+
+    async def test_raw_nonzero_exit(self, tmp_path: Path) -> None:
+        """exit code 1 -> WorkerFailure."""
+        proc = _make_mock_proc(1)
+        session_log = tmp_path / "session.jsonl"
+
+        with patch("orca.orchestrator.worker.asyncio.create_subprocess_exec", return_value=proc):
+            worker = ClaudeCodeWorker(repo_root=tmp_path)
+            outcome = await worker.execute_raw("analyze this", tmp_path, session_log)
+
+        assert isinstance(outcome, WorkerFailure)
+        assert "exit code" in outcome.error
+
+    async def test_raw_extracts_session_id(self, tmp_path: Path) -> None:
+        """Session ID extracted from first JSON line."""
+        stdout_lines = [b'{"sessionId": "sess-abc"}\n', b'{"type": "assistant"}\n']
+        proc = _make_mock_proc(0, stdout_lines=stdout_lines)
+        session_log = tmp_path / "session.jsonl"
+
+        with patch("orca.orchestrator.worker.asyncio.create_subprocess_exec", return_value=proc):
+            worker = ClaudeCodeWorker(repo_root=tmp_path)
+            outcome = await worker.execute_raw("analyze this", tmp_path, session_log)
+
+        assert isinstance(outcome, WorkerSuccess)
+        assert outcome.session_id == "sess-abc"
+
+    async def test_raw_timeout_during_streaming(self, tmp_path: Path) -> None:
+        """Worker killed after timeout during stdout streaming -> WorkerFailure."""
+
+        class SlowLineIterator:
+            """Simulates a subprocess that never finishes writing stdout."""
+
+            def __aiter__(self) -> SlowLineIterator:
+                return self
+
+            async def __anext__(self) -> bytes:
+                await asyncio.sleep(100)  # hang forever
+                return b""
+
+        proc = MagicMock()
+        proc.returncode = -9
+        proc.stdout = SlowLineIterator()
+        proc.stdin = MagicMock()
+        proc.stdin.close = MagicMock()
+        proc.kill = MagicMock()
+        proc.wait = AsyncMock(return_value=-9)
+
+        session_log = tmp_path / "session.jsonl"
+
+        with patch("orca.orchestrator.worker.asyncio.create_subprocess_exec", return_value=proc):
+            worker = ClaudeCodeWorker(repo_root=tmp_path)
+            outcome = await worker.execute_raw("analyze", tmp_path, session_log, timeout=0.1)
+
+        assert isinstance(outcome, WorkerFailure)
+        assert "timeout" in outcome.error.lower() or "timed out" in outcome.error.lower()
+        proc.kill.assert_called_once()

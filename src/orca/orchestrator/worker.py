@@ -151,3 +151,68 @@ class ClaudeCodeWorker:
 
         # i. Return WorkerSuccess
         return WorkerSuccess(result=result, session_id=session_id)
+
+    async def execute_raw(
+        self,
+        prompt: str,
+        workdir: Path,
+        session_log_path: Path,
+        timeout: float | None = None,
+    ) -> WorkerOutcome:
+        """Run Claude with a pre-rendered prompt. No result.json parsing.
+
+        Unlike execute(), this accepts a ready-to-use prompt string and does not
+        read or validate a result file. Used for sidecar tasks like insights.
+
+        Returns WorkerSuccess(result={}) on exit code 0, WorkerFailure otherwise.
+        """
+        session_log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        proc = await asyncio.create_subprocess_exec(
+            "claude",
+            "--print",
+            "--output-format",
+            "stream-json",
+            "--verbose",
+            "--max-turns",
+            "50",
+            "--permission-mode",
+            "bypassPermissions",
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            cwd=workdir,
+            limit=1024 * 1024,
+        )
+
+        if proc.stdin is not None:
+            proc.stdin.write(prompt.encode())
+            proc.stdin.close()
+
+        session_id: str | None = None
+
+        async def _stream_and_wait() -> None:
+            nonlocal session_id
+            with session_log_path.open("wb") as log_file:
+                async for line in proc.stdout:  # type: ignore[union-attr]
+                    log_file.write(line)
+                    if session_id is None:
+                        try:
+                            msg = json.loads(line)
+                            session_id = msg.get("sessionId") or msg.get("session_id")
+                        except (json.JSONDecodeError, AttributeError):
+                            pass
+            await proc.wait()
+
+        try:
+            await asyncio.wait_for(_stream_and_wait(), timeout=timeout)
+        except TimeoutError:
+            proc.kill()
+            return WorkerFailure(error="insights worker timed out", session_id=session_id)
+
+        if proc.returncode != 0:
+            return WorkerFailure(
+                error=f"claude exited with non-zero exit code: {proc.returncode}",
+                session_id=session_id,
+            )
+
+        return WorkerSuccess(result={}, session_id=session_id)
