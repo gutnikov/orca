@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -181,8 +182,12 @@ class SessionSync:
         self._render_states: dict[str, _SessionRenderState] = {}
 
     def claude_projects_path(self, worktree_path: Path) -> Path:
-        """Derive ~/.claude/projects/{hash}/ from worktree path."""
-        project_hash = str(worktree_path).replace("/", "-").replace(".", "-")
+        """Derive ~/.claude/projects/{hash}/ from worktree path.
+
+        Claude Code replaces all non-alphanumeric characters (except dashes)
+        in the absolute path with dashes to form the project directory name.
+        """
+        project_hash = re.sub(r"[^a-zA-Z0-9-]", "-", str(worktree_path))
         return self.claude_projects_root / project_hash
 
     def find_transcript(
