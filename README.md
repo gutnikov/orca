@@ -1,10 +1,10 @@
 <p align="center">
-  <img src="docs/logo.png" width="200" alt="Orca">
+  <img src="docs/logo.png" width="300" alt="Orca">
 </p>
 
 <h1 align="center">Orca</h1>
 
-Orca runs multi-agent workflows on your codebase. You define a state machine in YAML — states, transitions, worker prompts — and Orca orchestrates Claude Code agents through it. Each agent gets its own git worktree, so they work in parallel without stepping on each other.
+Orca orchestrates fleets of AI agents that decompose, plan, build, and merge code — all defined as a YAML state machine with parallel workers and isolated git worktrees. One spec in, working code out.
 
 ![Orca TUI](docs/screenshots/tui.png)
 
