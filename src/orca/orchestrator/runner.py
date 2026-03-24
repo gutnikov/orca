@@ -51,6 +51,21 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+async def _git_branch_exists(branch_name: str, repo_root: Path) -> bool:
+    """Check if a git branch exists locally."""
+    proc = await asyncio.create_subprocess_exec(
+        "git",
+        "rev-parse",
+        "--verify",
+        branch_name,
+        cwd=str(repo_root),
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    await proc.communicate()
+    return proc.returncode == 0
+
+
 def resolve_config_path(repo_root: Path, workflow: str | None) -> Path:
     """Resolve the workflow config file path.
 
@@ -253,15 +268,24 @@ async def run(task_file: Path, branch_name: str, config_path: Path, insights_ena
 
         initial_effects.extend(recovered_effects)
     else:
-        # Fresh start — worktree creation also creates the branch via -b
-        # Create root worktree
+        # Fresh start
         root_issue_id = _generate_id()
-        worktree_path = await worktree_mgr.create(
-            issue_id=root_issue_id,
-            branch_name=branch_name,
-            parent_branch="HEAD",
-        )
-        _ = worktree_path  # worktree_path used internally by WorktreeManager
+
+        # Check if the branch already exists (e.g. user is on it).
+        # If so, use repo_root directly instead of creating a worktree.
+        branch_exists = await _git_branch_exists(branch_name, repo_root)
+        if branch_exists:
+            logger.info(
+                "Branch %s already exists — using repo root as root workdir",
+                branch_name,
+                extra={"event": "branch_reuse", "branch": branch_name},
+            )
+        else:
+            await worktree_mgr.create(
+                issue_id=root_issue_id,
+                branch_name=branch_name,
+                parent_branch="HEAD",
+            )
 
         # Create initial state and event
         state = State(issues={}, worker_queues={})
@@ -378,6 +402,14 @@ def main() -> None:
 
         app = OrcaApp(run_dir=run_dir, branch_name=branch_name, config=config, insights_enabled=args.insights)
         app.run()
+
+        # Surface orchestrator errors before exiting
+        if run_error is not None:
+            import sys
+            import traceback
+
+            print("\nOrchestrator error:", file=sys.stderr)
+            traceback.print_exception(type(run_error), run_error, run_error.__traceback__, file=sys.stderr)
 
         # TUI closed — force exit to kill orchestrator thread and any subprocesses
         import os
