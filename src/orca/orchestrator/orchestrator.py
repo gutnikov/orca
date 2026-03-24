@@ -175,6 +175,10 @@ class Orchestrator:
         if self._session_sync is not None:
             branch = self.branches.get(effect.issue_id) or effect.issue_id
             workdir = self.worktree_mgr.resolve(branch)
+            # If the worktree dir doesn't exist, the root issue is reusing the
+            # repo checkout directly — record repo_root instead.
+            if not workdir.exists() and self.repo_root is not None:
+                workdir = self.repo_root
             self._session_sync.manifest.append(
                 issue_id=effect.issue_id,
                 state=effect.state,
