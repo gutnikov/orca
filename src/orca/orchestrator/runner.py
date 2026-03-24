@@ -404,7 +404,16 @@ def main() -> None:
             print("\nOrchestrator error:", file=sys.stderr)
             traceback.print_exception(type(run_error), run_error, run_error.__traceback__, file=sys.stderr)
 
-        # TUI closed — force exit to kill orchestrator thread and any subprocesses
+        # Reset terminal before force-killing — SIGTERM would leave escape
+        # sequences (focus reporting, alternate screen) enabled.
+        import sys
+
+        sys.stdout.write("\x1b[?1004l")  # disable focus reporting
+        sys.stdout.write("\x1b[?1049l")  # exit alternate screen buffer
+        sys.stdout.write("\x1b[?25h")  # show cursor
+        sys.stdout.flush()
+
+        # Force exit to kill orchestrator thread and any subprocesses
         import os
         import signal
 

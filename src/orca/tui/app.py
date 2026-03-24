@@ -31,9 +31,10 @@ class OrcaApp(App[None]):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("r", "force_refresh", "Refresh"),
-        Binding("u", "update_transcript", "Update"),
+        Binding("r", "refresh_all", "Refresh"),
         Binding("n", "retry_failed", "Retry"),
+        Binding("h,left", "focus_tree", "Tree", show=False),
+        Binding("l,right", "focus_detail", "Detail", show=False),
         Binding("j", "scroll_detail_down", "Scroll ↓", show=False),
         Binding("k", "scroll_detail_up", "Scroll ↑", show=False),
     ]
@@ -85,9 +86,18 @@ class OrcaApp(App[None]):
         detail = self.query_one(IssueDetail)
         detail.tick_insights()
 
-    def action_force_refresh(self) -> None:
+    def action_refresh_all(self) -> None:
+        """Refresh state and content pane."""
         self._reader.reset()
         self._poll_state()
+        detail = self.query_one(IssueDetail)
+        detail.refresh_transcript()
+
+    def action_focus_tree(self) -> None:
+        self.query_one(IssueTree).focus()
+
+    def action_focus_detail(self) -> None:
+        self.query_one(IssueDetail).focus()
 
     def on_state_updated(self, message: StateUpdated) -> None:
         tree = self.query_one(IssueTree)
@@ -112,11 +122,6 @@ class OrcaApp(App[None]):
         detail = self.query_one(IssueDetail)
         insights_path = self._run_dir / "insights.md"
         detail.show_insights(insights_path)
-
-    def action_update_transcript(self) -> None:
-        """Manually refresh the transcript panel."""
-        detail = self.query_one(IssueDetail)
-        detail.refresh_transcript()
 
     def _update_status(self) -> None:
         if self._state is None:

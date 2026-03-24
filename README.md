@@ -166,10 +166,10 @@ states:
 | Key | Action |
 |-----|--------|
 | `q` | Quit |
-| `r` | Force refresh |
-| `u` | Update transcript panel |
+| `r` | Refresh state and content pane |
 | `n` | Retry failed issue |
-| `j` / `k` | Scroll transcript down / up |
+| `h` / `l` or Left / Right | Focus tree / content panel |
+| `j` / `k` | Scroll content down / up |
 
 ## Development
 
