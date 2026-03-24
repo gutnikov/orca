@@ -119,7 +119,14 @@ class Orchestrator:
         """Ensure a worktree exists for the issue, creating one if needed."""
         existing_branch = self.branches.get(issue_id)
         if existing_branch is not None:
-            return self.worktree_mgr.resolve(existing_branch)
+            worktree_path = self.worktree_mgr.resolve(existing_branch)
+            if worktree_path.exists():
+                return worktree_path
+            # Branch registered but no worktree dir — root issue reusing an
+            # existing branch.  Fall back to the repo root.
+            if self.repo_root is not None:
+                return self.repo_root
+            return worktree_path
 
         # Derive a human-readable branch name from the issue title
         issue = self.state.issues[issue_id]
