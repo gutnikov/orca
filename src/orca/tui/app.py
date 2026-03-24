@@ -22,6 +22,7 @@ class OrcaApp(App[None]):
     """Orca TUI — interactive viewer for orchestrator runs."""
 
     THEME = "flexoki"
+    ENABLE_MOUSE_SUPPORT = False
 
     CSS = """
     #main-panels {
@@ -34,6 +35,8 @@ class OrcaApp(App[None]):
         Binding("r", "force_refresh", "Refresh"),
         Binding("u", "update_transcript", "Update"),
         Binding("n", "retry_failed", "Retry"),
+        Binding("j", "scroll_detail_down", "Scroll ↓", show=False),
+        Binding("k", "scroll_detail_up", "Scroll ↑", show=False),
     ]
 
     def __init__(
@@ -147,6 +150,14 @@ class OrcaApp(App[None]):
         retry_dir.mkdir(parents=True, exist_ok=True)
         (retry_dir / issue_id).touch()
         self.notify(f"Retry requested for {issue_id[:8]}...")
+
+    def action_scroll_detail_down(self) -> None:
+        """Scroll the detail panel down."""
+        self.query_one(IssueDetail).scroll_down()
+
+    def action_scroll_detail_up(self) -> None:
+        """Scroll the detail panel up."""
+        self.query_one(IssueDetail).scroll_up()
 
     def _find_root_issue(self) -> str | None:
         if self._state is None:
