@@ -58,3 +58,33 @@ def render_prompt(
     }
 
     return template.render(context)
+
+
+def render_insights_prompt(
+    template_path: Path,
+    state: dict[str, Any],
+    transcripts: dict[str, str],
+    mode: str,
+    insights_so_far: str,
+    output_path: str,
+) -> str:
+    """Render the insights prompt template."""
+    if not template_path.exists():
+        raise FileNotFoundError(f"Template not found: {template_path}")
+
+    env = Environment(
+        loader=AbsolutePathLoader(),
+        autoescape=False,
+    )
+
+    template = env.get_template(str(template_path))
+
+    context = {
+        "state": state,
+        "transcripts": transcripts,
+        "mode": mode,
+        "insights_so_far": insights_so_far,
+        "output_path": output_path,
+    }
+
+    return template.render(context)

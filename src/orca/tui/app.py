@@ -9,7 +9,7 @@ from textual.containers import Horizontal
 from textual.widgets import Footer, Header
 
 from orca.engine.types import State, StateMachineConfig
-from orca.tui.messages import IssueSelected, StateUpdated, WorkerRunSelected
+from orca.tui.messages import InsightsSelected, IssueSelected, StateUpdated, WorkerRunSelected
 from orca.tui.state_reader import StateReader
 from orca.tui.widgets.issue_detail import IssueDetail
 from orca.tui.widgets.issue_tree import IssueTree
@@ -98,6 +98,11 @@ class OrcaApp(App[None]):
             worktree_path=message.worktree_path,
             claude_session_id=message.claude_session_id,
         )
+
+    def on_insights_selected(self, message: InsightsSelected) -> None:
+        detail = self.query_one(IssueDetail)
+        insights_path = self._run_dir / "insights.md"
+        detail.show_insights(insights_path)
 
     def action_update_transcript(self) -> None:
         """Manually refresh the transcript panel."""

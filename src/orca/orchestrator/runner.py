@@ -140,7 +140,7 @@ def _recover_effects(
     return recovered_events, recovered_effects
 
 
-async def run(task_file: Path, branch_name: str) -> None:
+async def run(task_file: Path, branch_name: str, insights_enabled: bool = False) -> None:
     """Main entry point: read task file, set up state, run orchestrator."""
     repo_root = Path.cwd()
 
@@ -225,6 +225,7 @@ async def run(task_file: Path, branch_name: str) -> None:
 
     # Set up worker, session sync, and orchestrator
     worker = ClaudeCodeWorker(repo_root)
+    insights_worker = worker if insights_enabled else None
 
     from orca.orchestrator.orchestrator import Orchestrator
     from orca.orchestrator.session_sync import SessionSync
@@ -245,6 +246,7 @@ async def run(task_file: Path, branch_name: str) -> None:
         worktree_mgr=worktree_mgr,
         repo_root=repo_root,
         session_sync=session_sync,
+        insights_worker=insights_worker,
     )
 
     try:
@@ -272,6 +274,7 @@ def main() -> None:
     run_parser.add_argument("task_file", type=Path, help="Path to the task file")
     run_parser.add_argument("branch_name", type=str, help="Git branch name for this run")
     run_parser.add_argument("--headless", action="store_true", help="Run without TUI (headless mode)")
+    run_parser.add_argument("--insights", action="store_true", help="Enable insights agent for progress monitoring")
 
     watch_parser = subparsers.add_parser("watch", help="Watch orchestrator state in a TUI dashboard")
     watch_parser.add_argument("branch_name", type=str, help="Git branch name of the run to watch")
@@ -280,7 +283,7 @@ def main() -> None:
 
     if args.command == "run":
         if args.headless:
-            asyncio.run(run(args.task_file, args.branch_name))
+            asyncio.run(run(args.task_file, args.branch_name, insights_enabled=args.insights))
         else:
             import threading
 
@@ -289,7 +292,7 @@ def main() -> None:
             def run_orchestrator() -> None:
                 nonlocal run_error
                 try:
-                    asyncio.run(run(args.task_file, args.branch_name))
+                    asyncio.run(run(args.task_file, args.branch_name, insights_enabled=args.insights))
                 except BaseException as e:
                     run_error = e
 

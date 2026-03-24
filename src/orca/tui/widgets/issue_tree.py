@@ -8,7 +8,7 @@ from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
 from orca.engine.types import Issue, State
-from orca.tui.messages import IssueSelected, WorkerRunSelected
+from orca.tui.messages import InsightsSelected, IssueSelected, WorkerRunSelected
 
 # Braille dot spinner frames
 _SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -119,6 +119,20 @@ class IssueTree(Tree[str]):
         for iid, issue in roots:
             self._add_issue_node(self.root, iid, issue, state)
 
+        # Add Insights node if insights sessions exist
+        insights_sessions = [s for s in sessions if s.get("issue_id") == "__insights__"]
+        if insights_sessions:
+            insights_label = Text()
+            insights_label.append("◆ ", style="bold cyan")
+            insights_label.append("Insights", style="cyan")
+            insights_node = self.root.add(insights_label, data="insights")
+            insights_node.expand()
+            # Show last 5 insights sessions
+            for session in insights_sessions[-5:]:
+                run_label = self._worker_run_label(str(session.get("state", "insights")), session)
+                session_id = str(session.get("session_id", ""))
+                insights_node.add_leaf(run_label, data=f"session:{session_id}")
+
         self.root.expand()
 
         # Restore cursor, or select first root issue on initial load.
@@ -199,6 +213,8 @@ class IssueTree(Tree[str]):
                     claude_session_id=claude_session_id,
                 )
             )
+        elif data == "insights":
+            self.post_message(InsightsSelected())
 
     def refresh_tick(self) -> None:
         """Called by the app timer to advance the spinner without full rebuild."""
