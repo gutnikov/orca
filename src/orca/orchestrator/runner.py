@@ -77,6 +77,41 @@ def resolve_config_path(repo_root: Path, workflow: str | None) -> Path:
     raise SystemExit(1)
 
 
+def resolve_branch(branch: str | None) -> str:
+    """Resolve the branch name, defaulting to current git branch.
+
+    Args:
+        branch: Explicit branch name, or None to auto-detect.
+
+    Returns:
+        Resolved branch name.
+
+    Raises:
+        SystemExit: If auto-detection fails (detached HEAD, not a git repo).
+    """
+    import subprocess
+    import sys
+
+    if branch is not None:
+        return branch
+
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        name = result.stdout.strip()
+        if result.returncode != 0 or not name or name == "HEAD":
+            print("Error: cannot detect current branch (detached HEAD?). Specify with -b.", file=sys.stderr)
+            raise SystemExit(1)
+        return name
+    except FileNotFoundError:
+        print("Error: git not found. Specify branch with -b.", file=sys.stderr)
+        raise SystemExit(1) from None
+
+
 def _find_root_issue(state: State) -> str:
     """Find the issue with decomposed_from is None (the root issue)."""
     for issue_id, issue in state.issues.items():
