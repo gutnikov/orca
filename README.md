@@ -91,26 +91,18 @@ Save it as `task.md` (or any filename).
 ### 4. Run it
 
 ```bash
-orca task.md -b my-feature-branch
-```
-
-Orca will:
-- Create a git branch `my-feature-branch`
-- Spawn a worktree per agent
-- Route each issue through the state machine
-- Show live progress in the TUI
-
-If you omit `-b`, orca uses the current git branch as the base and runs workers from the repo root:
-
-```bash
 orca task.md
 ```
+
+Orca uses the current git branch as the base, then:
+- Spawns a worktree per agent
+- Routes each issue through the state machine
+- Shows live progress in the TUI
 
 ## Options
 
 | Flag | Description |
 |------|-------------|
-| `-b BRANCH` | Git branch name. Default: current branch. |
 | `-w WORKFLOW` | Workflow shorthand. `-w develop` loads `orca.develop.yml`. Default: `orca.yml`. |
 | `--headless` | Run without TUI, log to file. |
 | `--insights` | Enable progress monitoring agent. |

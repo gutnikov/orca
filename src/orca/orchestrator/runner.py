@@ -92,23 +92,17 @@ def resolve_config_path(repo_root: Path, workflow: str | None) -> Path:
     raise SystemExit(1)
 
 
-def resolve_branch(branch: str | None) -> str:
-    """Resolve the branch name, defaulting to current git branch.
-
-    Args:
-        branch: Explicit branch name, or None to auto-detect.
+def resolve_branch() -> str:
+    """Detect the current git branch.
 
     Returns:
-        Resolved branch name.
+        Current branch name.
 
     Raises:
-        SystemExit: If auto-detection fails (detached HEAD, not a git repo).
+        SystemExit: If detection fails (detached HEAD, not a git repo).
     """
     import subprocess
     import sys
-
-    if branch is not None:
-        return branch
 
     try:
         result = subprocess.run(
@@ -358,10 +352,9 @@ async def run(task_file: Path, branch_name: str, config_path: Path, insights_ena
 
 
 def main() -> None:
-    """CLI entry point: orca <task_file> [-b branch] [-w workflow] [--headless] [--insights]."""
+    """CLI entry point: orca <task_file> [-w workflow] [--headless] [--insights]."""
     parser = argparse.ArgumentParser(prog="orca", description="Orca orchestrator CLI")
     parser.add_argument("task_file", type=Path, help="Path to the task file")
-    parser.add_argument("-b", "--branch", type=str, default=None, help="Git branch name (default: current branch)")
     parser.add_argument(
         "-w", "--workflow", type=str, default=None, help="Workflow name shorthand (e.g. 'develop' -> orca.develop.yml)"
     )
@@ -372,7 +365,7 @@ def main() -> None:
 
     repo_root = Path.cwd()
     config_path = resolve_config_path(repo_root, args.workflow)
-    branch_name = resolve_branch(args.branch)
+    branch_name = resolve_branch()
 
     if args.headless:
         asyncio.run(run(args.task_file, branch_name, config_path, insights_enabled=args.insights))

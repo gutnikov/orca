@@ -15,7 +15,7 @@ Two packages:
 - `uv run ruff format --check .` — format check
 - `uv run mypy src/` — type-check
 - `uv run pytest` — run tests
-- `orca <task.md> [-b branch] [-w workflow] [--headless] [--insights]` — run a workflow
+- `orca <task.md> [-w workflow] [--headless] [--insights]` — run a workflow
 
 ## Code Style
 
