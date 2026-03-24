@@ -69,7 +69,6 @@ class OrcaApp(App[None]):
         self._poll_state()
         self.set_interval(1.5, self._poll_state)
         self.set_interval(0.15, self._tick_spinners)
-        self.set_interval(1.0, self._tick_insights)
 
     def _poll_state(self) -> None:
         result = self._reader.read()
@@ -82,14 +81,8 @@ class OrcaApp(App[None]):
         tree = self.query_one(IssueTree)
         tree.refresh_tick()
 
-    def _tick_insights(self) -> None:
-        detail = self.query_one(IssueDetail)
-        detail.tick_insights()
-
     def action_refresh_all(self) -> None:
-        """Refresh state and content pane."""
-        self._reader.reset()
-        self._poll_state()
+        """Refresh the content pane (transcript or insights)."""
         detail = self.query_one(IssueDetail)
         detail.refresh_transcript()
 

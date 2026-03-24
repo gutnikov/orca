@@ -1,16 +1,13 @@
 from __future__ import annotations
 
-import time
 from collections.abc import Generator
 from pathlib import Path
 
 from textual.containers import VerticalScroll
 from textual.widget import Widget
-from textual.widgets import Markdown, ProgressBar, Static
+from textual.widgets import Markdown
 
 from orca.engine.types import State
-
-_INSIGHTS_INTERVAL = 300.0
 
 _PLACEHOLDER = "*Select an issue or worker run from the tree*"
 
@@ -23,21 +20,11 @@ class IssueDetail(VerticalScroll):
         width: 1fr;
         padding: 1;
     }
-    .insights-progress {
-        display: none;
-        height: auto;
-        margin-bottom: 1;
-    }
-    IssueDetail.show-insights-progress .insights-progress {
-        display: block;
-    }
     """
 
     def __init__(self, transcripts_dir: Path | None = None) -> None:
         super().__init__(id="issue-detail")
         self._markdown = Markdown(_PLACEHOLDER)
-        self._progress_label = Static("", classes="insights-progress")
-        self._progress_bar = ProgressBar(total=100, show_eta=False, show_percentage=False, classes="insights-progress")
         self._transcripts_dir = transcripts_dir
         # For .md-based transcript viewing (completed sessions)
         self._current_transcript_path: Path | None = None
@@ -47,15 +34,8 @@ class IssueDetail(VerticalScroll):
         self._jsonl_offset: int = 0
         self._jsonl_last_type: str = ""
         self._rendered_md: str = ""
-        # Insights countdown
-        self._insights_path: Path | None = None
-        self._insights_start_time: float = 0.0
-        self._insights_last_mtime: float = 0.0
-        self._showing_insights: bool = False
 
     def compose(self) -> Generator[Widget, None, None]:
-        yield self._progress_label
-        yield self._progress_bar
         yield self._markdown
 
     def refresh_transcript(self) -> None:
@@ -85,7 +65,7 @@ class IssueDetail(VerticalScroll):
             self.scroll_end(animate=False)
 
     def _refresh_md(self) -> None:
-        """Re-read .md file if mtime changed (for completed sessions)."""
+        """Re-read .md file if mtime changed (for completed sessions or insights)."""
         if self._current_transcript_path is None or not self._current_transcript_path.exists():
             return
         mtime = self._current_transcript_path.stat().st_mtime
@@ -105,50 +85,6 @@ class IssueDetail(VerticalScroll):
         self._jsonl_offset = 0
         self._jsonl_last_type = ""
         self._rendered_md = ""
-        self._insights_path = None
-        self._showing_insights = False
-        self.remove_class("show-insights-progress")
-
-    def _update_insights_progress(self) -> None:
-        """Update the insights countdown bar."""
-        if self._insights_path is None:
-            self._showing_insights = False
-            self.remove_class("show-insights-progress")
-            return
-
-        self._showing_insights = True
-        self.add_class("show-insights-progress")
-
-        # Determine elapsed time since last insights run (or since start)
-        if self._insights_last_mtime > 0:
-            elapsed = time.time() - self._insights_last_mtime
-        else:
-            elapsed = time.monotonic() - self._insights_start_time
-
-        remaining = max(0, _INSIGHTS_INTERVAL - elapsed)
-        progress = min(100, (elapsed / _INSIGHTS_INTERVAL) * 100)
-
-        minutes = int(remaining) // 60
-        seconds = int(remaining) % 60
-        self._progress_label.update(f"Next insights in {minutes}:{seconds:02d}")
-        self._progress_bar.update(progress=progress)
-
-    def tick_insights(self) -> None:
-        """Called by the app on an interval to update the insights countdown."""
-        if not self._showing_insights or self._insights_path is None:
-            return
-
-        # Check if insights file appeared or was updated
-        if self._insights_path.exists():
-            mtime = self._insights_path.stat().st_mtime
-            if mtime != self._insights_last_mtime:
-                self._insights_last_mtime = mtime
-                self._transcript_mtime = mtime
-                self._current_transcript_path = self._insights_path
-                content = self._insights_path.read_text()
-                self._markdown.update(content or "*Insights file is empty — waiting for first analysis*")
-
-        self._update_insights_progress()
 
     def show_issue(self, issue_id: str, state: State) -> None:
         self.stop_auto_refresh()
@@ -234,21 +170,15 @@ class IssueDetail(VerticalScroll):
         return None
 
     def show_insights(self, insights_path: Path) -> None:
-        """Display the contents of insights.md with a countdown to next run."""
+        """Display the contents of insights.md. Press r to refresh."""
         self.stop_auto_refresh()
-        self._insights_path = insights_path
-        if not insights_path.exists():
-            self._insights_start_time = time.monotonic()
-            self._insights_last_mtime = 0.0
-            self._markdown.update("*Waiting for first insights run...*")
-            self._update_insights_progress()
-            return
         self._current_transcript_path = insights_path
-        self._insights_last_mtime = insights_path.stat().st_mtime
-        self._transcript_mtime = self._insights_last_mtime
+        if not insights_path.exists():
+            self._markdown.update("*Waiting for first insights run... Press `r` to refresh.*")
+            return
+        self._transcript_mtime = insights_path.stat().st_mtime
         content = insights_path.read_text()
         self._markdown.update(content or "*Insights file is empty — waiting for first analysis*")
-        self._update_insights_progress()
 
     def clear(self) -> None:
         self.stop_auto_refresh()
