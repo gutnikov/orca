@@ -173,7 +173,7 @@ class IssueDetail(VerticalScroll):
         """Display the contents of insights.md."""
         self.stop_auto_refresh()
         if not insights_path.exists():
-            self._markdown.update("*Waiting for first insights run (~90s)...*")
+            self._markdown.update("*Waiting for first insights run (~5m)...*")
             return
         self._current_transcript_path = insights_path
         self._transcript_mtime = insights_path.stat().st_mtime

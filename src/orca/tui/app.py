@@ -22,7 +22,6 @@ class OrcaApp(App[None]):
     """Orca TUI — interactive viewer for orchestrator runs."""
 
     THEME = "flexoki"
-    ENABLE_MOUSE_SUPPORT = False
 
     CSS = """
     #main-panels {
