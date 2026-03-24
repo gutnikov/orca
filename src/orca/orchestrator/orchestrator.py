@@ -182,7 +182,7 @@ class Orchestrator:
         backoff = 5.0 * (2**failures) if failures > 0 else 0.0
 
         task: asyncio.Task[WorkerOutcome] = asyncio.create_task(
-            self._run_worker_with_backoff(effect, worker, state_def.worker.prompt, backoff)
+            self._run_worker_with_backoff(effect, worker, state_def.worker.prompt, backoff, tracking_id)
         )
         self._in_flight[task] = (effect.issue_id, tracking_id)
         logger.info(
@@ -207,7 +207,12 @@ class Orchestrator:
         return self.root_branch
 
     async def _run_worker_with_backoff(
-        self, effect: DispatchWorkerEffect, worker: Worker, prompt_template: str, backoff: float
+        self,
+        effect: DispatchWorkerEffect,
+        worker: Worker,
+        prompt_template: str,
+        backoff: float,
+        tracking_id: str,
     ) -> WorkerOutcome:
         """Wait for backoff delay, then run the worker."""
         if backoff > 0:
@@ -218,11 +223,18 @@ class Orchestrator:
                 extra={"event": "worker_backoff", "issue_id": effect.issue_id, "backoff_seconds": backoff},
             )
             await asyncio.sleep(backoff)
-        return await self._run_worker(effect, worker, prompt_template)
+        return await self._run_worker(effect, worker, prompt_template, tracking_id)
 
-    async def _run_worker(self, effect: DispatchWorkerEffect, worker: Worker, prompt_template: str) -> WorkerOutcome:
+    async def _run_worker(
+        self, effect: DispatchWorkerEffect, worker: Worker, prompt_template: str, tracking_id: str
+    ) -> WorkerOutcome:
         """Create worktree if needed, then execute the worker."""
         workdir = await self._ensure_worktree(effect.issue_id)
+
+        # Update the manifest with the real worktree path (may differ from the
+        # preliminary path recorded in _spawn_worker when the branch didn't exist yet).
+        if self._session_sync is not None:
+            self._session_sync.manifest.update_worktree_path(tracking_id, str(workdir))
         result_path = workdir / ".orca" / "result.json"
 
         prompt_path: Path | None = None

@@ -106,6 +106,17 @@ class SessionManifest:
         )
         self._write(entries)
 
+    def update_worktree_path(self, session_id: str, worktree_path: str) -> None:
+        """Update the worktree_path for a session (e.g. after worktree creation resolves the real path)."""
+        entries = self.read()
+        for entry in entries:
+            if entry["session_id"] == session_id:
+                if entry["worktree_path"] != worktree_path:
+                    entry["worktree_path"] = worktree_path
+                    self._write(entries)
+                return
+        logger.warning("update_worktree_path: session %s not found in manifest", session_id)
+
     def mark_completed(self, session_id: str, completed_at: str, *, claude_session_id: str | None = None) -> None:
         entries = self.read()
         for entry in entries:
