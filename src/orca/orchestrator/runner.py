@@ -174,11 +174,13 @@ async def run(task_file: Path, branch_name: str, insights_enabled: bool = False)
             extra={"event": "run_resumed", "branch": branch_name},
         )
 
-        # Mark orphan sessions from the previous (crashed) run as completed
+        # Clean up sessions from the previous (crashed) run
         from orca.orchestrator.session_sync import SessionManifest
 
         run_dir = repo_root / ".orca" / "runs" / branch_name
-        SessionManifest(run_dir).mark_orphans_completed(_now())
+        manifest = SessionManifest(run_dir)
+        manifest.mark_orphans_completed(_now())
+        manifest.backfill_claude_session_ids()
 
         recovered_events, recovered_effects = _recover_effects(
             config, state, branches, worktree_mgr, repo_root, _generate_id, _now
@@ -319,7 +321,7 @@ def main() -> None:
             if config_path.exists():
                 config = parse_config(config_path.read_text())
 
-            app = OrcaApp(run_dir=run_dir, branch_name=args.branch_name, config=config)
+            app = OrcaApp(run_dir=run_dir, branch_name=args.branch_name, config=config, insights_enabled=args.insights)
             app.run()
 
             # TUI closed — force exit to kill orchestrator thread and any subprocesses

@@ -61,13 +61,14 @@ class IssueTree(Tree[str]):
     }
     """
 
-    def __init__(self) -> None:
+    def __init__(self, insights_enabled: bool = False) -> None:
         super().__init__("", id="issue-tree")
         self.show_root = False
         self.show_guides = False
         self._sessions: list[dict[str, Any]] = []
         self._state: State | None = None
         self._tick: int = 0
+        self._insights_enabled = insights_enabled
 
     def _issue_label(self, issue: Issue) -> Text:
         title = str(issue.fields.get("title", "untitled"))
@@ -119,19 +120,12 @@ class IssueTree(Tree[str]):
         for iid, issue in roots:
             self._add_issue_node(self.root, iid, issue, state)
 
-        # Add Insights node if insights sessions exist
-        insights_sessions = [s for s in sessions if s.get("issue_id") == "__insights__"]
-        if insights_sessions:
+        # Add Insights leaf node when insights are enabled
+        if self._insights_enabled:
             insights_label = Text()
             insights_label.append("◆ ", style="bold cyan")
             insights_label.append("Insights", style="cyan")
-            insights_node = self.root.add(insights_label, data="insights")
-            insights_node.expand()
-            # Show last 5 insights sessions
-            for session in insights_sessions[-5:]:
-                run_label = self._worker_run_label(str(session.get("state", "insights")), session)
-                session_id = str(session.get("session_id", ""))
-                insights_node.add_leaf(run_label, data=f"session:{session_id}")
+            self.root.add_leaf(insights_label, data="insights")
 
         self.root.expand()
 
@@ -151,10 +145,6 @@ class IssueTree(Tree[str]):
                         issue_data = f"issue:{s.get('issue_id', '')}"
                         self._restore_cursor(issue_data)
                         break
-        elif roots and self.root.children:
-            self.move_cursor(self.root.children[0])
-            first_id = roots[0][0]
-            self.post_message(IssueSelected(first_id))
 
     def _add_issue_node(self, parent_node: TreeNode[str], issue_id: str, issue: Issue, state: State) -> None:
         node = parent_node.add(self._issue_label(issue), data=f"issue:{issue_id}")

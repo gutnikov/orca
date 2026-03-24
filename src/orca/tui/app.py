@@ -41,12 +41,14 @@ class OrcaApp(App[None]):
         run_dir: Path,
         branch_name: str,
         config: StateMachineConfig | None = None,
+        insights_enabled: bool = False,
     ) -> None:
         super().__init__()
         self._reader = StateReader(run_dir)
         self._run_dir = run_dir
         self._branch_name = branch_name
         self._config = config
+        self._insights_enabled = insights_enabled
         self._state: State | None = None
         # run_dir is .orca/runs/{branch}, so repo_root is 3 levels up
         repo_root = run_dir.parent.parent.parent
@@ -55,7 +57,7 @@ class OrcaApp(App[None]):
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="main-panels"):
-            yield IssueTree()
+            yield IssueTree(insights_enabled=self._insights_enabled)
             yield IssueDetail(transcripts_dir=self._transcripts_dir)
         yield Footer()
 

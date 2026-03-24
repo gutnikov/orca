@@ -3,12 +3,67 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from orca.orchestrator.transcript import render_incremental
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_session_id_from_log(candidates: list[Path], started_at: str) -> str | None:
+    """Extract sessionId from the best-matching session log file.
+
+    Picks the candidate whose filename timestamp is closest to started_at,
+    then reads the first few lines to find the sessionId field.
+    """
+    best: Path | None = None
+    if len(candidates) == 1:
+        best = candidates[0]
+    elif started_at:
+        # Parse started_at and match to filename timestamp (e.g. "implementing-20260323T194801.jsonl")
+        try:
+            target = datetime.fromisoformat(started_at)
+        except ValueError:
+            best = candidates[-1]  # fallback to latest
+        else:
+            best_delta = float("inf")
+            for c in candidates:
+                # Extract timestamp from filename: {state}-{YYYYMMDDTHHMMSS}.jsonl
+                stem = c.stem  # e.g. "implementing-20260323T194801"
+                parts = stem.rsplit("-", 1)
+                if len(parts) != 2:
+                    continue
+                try:
+                    file_dt = datetime.strptime(parts[1], "%Y%m%dT%H%M%S")
+                    file_dt = file_dt.replace(tzinfo=target.tzinfo)
+                    delta = abs((file_dt - target).total_seconds())
+                    if delta < best_delta:
+                        best_delta = delta
+                        best = c
+                except ValueError:
+                    continue
+    if best is None:
+        best = candidates[-1]
+
+    # Read first few lines to find sessionId
+    try:
+        with best.open() as f:
+            for _ in range(10):
+                line = f.readline()
+                if not line:
+                    break
+                try:
+                    msg = json.loads(line)
+                    sid = msg.get("sessionId") or msg.get("session_id")
+                    if sid:
+                        return str(sid)
+                except (json.JSONDecodeError, AttributeError):
+                    continue
+    except OSError:
+        pass
+    return None
 
 
 @dataclass
@@ -73,6 +128,35 @@ class SessionManifest:
         if count:
             self._write(entries)
             logger.info("Marked %d orphan session(s) as completed", count)
+        return count
+
+    def backfill_claude_session_ids(self) -> int:
+        """Populate claude_session_id for entries missing it by scanning session log files.
+
+        Matches manifest entries to {worktree}/.orca/sessions/{state}-*.jsonl files
+        by state name, then extracts the real sessionId from the first JSON line.
+        """
+        entries = self.read()
+        count = 0
+        for entry in entries:
+            if entry.get("claude_session_id"):
+                continue
+            worktree = Path(entry["worktree_path"])
+            sessions_dir = worktree / ".orca" / "sessions"
+            if not sessions_dir.is_dir():
+                continue
+            state = entry.get("state", "")
+            candidates = sorted(sessions_dir.glob(f"{state}-*.jsonl"))
+            if not candidates:
+                continue
+            # Pick best match by timestamp proximity to started_at
+            claude_id = _extract_session_id_from_log(candidates, entry.get("started_at", ""))
+            if claude_id:
+                entry["claude_session_id"] = claude_id
+                count += 1
+        if count:
+            self._write(entries)
+            logger.info("Backfilled claude_session_id for %d session(s)", count)
         return count
 
     def _write(self, entries: list[dict[str, Any]]) -> None:
