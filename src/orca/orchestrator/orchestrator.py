@@ -59,7 +59,7 @@ class Orchestrator:
         repo_root: Path | None = None,
         session_sync: SessionSync | None = None,
         insights_worker: ClaudeCodeWorker | None = None,
-        insights_interval: float = 90.0,
+        insights_interval: float = 300.0,
         insights_timeout: float = 120.0,
     ) -> None:
         self.config = config
