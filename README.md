@@ -91,7 +91,7 @@ Save it as `task.md` (or any filename).
 ### 4. Run it
 
 ```bash
-orca run task.md my-feature-branch
+orca task.md -b my-feature-branch
 ```
 
 Orca will:
@@ -100,20 +100,14 @@ Orca will:
 - Route each issue through the state machine
 - Show live progress in the TUI
 
-### 5. Watch a running workflow
-
-Open a second terminal to observe without controlling:
-
-```bash
-orca watch my-feature-branch
-```
-
 ## Options
 
 ```bash
-orca run task.md branch-name              # run with TUI
-orca run task.md branch-name --headless   # run without TUI
-orca run task.md branch-name --insights   # enable progress monitoring agent
+orca task.md -b branch-name              # run with TUI (branch explicit)
+orca task.md                             # run with TUI (branch = current)
+orca task.md --headless                  # run without TUI
+orca task.md -w develop                  # use orca.develop.yml workflow
+orca task.md --insights                  # enable progress monitoring agent
 ```
 
 ## Workflow features
