@@ -150,22 +150,23 @@ class TestSessionSync:
 
         assert result == transcript
 
-    def test_find_transcript_fallback_scan(self, tmp_path: Path) -> None:
-        """Fall back to scanning all project dirs when derived path is wrong."""
+    def test_find_transcript_by_claude_session_id(self, tmp_path: Path) -> None:
+        """Find transcript using claude_session_id when tracking ID doesn't match."""
         sync = SessionSync(
             run_dir=tmp_path / "runs" / "main",
             transcripts_dir=tmp_path / "transcripts",
             claude_projects_root=tmp_path / "claude-projects",
         )
-        # Create transcript in an unexpected project dir (simulates changed hash algo)
-        other_dir = tmp_path / "claude-projects" / "some-other-hash"
-        other_dir.mkdir(parents=True)
-        transcript = other_dir / "sess-aaa.jsonl"
+        # Create transcript with the real Claude session ID
+        projects_dir = tmp_path / "claude-projects" / "-tmp-worktrees-main"
+        projects_dir.mkdir(parents=True)
+        transcript = projects_dir / "real-claude-id.jsonl"
         transcript.write_text('{"type":"system"}\n')
 
         result = sync.find_transcript(
-            session_id="sess-aaa",
+            session_id="tracking-uuid",
             worktree_path=Path("/tmp/worktrees/main"),
+            claude_session_id="real-claude-id",
         )
 
         assert result == transcript
@@ -208,17 +209,17 @@ class TestSessionSync:
 
         assert sync.needs_render(entry, tmp_path / "nonexistent.md")
 
-    def test_needs_render_completed_and_exists(self, tmp_path: Path) -> None:
-        """Skip render when completed and target exists."""
+    def test_needs_render_completed_and_exists_no_render_state(self, tmp_path: Path) -> None:
+        """Needs render when completed + exists but never synced (no render state)."""
         sync = SessionSync(
             run_dir=tmp_path / "runs" / "main",
             transcripts_dir=tmp_path / "transcripts",
         )
         target = tmp_path / "output.md"
         target.write_text("rendered")
-        entry: dict[str, Any] = {"completed_at": "2026-03-22T10:10:00Z"}
+        entry: dict[str, Any] = {"completed_at": "2026-03-22T10:10:00Z", "session_id": "sess-x"}
 
-        assert not sync.needs_render(entry, target)
+        assert sync.needs_render(entry, target)
 
     def test_needs_render_still_running(self, tmp_path: Path) -> None:
         """Re-render when session still running even if target exists."""

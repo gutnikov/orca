@@ -30,6 +30,22 @@ def _elapsed_str(started_at: str) -> str:
         return ""
 
 
+def _duration_str(started_at: str, completed_at: str) -> str:
+    """Format duration between two ISO timestamps."""
+    try:
+        start = datetime.fromisoformat(started_at)
+        end = datetime.fromisoformat(completed_at)
+        total = int((end - start).total_seconds())
+        if total < 0:
+            total = 0
+        minutes, seconds = divmod(total, 60)
+        if minutes > 0:
+            return f"{minutes}m {seconds:02d}s"
+        return f"{seconds}s"
+    except (ValueError, TypeError):
+        return ""
+
+
 class IssueTree(Tree[str]):
     """Hierarchical tree view of issues with worker runs as children."""
 
@@ -57,13 +73,13 @@ class IssueTree(Tree[str]):
         title = str(issue.fields.get("title", "untitled"))
         label = Text()
         if issue.failure_count > 0 and not issue.worker_active:
-            label.append("* ", style="bold red")
+            label.append("• ", style="bold red")
             label.append(title)
         elif issue.state == "done":
-            label.append("* ", style="bold green")
+            label.append("• ", style="bold green")
             label.append(title)
         else:
-            label.append("* ", style="dim")
+            label.append("• ", style="dim")
             label.append(title)
             label.append(f" [{issue.state}]", style="dim")
         return label
@@ -81,6 +97,9 @@ class IssueTree(Tree[str]):
         else:
             label.append("  ", style="green")
             label.append(state_name, style="dim")
+            duration = _duration_str(str(session.get("started_at", "")), str(session.get("completed_at", "")))
+            if duration:
+                label.append(f" - {duration}", style="dim")
         return label
 
     def update_state(self, state: State, sessions: list[dict[str, Any]]) -> None:
@@ -171,7 +190,15 @@ class IssueTree(Tree[str]):
             session = next((s for s in self._sessions if s.get("session_id") == session_id), None)
             active = session is not None and session.get("completed_at") is None
             worktree_path = str(session.get("worktree_path", "")) if session else ""
-            self.post_message(WorkerRunSelected(session_id, active=active, worktree_path=worktree_path))
+            claude_session_id = str(session.get("claude_session_id", "")) if session else ""
+            self.post_message(
+                WorkerRunSelected(
+                    session_id,
+                    active=active,
+                    worktree_path=worktree_path,
+                    claude_session_id=claude_session_id,
+                )
+            )
 
     def refresh_tick(self) -> None:
         """Called by the app timer to advance the spinner without full rebuild."""

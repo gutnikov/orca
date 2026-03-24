@@ -69,17 +69,34 @@ def _recover_effects(
     generate_id: Callable[[], str],
     now: Callable[[], str],
 ) -> tuple[list[WorkerResultEvent], list[DispatchWorkerEffect]]:
-    """For issues with worker_active=True, check for existing result files.
+    """Recover in-flight workers and retry exhausted-retry issues on resume.
 
     Returns:
         recovered_events: WorkerResultEvents from valid result files.
-        recovered_effects: DispatchWorkerEffects for re-dispatch when no valid result.
+        recovered_effects: DispatchWorkerEffects for re-dispatch.
     """
     recovered_events: list[WorkerResultEvent] = []
     recovered_effects: list[DispatchWorkerEffect] = []
 
     for issue_id, issue in state.issues.items():
-        if not issue.worker_active:
+        state_def = config.states.get(issue.state)
+        if state_def is None or state_def.terminal:
+            continue
+
+        if issue.worker_active:
+            # In-flight when orchestrator stopped — check for result or re-dispatch
+            pass
+        elif issue.failure_count > 0:
+            # Retries exhausted — reset and re-dispatch
+            logger.info(
+                "Retrying previously exhausted issue %s (failure_count=%d)",
+                issue_id,
+                issue.failure_count,
+                extra={"event": "retry_exhausted", "issue_id": issue_id},
+            )
+            issue.failure_count = 0
+            issue.worker_active = True
+        else:
             continue
 
         branch = branches.get(issue_id)

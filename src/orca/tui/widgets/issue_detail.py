@@ -117,7 +117,9 @@ class IssueDetail(VerticalScroll):
                 return str(entry.data.get("error", ""))
         return ""
 
-    def show_transcript(self, session_id: str, *, active: bool = False, worktree_path: str = "") -> None:
+    def show_transcript(
+        self, session_id: str, *, active: bool = False, worktree_path: str = "", claude_session_id: str = ""
+    ) -> None:
         self.stop_auto_refresh()
 
         # Try pre-rendered .md first
@@ -129,12 +131,14 @@ class IssueDetail(VerticalScroll):
                 content = transcript_path.read_text()
                 self._markdown.update(content)
                 if active:
-                    self._jsonl_path = self._find_jsonl(session_id, worktree_path) if worktree_path else None
+                    self._jsonl_path = (
+                        self._find_jsonl(claude_session_id or session_id, worktree_path) if worktree_path else None
+                    )
                 return
 
         # No .md — try JSONL directly
         if worktree_path:
-            jsonl = self._find_jsonl(session_id, worktree_path)
+            jsonl = self._find_jsonl(claude_session_id or session_id, worktree_path)
             if jsonl is not None:
                 self._jsonl_path = jsonl
                 self._refresh_jsonl()
@@ -145,26 +149,19 @@ class IssueDetail(VerticalScroll):
 
     @staticmethod
     def _find_jsonl(session_id: str, worktree_path: str) -> Path | None:
-        """Locate the JSONL transcript file for a session.
-
-        The session_id in our manifest is a tracking UUID, not Claude's actual
-        session ID. So we can't match by filename. Instead, find the most
-        recently modified JSONL in the project directory for this worktree.
-        """
+        """Locate the JSONL transcript file for a session."""
         claude_projects_root = Path.home() / ".claude" / "projects"
         if not claude_projects_root.exists():
             return None
 
-        # Try exact match first (works when session_id is the real Claude ID)
-        filename = f"{session_id}.jsonl"
         project_hash = worktree_path.replace("/", "-").replace(".", "-")
         project_dir = claude_projects_root / project_hash
-        exact = project_dir / filename
-        if exact.exists():
-            return exact
+        candidate = project_dir / f"{session_id}.jsonl"
+        if candidate.exists():
+            return candidate
 
-        # Tracking ID doesn't match — find the most recently modified JSONL
-        # in the project directory (one active session per worktree)
+        # Fallback: most recently modified JSONL (for active sessions before
+        # the real Claude session ID is known)
         if project_dir.exists():
             jsonl_files = sorted(project_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
             if jsonl_files:

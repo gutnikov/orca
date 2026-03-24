@@ -50,11 +50,13 @@ class SessionManifest:
         )
         self._write(entries)
 
-    def mark_completed(self, session_id: str, completed_at: str) -> None:
+    def mark_completed(self, session_id: str, completed_at: str, *, claude_session_id: str | None = None) -> None:
         entries = self.read()
         for entry in entries:
             if entry["session_id"] == session_id:
                 entry["completed_at"] = completed_at
+                if claude_session_id:
+                    entry["claude_session_id"] = claude_session_id
                 break
         else:
             logger.warning("mark_completed: session %s not found in manifest", session_id)
@@ -86,28 +88,22 @@ class SessionSync:
         project_hash = str(worktree_path).replace("/", "-").replace(".", "-")
         return self.claude_projects_root / project_hash
 
-    def find_transcript(self, *, session_id: str, worktree_path: Path) -> Path | None:
-        """Find native transcript, trying derived path then fallback scan."""
-        filename = f"{session_id}.jsonl"
+    def find_transcript(
+        self, *, session_id: str, worktree_path: Path, claude_session_id: str | None = None
+    ) -> Path | None:
+        """Find native transcript, trying claude_session_id first, then tracking id."""
+        project_dir = self.claude_projects_path(worktree_path)
 
-        # Try derived path first
-        derived = self.claude_projects_path(worktree_path) / filename
-        if derived.exists():
-            return derived
+        # Try the real Claude session ID first (most reliable)
+        if claude_session_id:
+            candidate = project_dir / f"{claude_session_id}.jsonl"
+            if candidate.exists():
+                return candidate
 
-        # Fallback: scan all project directories
-        if self.claude_projects_root.exists():
-            for project_dir in self.claude_projects_root.iterdir():
-                if not project_dir.is_dir():
-                    continue
-                candidate = project_dir / filename
-                if candidate.exists():
-                    logger.info(
-                        "Transcript %s found via fallback scan at %s",
-                        session_id,
-                        candidate,
-                    )
-                    return candidate
+        # Try tracking UUID (unlikely to match, but cheap check)
+        candidate = project_dir / f"{session_id}.jsonl"
+        if candidate.exists():
+            return candidate
 
         return None
 
@@ -116,7 +112,7 @@ class SessionSync:
         return self.transcripts_dir / f"{session_id}.md"
 
     def needs_render(self, entry: dict[str, Any], target: Path) -> bool:
-        """True if session needs syncing: still running, or completed with unread bytes."""
+        """True if session needs syncing: not yet rendered, or has unread bytes."""
         if not target.exists():
             return True
         if entry["completed_at"] is None:
@@ -125,11 +121,13 @@ class SessionSync:
         session_id = entry.get("session_id", "")
         rs = self._render_states.get(session_id)
         if rs is None:
-            return False  # No render state = never synced by us, skip
+            # Never synced by us — still needs a full render if JSONL exists
+            return True
         # If we have render state, check if JSONL has more bytes than we've read
         transcript = self.find_transcript(
             session_id=session_id,
             worktree_path=Path(entry["worktree_path"]),
+            claude_session_id=entry.get("claude_session_id"),
         )
         if transcript is None:
             return False
@@ -152,6 +150,7 @@ class SessionSync:
         transcript = self.find_transcript(
             session_id=entry["session_id"],
             worktree_path=Path(entry["worktree_path"]),
+            claude_session_id=entry.get("claude_session_id"),
         )
         if transcript is None:
             logger.warning(

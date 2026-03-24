@@ -345,7 +345,7 @@ class Orchestrator:
 
                 # Mark the in-flight session as completed
                 if self._session_sync is not None:
-                    self._session_sync.manifest.mark_completed(tracking_id, ts)
+                    self._session_sync.manifest.mark_completed(tracking_id, ts, claude_session_id=outcome.session_id)
 
                 if isinstance(outcome, WorkerSuccess):
                     event: WorkerResultEvent | WorkerFailedEvent = WorkerResultEvent(

@@ -21,7 +21,7 @@ _DEADLOCK_THRESHOLD = 30.0
 class OrcaApp(App[None]):
     """Orca TUI — interactive viewer for orchestrator runs."""
 
-    THEME = "gruvbox"
+    THEME = "flexoki"
 
     CSS = """
     #main-panels {
@@ -92,7 +92,12 @@ class OrcaApp(App[None]):
 
     def on_worker_run_selected(self, message: WorkerRunSelected) -> None:
         detail = self.query_one(IssueDetail)
-        detail.show_transcript(message.session_id, active=message.active, worktree_path=message.worktree_path)
+        detail.show_transcript(
+            message.session_id,
+            active=message.active,
+            worktree_path=message.worktree_path,
+            claude_session_id=message.claude_session_id,
+        )
 
     def action_update_transcript(self) -> None:
         """Manually refresh the transcript panel."""
