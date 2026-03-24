@@ -201,7 +201,7 @@ def _recover_effects(
     return recovered_events, recovered_effects
 
 
-async def run(task_file: Path, branch_name: str, insights_enabled: bool = False) -> None:
+async def run(task_file: Path, branch_name: str, config_path: Path, insights_enabled: bool = False) -> None:
     """Main entry point: read task file, set up state, run orchestrator."""
     repo_root = Path.cwd()
 
@@ -209,7 +209,6 @@ async def run(task_file: Path, branch_name: str, insights_enabled: bool = False)
     title, description = parse_task_file(task_file)
 
     # Load config
-    config_path = repo_root / "orca.yml"
     config = parse_config(config_path.read_text())
 
     # Set up Persistence and BranchMap
@@ -335,80 +334,53 @@ async def run(task_file: Path, branch_name: str, insights_enabled: bool = False)
 
 
 def main() -> None:
-    """CLI entry point: orca run <task_file> <branch_name>."""
+    """CLI entry point: orca <task_file> [-b branch] [-w workflow] [--headless] [--insights]."""
     parser = argparse.ArgumentParser(prog="orca", description="Orca orchestrator CLI")
-    subparsers = parser.add_subparsers(dest="command", required=True)
-
-    run_parser = subparsers.add_parser("run", help="Run the orchestrator with a task file")
-    run_parser.add_argument("task_file", type=Path, help="Path to the task file")
-    run_parser.add_argument("branch_name", type=str, help="Git branch name for this run")
-    run_parser.add_argument("--headless", action="store_true", help="Run without TUI (headless mode)")
-    run_parser.add_argument("--insights", action="store_true", help="Enable insights agent for progress monitoring")
-
-    watch_parser = subparsers.add_parser("watch", help="Watch orchestrator state in a TUI dashboard")
-    watch_parser.add_argument("branch_name", type=str, help="Git branch name of the run to watch")
+    parser.add_argument("task_file", type=Path, help="Path to the task file")
+    parser.add_argument("-b", "--branch", type=str, default=None, help="Git branch name (default: current branch)")
+    parser.add_argument(
+        "-w", "--workflow", type=str, default=None, help="Workflow name shorthand (e.g. 'develop' -> orca.develop.yml)"
+    )
+    parser.add_argument("--headless", action="store_true", help="Run without TUI (headless mode)")
+    parser.add_argument("--insights", action="store_true", help="Enable insights agent for progress monitoring")
 
     args = parser.parse_args()
 
-    if args.command == "run":
-        if args.headless:
-            asyncio.run(run(args.task_file, args.branch_name, insights_enabled=args.insights))
-        else:
-            import threading
+    repo_root = Path.cwd()
+    config_path = resolve_config_path(repo_root, args.workflow)
+    branch_name = resolve_branch(args.branch)
 
-            run_error: BaseException | None = None
+    if args.headless:
+        asyncio.run(run(args.task_file, branch_name, config_path, insights_enabled=args.insights))
+    else:
+        import threading
 
-            def run_orchestrator() -> None:
-                nonlocal run_error
-                try:
-                    asyncio.run(run(args.task_file, args.branch_name, insights_enabled=args.insights))
-                except BaseException as e:
-                    run_error = e
+        run_error: BaseException | None = None
 
-            thread = threading.Thread(target=run_orchestrator, daemon=True)
-            thread.start()
-
+        def run_orchestrator() -> None:
+            nonlocal run_error
             try:
-                from orca.tui.app import OrcaApp
-            except ImportError:
-                print("Error: textual is not installed. Install with: uv pip install 'orca[tui]'")
-                raise SystemExit(1) from None
+                asyncio.run(run(args.task_file, branch_name, config_path, insights_enabled=args.insights))
+            except BaseException as e:
+                run_error = e
 
-            repo_root = Path.cwd()
-            run_dir = repo_root / ".orca" / "runs" / args.branch_name
+        thread = threading.Thread(target=run_orchestrator, daemon=True)
+        thread.start()
 
-            config = None
-            config_path = repo_root / "orca.yml"
-            if config_path.exists():
-                config = parse_config(config_path.read_text())
-
-            app = OrcaApp(run_dir=run_dir, branch_name=args.branch_name, config=config, insights_enabled=args.insights)
-            app.run()
-
-            # TUI closed — force exit to kill orchestrator thread and any subprocesses
-            import os
-            import signal
-
-            os.kill(os.getpid(), signal.SIGTERM)
-    elif args.command == "watch":
         try:
             from orca.tui.app import OrcaApp
-        except ImportError as e:
+        except ImportError:
             print("Error: textual is not installed. Install with: uv pip install 'orca[tui]'")
-            raise SystemExit(1) from e
+            raise SystemExit(1) from None
 
-        repo_root = Path.cwd()
-        run_dir = repo_root / ".orca" / "runs" / args.branch_name
+        run_dir = repo_root / ".orca" / "runs" / branch_name
+        config = parse_config(config_path.read_text())
 
-        if not run_dir.exists():
-            print(f"Error: no run found at {run_dir}")
-            raise SystemExit(1)
-
-        # Load config for terminal state detection
-        config = None
-        config_path = repo_root / "orca.yml"
-        if config_path.exists():
-            config = parse_config(config_path.read_text())
-
-        app = OrcaApp(run_dir=run_dir, branch_name=args.branch_name, config=config)
+        app = OrcaApp(run_dir=run_dir, branch_name=branch_name, config=config, insights_enabled=args.insights)
         app.run()
+
+        # TUI closed — force exit to kill orchestrator thread and any subprocesses
+        import os
+        import signal
+
+        os.kill(os.getpid(), signal.SIGTERM)
