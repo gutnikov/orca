@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+import threading
 import time
 from pathlib import Path
 
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.widgets import Footer, Header
 
 from orca.engine.types import State, StateMachineConfig
+from orca.orchestrator.pty_session import PtySession
 from orca.tui.messages import InsightsSelected, IssueSelected, StateUpdated, WorkerRunSelected
 from orca.tui.state_reader import StateReader
 from orca.tui.widgets.issue_detail import IssueDetail
 from orca.tui.widgets.issue_tree import IssueTree
+from orca.tui.widgets.terminal_view import FrozenTerminal, TerminalView
 
 _STALE_THRESHOLD = 10.0
 _DEADLOCK_THRESHOLD = 30.0
@@ -26,6 +30,9 @@ class OrcaApp(App[None]):
     CSS = """
     #main-panels {
         height: 1fr;
+    }
+    #terminal-view {
+        display: none;
     }
     """
 
@@ -45,6 +52,9 @@ class OrcaApp(App[None]):
         branch_name: str,
         config: StateMachineConfig | None = None,
         insights_enabled: bool = False,
+        pty_registry: dict[str, PtySession] | None = None,
+        frozen_registry: dict[str, list[Text]] | None = None,
+        pty_lock: threading.Lock | None = None,
     ) -> None:
         super().__init__()
         self._reader = StateReader(run_dir)
@@ -53,6 +63,9 @@ class OrcaApp(App[None]):
         self._config = config
         self._insights_enabled = insights_enabled
         self._state: State | None = None
+        self._pty_registry: dict[str, PtySession] = pty_registry if pty_registry is not None else {}
+        self._frozen_registry: dict[str, list[Text]] = frozen_registry if frozen_registry is not None else {}
+        self._pty_lock = pty_lock or threading.Lock()
         # run_dir is .orca/runs/{branch}, so repo_root is 3 levels up
         repo_root = run_dir.parent.parent.parent
         self._transcripts_dir = repo_root / ".orca" / "transcripts"
@@ -62,6 +75,7 @@ class OrcaApp(App[None]):
         with Horizontal(id="main-panels"):
             yield IssueTree(insights_enabled=self._insights_enabled)
             yield IssueDetail(transcripts_dir=self._transcripts_dir)
+            yield TerminalView()
         yield Footer()
 
     def on_mount(self) -> None:
@@ -90,7 +104,11 @@ class OrcaApp(App[None]):
         self.query_one(IssueTree).focus()
 
     def action_focus_detail(self) -> None:
-        self.query_one(IssueDetail).focus()
+        terminal = self.query_one(TerminalView)
+        if str(terminal.styles.display) != "none":
+            terminal.focus()
+        else:
+            self.query_one(IssueDetail).focus()
 
     def on_state_updated(self, message: StateUpdated) -> None:
         tree = self.query_one(IssueTree)
@@ -99,23 +117,44 @@ class OrcaApp(App[None]):
 
     def on_issue_selected(self, message: IssueSelected) -> None:
         if self._state:
+            self.query_one(TerminalView).styles.display = "none"
             detail = self.query_one(IssueDetail)
+            detail.styles.display = "block"
             detail.show_issue(message.issue_id, self._state)
 
     def on_worker_run_selected(self, message: WorkerRunSelected) -> None:
         detail = self.query_one(IssueDetail)
-        detail.show_transcript(
-            message.session_id,
-            active=message.active,
-            worktree_path=message.worktree_path,
-            claude_session_id=message.claude_session_id,
-            state=message.state,
-        )
+        terminal = self.query_one(TerminalView)
+
+        with self._pty_lock:
+            live_session = self._pty_registry.get(message.session_id)
+            frozen_lines = self._frozen_registry.get(message.session_id)
+
+        if live_session is not None:
+            detail.styles.display = "none"
+            terminal.styles.display = "block"
+            terminal.show_live(live_session)
+        elif frozen_lines is not None:
+            detail.styles.display = "none"
+            terminal.styles.display = "block"
+            terminal.show_frozen(FrozenTerminal(lines=frozen_lines))
+        else:
+            # Fall back to existing transcript pipeline
+            terminal.styles.display = "none"
+            detail.styles.display = "block"
+            detail.show_transcript(
+                message.session_id,
+                active=message.active,
+                worktree_path=message.worktree_path,
+                claude_session_id=message.claude_session_id,
+                state=message.state,
+            )
 
     def on_insights_selected(self, message: InsightsSelected) -> None:
+        self.query_one(TerminalView).styles.display = "none"
         detail = self.query_one(IssueDetail)
-        insights_path = self._run_dir / "insights.md"
-        detail.show_insights(insights_path)
+        detail.styles.display = "block"
+        detail.show_insights(self._run_dir / "insights.md")
 
     def _update_status(self) -> None:
         if self._state is None:
@@ -156,11 +195,19 @@ class OrcaApp(App[None]):
 
     def action_scroll_detail_down(self) -> None:
         """Scroll the detail panel down."""
-        self.query_one(IssueDetail).scroll_down()
+        terminal = self.query_one(TerminalView)
+        if str(terminal.styles.display) != "none":
+            terminal.scroll_down()
+        else:
+            self.query_one(IssueDetail).scroll_down()
 
     def action_scroll_detail_up(self) -> None:
         """Scroll the detail panel up."""
-        self.query_one(IssueDetail).scroll_up()
+        terminal = self.query_one(TerminalView)
+        if str(terminal.styles.display) != "none":
+            terminal.scroll_up()
+        else:
+            self.query_one(IssueDetail).scroll_up()
 
     def _find_root_issue(self) -> str | None:
         if self._state is None:

@@ -5,10 +5,13 @@ import asyncio
 import contextlib
 import json
 import logging
+import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
+
+from rich.text import Text
 
 from orca.engine.config import parse_config
 from orca.engine.dispatch import build_issue_context, build_result_format
@@ -24,6 +27,7 @@ from orca.engine.types import (
 from orca.orchestrator.branches import BranchMap
 from orca.orchestrator.log import setup_logging
 from orca.orchestrator.persistence import Persistence
+from orca.orchestrator.pty_session import PtySession
 from orca.orchestrator.validation import validate_result
 from orca.orchestrator.worker import ClaudeCodeWorker
 from orca.orchestrator.worktree import WorktreeManager
@@ -213,7 +217,15 @@ def _recover_effects(
     return recovered_events, recovered_effects
 
 
-async def run(task_file: Path, branch_name: str, config_path: Path, insights_enabled: bool = False) -> None:
+async def run(
+    task_file: Path,
+    branch_name: str,
+    config_path: Path,
+    insights_enabled: bool = False,
+    pty_registry: dict[str, PtySession] | None = None,
+    frozen_registry: dict[str, list[Text]] | None = None,
+    pty_lock: threading.Lock | None = None,
+) -> None:
     """Main entry point: read task file, set up state, run orchestrator."""
     repo_root = Path.cwd()
 
@@ -336,6 +348,9 @@ async def run(task_file: Path, branch_name: str, config_path: Path, insights_ena
         repo_root=repo_root,
         session_sync=session_sync,
         insights_worker=insights_worker,
+        pty_registry=pty_registry,
+        frozen_registry=frozen_registry,
+        pty_lock=pty_lock,
     )
 
     try:
@@ -373,14 +388,28 @@ def main() -> None:
     if args.headless:
         asyncio.run(run(args.task_file, branch_name, config_path, insights_enabled=args.insights))
     else:
-        import threading
+        # Create shared registries for cross-thread access between
+        # the orchestrator (daemon thread) and TUI (main thread).
+        pty_lock = threading.Lock()
+        pty_registry: dict[str, PtySession] = {}
+        frozen_registry: dict[str, list[Text]] = {}
 
         run_error: BaseException | None = None
 
         def run_orchestrator() -> None:
             nonlocal run_error
             try:
-                asyncio.run(run(args.task_file, branch_name, config_path, insights_enabled=args.insights))
+                asyncio.run(
+                    run(
+                        args.task_file,
+                        branch_name,
+                        config_path,
+                        insights_enabled=args.insights,
+                        pty_registry=pty_registry,
+                        frozen_registry=frozen_registry,
+                        pty_lock=pty_lock,
+                    )
+                )
             except BaseException as e:
                 run_error = e
 
@@ -396,7 +425,15 @@ def main() -> None:
         run_dir = repo_root / ".orca" / "runs" / branch_name
         config = parse_config(config_path.read_text())
 
-        app = OrcaApp(run_dir=run_dir, branch_name=branch_name, config=config, insights_enabled=args.insights)
+        app = OrcaApp(
+            run_dir=run_dir,
+            branch_name=branch_name,
+            config=config,
+            insights_enabled=args.insights,
+            pty_registry=pty_registry,
+            frozen_registry=frozen_registry,
+            pty_lock=pty_lock,
+        )
         app.run()
 
         # Surface orchestrator errors before exiting

@@ -4,10 +4,13 @@ import asyncio
 import contextlib
 import logging
 import re
+import threading
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
+
+from rich.text import Text
 
 from orca.engine.reducer import reduce
 from orca.engine.types import (
@@ -26,6 +29,7 @@ from orca.orchestrator.insights import (
     truncate_insights_so_far,
 )
 from orca.orchestrator.persistence import Persistence
+from orca.orchestrator.pty_session import PtySession
 from orca.orchestrator.session_sync import SessionSync
 from orca.orchestrator.template import render_insights_prompt
 from orca.orchestrator.worker import ClaudeCodeWorker, Worker, WorkerFailure, WorkerOutcome, WorkerSuccess
@@ -61,6 +65,9 @@ class Orchestrator:
         insights_worker: ClaudeCodeWorker | None = None,
         insights_interval: float = 300.0,
         insights_timeout: float = 120.0,
+        pty_registry: dict[str, PtySession] | None = None,
+        frozen_registry: dict[str, list[Text]] | None = None,
+        pty_lock: threading.Lock | None = None,
     ) -> None:
         self.config = config
         self.state = state
@@ -77,12 +84,31 @@ class Orchestrator:
         self._insights_interval = insights_interval
         self._insights_timeout = insights_timeout
         self._insights_in_flight = False
+        # Pty registries for TUI terminal rendering (thread-safe via _pty_lock)
+        self._pty_lock = pty_lock or threading.Lock()
+        self._pty_registry: dict[str, PtySession] = pty_registry if pty_registry is not None else {}
+        self._frozen_registry: dict[str, list[Text]] = frozen_registry if frozen_registry is not None else {}
         # Maps asyncio.Task -> (issue_id, tracking_id)
         self._in_flight: dict[asyncio.Task[WorkerOutcome], tuple[str, str]] = {}
         # Track used branch slugs to avoid collisions
         self._used_slugs: set[str] = set()
         for branch in self.branches.values():
             self._used_slugs.add(branch)
+
+    @property
+    def pty_lock(self) -> threading.Lock:
+        """Lock for thread-safe access to pty and frozen registries."""
+        return self._pty_lock
+
+    @property
+    def pty_registry(self) -> dict[str, PtySession]:
+        """Map of session_id -> live PtySession."""
+        return self._pty_registry
+
+    @property
+    def frozen_registry(self) -> dict[str, list[Text]]:
+        """Map of session_id -> frozen terminal lines (list of Rich Text)."""
+        return self._frozen_registry
 
     def _is_terminal(self, issue_id: str) -> bool:
         """Return True if the issue's current state is terminal in config."""
