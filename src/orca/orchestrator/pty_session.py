@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 import shlex
 import subprocess
 from pathlib import Path
 
 from rich.text import Text
+
+# Strip ALL background colors and bright white foreground (231) that clash with dark themes
+_STRIP_RE = re.compile(r"\x1b\[(?:48;[25];\d+(?:;\d+)*|38;5;231)m")
 
 logger = logging.getLogger(__name__)
 
@@ -89,9 +93,9 @@ class TmuxSession:
         logger.debug("Tmux session %s started", self._session_name)
 
     def capture_pane(self) -> str:
-        """Capture the current visible pane content as plain text."""
+        """Capture the current visible pane content with ANSI escape sequences."""
         result = subprocess.run(
-            ["tmux", "capture-pane", "-t", self._session_name, "-p"],
+            ["tmux", "capture-pane", "-t", self._session_name, "-p", "-e"],
             capture_output=True,
             text=True,
         )
@@ -100,9 +104,9 @@ class TmuxSession:
         return result.stdout
 
     def capture_scrollback(self) -> str:
-        """Capture full scrollback history as plain text."""
+        """Capture full scrollback history with ANSI escape sequences."""
         result = subprocess.run(
-            ["tmux", "capture-pane", "-t", self._session_name, "-p", "-S", "-"],
+            ["tmux", "capture-pane", "-t", self._session_name, "-p", "-e", "-S", "-"],
             capture_output=True,
             text=True,
         )
@@ -111,14 +115,20 @@ class TmuxSession:
         return result.stdout
 
     def capture_rich(self) -> Text:
-        """Capture pane content as a Rich Text object."""
+        """Capture pane content as a Rich Text object with colors."""
         raw = self.capture_pane()
-        return Text(raw) if raw else Text("")
+        if not raw:
+            return Text("")
+        raw = _STRIP_RE.sub("", raw)
+        return Text.from_ansi(raw)
 
     def snapshot(self) -> Text:
         """Capture full scrollback as a Rich Text object (for frozen display)."""
         raw = self.capture_scrollback()
-        return Text(raw) if raw else Text("")
+        if not raw:
+            return Text("")
+        raw = _STRIP_RE.sub("", raw)
+        return Text.from_ansi(raw)
 
     def resize(self, cols: int, rows: int) -> None:
         """Resize the tmux window."""
