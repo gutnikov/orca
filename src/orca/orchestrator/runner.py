@@ -135,7 +135,7 @@ def _recover_effects(
     state: State,
     branches: BranchMap,
     worktree_mgr: WorktreeManager,
-    repo_root: Path,
+    run_dir: Path,
     generate_id: Callable[[], str],
     now: Callable[[], str],
 ) -> tuple[list[WorkerResultEvent], list[DispatchWorkerEffect]]:
@@ -174,7 +174,9 @@ def _recover_effects(
             branch = issue_id  # fallback
 
         worktree_path = worktree_mgr.resolve(branch)
-        result_path = worktree_path / ".orca" / "result.json"
+        # When the root issue reuses an existing branch, the worktree dir
+        # doesn't exist — result.json lives in the run directory instead.
+        result_path = worktree_path / ".orca" / "result.json" if worktree_path.exists() else run_dir / "result.json"
 
         result_format = build_result_format(config, issue.state)
         issue_context = build_issue_context(state, issue_id)
@@ -252,7 +254,7 @@ async def run(task_file: Path, branch_name: str, config_path: Path, insights_ena
         manifest.backfill_claude_session_ids()
 
         recovered_events, recovered_effects = _recover_effects(
-            config, state, branches, worktree_mgr, repo_root, _generate_id, _now
+            config, state, branches, worktree_mgr, run_dir, _generate_id, _now
         )
 
         # Feed recovered events through the reducer
@@ -408,6 +410,10 @@ def main() -> None:
         # sequences (focus reporting, alternate screen) enabled.
         import sys
 
+        sys.stdout.write("\x1b[?1000l")  # disable normal mouse tracking
+        sys.stdout.write("\x1b[?1002l")  # disable button-event mouse tracking
+        sys.stdout.write("\x1b[?1003l")  # disable any-event mouse tracking
+        sys.stdout.write("\x1b[?1006l")  # disable SGR mouse reporting
         sys.stdout.write("\x1b[?1004l")  # disable focus reporting
         sys.stdout.write("\x1b[?1049l")  # exit alternate screen buffer
         sys.stdout.write("\x1b[?25h")  # show cursor
