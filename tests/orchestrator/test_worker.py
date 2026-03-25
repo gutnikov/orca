@@ -156,26 +156,6 @@ class TestClaudeCodeWorker:
         assert isinstance(outcome, WorkerFailure)
         assert "result file" in outcome.error
 
-    async def test_session_log_created(self, tmp_path: Path) -> None:
-        """Verify .orca/sessions/{state}-*.jsonl file created in workdir."""
-        effect = _make_effect(state="implementing")
-        result_path = tmp_path / "result.json"
-        prompt_path = tmp_path / "prompt.md"
-        prompt_path.write_text("Do the thing")
-
-        output_line = b'{"type": "assistant", "content": "working"}\n'
-        proc = _make_mock_proc(0, stdout_lines=[output_line])
-
-        with patch("orca.orchestrator.worker.asyncio.create_subprocess_exec", return_value=proc):
-            worker = ClaudeCodeWorker(repo_root=tmp_path)
-            await worker.execute(effect, tmp_path, result_path, prompt_path)
-
-        sessions_dir = tmp_path / ".orca" / "sessions"
-        assert sessions_dir.exists()
-        session_files = list(sessions_dir.glob("implementing-*.jsonl"))
-        assert len(session_files) == 1
-        assert session_files[0].read_bytes() == output_line
-
 
 @pytest.mark.asyncio()
 class TestClaudeCodeWorkerExecuteRaw:
@@ -203,19 +183,6 @@ class TestClaudeCodeWorkerExecuteRaw:
 
         assert isinstance(outcome, WorkerFailure)
         assert "exit code" in outcome.error
-
-    async def test_raw_extracts_session_id(self, tmp_path: Path) -> None:
-        """Session ID extracted from first JSON line."""
-        stdout_lines = [b'{"sessionId": "sess-abc"}\n', b'{"type": "assistant"}\n']
-        proc = _make_mock_proc(0, stdout_lines=stdout_lines)
-        session_log = tmp_path / "session.jsonl"
-
-        with patch("orca.orchestrator.worker.asyncio.create_subprocess_exec", return_value=proc):
-            worker = ClaudeCodeWorker(repo_root=tmp_path)
-            outcome = await worker.execute_raw("analyze this", tmp_path, session_log)
-
-        assert isinstance(outcome, WorkerSuccess)
-        assert outcome.session_id == "sess-abc"
 
     async def test_raw_timeout_during_streaming(self, tmp_path: Path) -> None:
         """Worker killed after timeout during stdout streaming -> WorkerFailure."""

@@ -66,15 +66,12 @@ class OrcaApp(App[None]):
         self._pty_registry: dict[str, PtySession] = pty_registry if pty_registry is not None else {}
         self._frozen_registry: dict[str, list[Text]] = frozen_registry if frozen_registry is not None else {}
         self._pty_lock = pty_lock or threading.Lock()
-        # run_dir is .orca/runs/{branch}, so repo_root is 3 levels up
-        repo_root = run_dir.parent.parent.parent
-        self._transcripts_dir = repo_root / ".orca" / "transcripts"
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="main-panels"):
             yield IssueTree(insights_enabled=self._insights_enabled)
-            yield IssueDetail(transcripts_dir=self._transcripts_dir)
+            yield IssueDetail()
             yield TerminalView()
         yield Footer()
 
@@ -139,16 +136,11 @@ class OrcaApp(App[None]):
             terminal.styles.display = "block"
             terminal.show_frozen(FrozenTerminal(lines=frozen_lines))
         else:
-            # Fall back to existing transcript pipeline
-            terminal.styles.display = "none"
-            detail.styles.display = "block"
-            detail.show_transcript(
-                message.session_id,
-                active=message.active,
-                worktree_path=message.worktree_path,
-                claude_session_id=message.claude_session_id,
-                state=message.state,
-            )
+            # No pty data available — show placeholder
+            detail.styles.display = "none"
+            terminal.styles.display = "block"
+            placeholder = Text(f"No terminal output for session {message.session_id[:8]}...")
+            terminal.show_frozen(FrozenTerminal(lines=[placeholder]))
 
     def on_insights_selected(self, message: InsightsSelected) -> None:
         self.query_one(TerminalView).styles.display = "none"

@@ -264,7 +264,6 @@ async def run(
         run_dir = repo_root / ".orca" / "runs" / branch_name
         manifest = SessionManifest(run_dir)
         manifest.mark_orphans_completed(_now())
-        manifest.backfill_claude_session_ids()
 
         recovered_events, recovered_effects = _recover_effects(
             config, state, branches, worktree_mgr, run_dir, _generate_id, _now
@@ -332,8 +331,7 @@ async def run(
     from orca.orchestrator.session_sync import SessionSync
 
     run_dir = repo_root / ".orca" / "runs" / branch_name
-    transcripts_dir = repo_root / ".orca" / "transcripts"
-    session_sync = SessionSync(run_dir=run_dir, transcripts_dir=transcripts_dir)
+    session_sync = SessionSync(run_dir=run_dir)
 
     orchestrator = Orchestrator(
         config=config,

@@ -5,7 +5,6 @@ import contextlib
 import json
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -23,13 +22,11 @@ _INACTIVITY_TIMEOUT = 300.0  # 5 minutes
 @dataclass(frozen=True)
 class WorkerSuccess:
     result: dict[str, Any]
-    session_id: str | None = None
 
 
 @dataclass(frozen=True)
 class WorkerFailure:
     error: str
-    session_id: str | None = None
 
 
 WorkerOutcome = WorkerSuccess | WorkerFailure
@@ -192,13 +189,7 @@ class ClaudeCodeWorker:
         else:
             prompt = ""
 
-        # c. Create session log path
-        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
-        sessions_dir = workdir / ".orca" / "sessions"
-        sessions_dir.mkdir(parents=True, exist_ok=True)
-        session_log_path = sessions_dir / f"{effect.state}-{timestamp}.jsonl"
-
-        # d. Spawn claude subprocess
+        # c. Spawn claude subprocess
         proc = await asyncio.create_subprocess_exec(
             "claude",
             "--print",
@@ -232,41 +223,31 @@ class ClaudeCodeWorker:
             proc.stdin.write(prompt.encode())
             proc.stdin.close()
 
-        # e. Stream stdout lines to session log file, extract session_id
-        session_id: str | None = None
+        # d. Read stdout until EOF or inactivity timeout
         timed_out = False
         effective_timeout = float(inactivity_timeout) if inactivity_timeout else _INACTIVITY_TIMEOUT
         assert proc.stdout is not None
-        with session_log_path.open("wb") as log_file:
-            while True:
-                try:
-                    line = await asyncio.wait_for(proc.stdout.readline(), timeout=effective_timeout)
-                except TimeoutError:
-                    logger.warning(
-                        "Worker for issue %s inactive for %ds — killing",
-                        effect.issue_id,
-                        int(_INACTIVITY_TIMEOUT),
-                        extra={"event": "inactivity_timeout", "issue_id": effect.issue_id, "pid": proc.pid},
-                    )
-                    proc.kill()
-                    timed_out = True
-                    break
-                if not line:
-                    break  # EOF
-                log_file.write(line)
-                if session_id is None:
-                    try:
-                        msg = json.loads(line)
-                        session_id = msg.get("sessionId") or msg.get("session_id")
-                    except (json.JSONDecodeError, AttributeError):
-                        pass
+        while True:
+            try:
+                line = await asyncio.wait_for(proc.stdout.readline(), timeout=effective_timeout)
+            except TimeoutError:
+                logger.warning(
+                    "Worker for issue %s inactive for %ds — killing",
+                    effect.issue_id,
+                    int(_INACTIVITY_TIMEOUT),
+                    extra={"event": "inactivity_timeout", "issue_id": effect.issue_id, "pid": proc.pid},
+                )
+                proc.kill()
+                timed_out = True
+                break
+            if not line:
+                break  # EOF
 
         # f. Wait for process, check returncode
         await proc.wait()
         if timed_out:
             return WorkerFailure(
                 error=f"worker killed after {int(_INACTIVITY_TIMEOUT)}s of inactivity",
-                session_id=session_id,
             )
         logger.debug(
             "Subprocess exited for issue %s with code %s",
@@ -283,25 +264,24 @@ class ClaudeCodeWorker:
         if proc.returncode != 0:
             return WorkerFailure(
                 error=f"claude exited with non-zero exit code: {proc.returncode}",
-                session_id=session_id,
             )
 
         # g. Read result_path, parse JSON
         if not result_path.exists():
-            return WorkerFailure(error="result file not found after claude exited successfully", session_id=session_id)
+            return WorkerFailure(error="result file not found after claude exited successfully")
 
         try:
             result: dict[str, Any] = json.loads(result_path.read_text())
         except (json.JSONDecodeError, OSError) as e:
-            return WorkerFailure(error=f"failed to parse result file: {e}", session_id=session_id)
+            return WorkerFailure(error=f"failed to parse result file: {e}")
 
         # h. Validate result
         error = validate_result(result, effect.result_format)
         if error is not None:
-            return WorkerFailure(error=error, session_id=session_id)
+            return WorkerFailure(error=error)
 
         # i. Return WorkerSuccess
-        return WorkerSuccess(result=result, session_id=session_id)
+        return WorkerSuccess(result=result)
 
     async def execute_raw(
         self,
@@ -339,31 +319,21 @@ class ClaudeCodeWorker:
             proc.stdin.write(prompt.encode())
             proc.stdin.close()
 
-        session_id: str | None = None
-
         async def _stream_and_wait() -> None:
-            nonlocal session_id
             with session_log_path.open("wb") as log_file:
                 async for line in proc.stdout:  # type: ignore[union-attr]
                     log_file.write(line)
-                    if session_id is None:
-                        try:
-                            msg = json.loads(line)
-                            session_id = msg.get("sessionId") or msg.get("session_id")
-                        except (json.JSONDecodeError, AttributeError):
-                            pass
             await proc.wait()
 
         try:
             await asyncio.wait_for(_stream_and_wait(), timeout=timeout)
         except TimeoutError:
             proc.kill()
-            return WorkerFailure(error="insights worker timed out", session_id=session_id)
+            return WorkerFailure(error="insights worker timed out")
 
         if proc.returncode != 0:
             return WorkerFailure(
                 error=f"claude exited with non-zero exit code: {proc.returncode}",
-                session_id=session_id,
             )
 
-        return WorkerSuccess(result={}, session_id=session_id)
+        return WorkerSuccess(result={})
