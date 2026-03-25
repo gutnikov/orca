@@ -256,6 +256,11 @@ def _handle_worker_result(
     # 2. Append worker_result log entry
     append_log(issue, event.timestamp, "worker_result", event.result)
 
+    # 3. Merge result fields (except outcome) back into issue fields
+    for key, value in event.result.items():
+        if key != "outcome" and key in config.issue_fields:
+            issue.fields[key] = value
+
     # Slot backfill: if old state has max_workers, backfill
     dispatch_effects: list[Effect] = []
     if state_def.max_workers is not None:

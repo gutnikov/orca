@@ -40,6 +40,7 @@ class Worker(Protocol):
         workdir: Path,
         result_path: Path,
         prompt_path: Path | None = None,
+        inactivity_timeout: int | None = None,
     ) -> WorkerOutcome: ...
 
 
@@ -55,6 +56,7 @@ class ClaudeCodeWorker:
         workdir: Path,
         result_path: Path,
         prompt_path: Path | None = None,
+        inactivity_timeout: int | None = None,
     ) -> WorkerOutcome:
         # a. Delete previous result file
         result_path.unlink(missing_ok=True)
@@ -108,11 +110,12 @@ class ClaudeCodeWorker:
         # e. Stream stdout lines to session log file, extract session_id
         session_id: str | None = None
         timed_out = False
+        effective_timeout = float(inactivity_timeout) if inactivity_timeout else _INACTIVITY_TIMEOUT
         assert proc.stdout is not None
         with session_log_path.open("wb") as log_file:
             while True:
                 try:
-                    line = await asyncio.wait_for(proc.stdout.readline(), timeout=_INACTIVITY_TIMEOUT)
+                    line = await asyncio.wait_for(proc.stdout.readline(), timeout=effective_timeout)
                 except TimeoutError:
                     logger.warning(
                         "Worker for issue %s inactive for %ds — killing",

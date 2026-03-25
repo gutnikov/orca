@@ -261,7 +261,9 @@ class Orchestrator:
             issue={**effect.issue, "base_branch": base_branch},
         )
 
-        return await worker.execute(enriched_effect, workdir, result_path, prompt_path)
+        state_def = self.config.states.get(effect.state)
+        inactivity_timeout = state_def.worker.inactivity_timeout if state_def and state_def.worker else None
+        return await worker.execute(enriched_effect, workdir, result_path, prompt_path, inactivity_timeout)
 
     def _process_retry_signals(self, pending: list[DispatchWorkerEffect]) -> bool:
         """Check for retry signal files from the TUI. Returns True if any retries were queued."""

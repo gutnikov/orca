@@ -39,6 +39,7 @@ class ScriptedWorker:
         workdir: Path,
         result_path: Path,
         prompt_path: Path | None = None,
+        inactivity_timeout: int | None = None,
     ) -> WorkerOutcome:
         key = (effect.issue_id, effect.state)
         self.calls.append(key)

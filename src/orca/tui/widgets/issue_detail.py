@@ -132,13 +132,13 @@ class IssueDetail(VerticalScroll):
                 self._markdown.update(content)
                 if active:
                     self._jsonl_path = (
-                        self._find_jsonl(claude_session_id or session_id, worktree_path) if worktree_path else None
+                        self._find_jsonl(worktree_path, claude_session_id, session_id) if worktree_path else None
                     )
                 return
 
         # No .md — try JSONL directly
         if worktree_path:
-            jsonl = self._find_jsonl(claude_session_id or session_id, worktree_path)
+            jsonl = self._find_jsonl(worktree_path, claude_session_id, session_id)
             if jsonl is not None:
                 self._jsonl_path = jsonl
                 self._refresh_jsonl()
@@ -148,7 +148,7 @@ class IssueDetail(VerticalScroll):
         self._markdown.update(f"*Waiting for transcript for session {session_id[:8]}...*")
 
     @staticmethod
-    def _find_jsonl(session_id: str, worktree_path: str) -> Path | None:
+    def _find_jsonl(worktree_path: str, claude_session_id: str, session_id: str) -> Path | None:
         """Locate the JSONL transcript file for a session."""
         claude_projects_root = Path.home() / ".claude" / "projects"
         if not claude_projects_root.exists():
@@ -156,13 +156,23 @@ class IssueDetail(VerticalScroll):
 
         project_hash = worktree_path.replace("/", "-").replace(".", "-")
         project_dir = claude_projects_root / project_hash
+
+        # Try exact match by Claude session ID first
+        if claude_session_id:
+            candidate = project_dir / f"{claude_session_id}.jsonl"
+            if candidate.exists():
+                return candidate
+
+        # Try by orca session ID
         candidate = project_dir / f"{session_id}.jsonl"
         if candidate.exists():
             return candidate
 
-        # Fallback: most recently modified JSONL (for active sessions before
-        # the real Claude session ID is known)
-        if project_dir.exists():
+        # Only fall back to most recent JSONL when we have NO claude_session_id
+        # (the session just started and hasn't reported its ID yet).
+        # With a known ID that doesn't match, we'd rather show "waiting"
+        # than display the wrong session's transcript (e.g. insights).
+        if not claude_session_id and project_dir.exists():
             jsonl_files = sorted(project_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
             if jsonl_files:
                 return jsonl_files[0]

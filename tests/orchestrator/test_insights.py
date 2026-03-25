@@ -139,14 +139,14 @@ class TestTruncateInsightsSoFar:
         assert truncate_insights_so_far(content, max_lines=3000) == content
 
 
-class _FakeWorktreeManager(WorktreeManager):  # type: ignore[misc]
+class _FakeWorktreeManager(WorktreeManager):
     def __init__(self, base: Path) -> None:
         super().__init__(base, "main")
 
     async def create(self, issue_id: str, branch_name: str, parent_branch: str) -> Path:
         p = self.resolve(branch_name)
         p.mkdir(parents=True, exist_ok=True)
-        return p  # type: ignore[no-any-return]
+        return p
 
 
 SIMPLE_CONFIG = """\
@@ -180,6 +180,7 @@ class _MockWorker:
         workdir: Path,
         result_path: Path,
         prompt_path: Path | None = None,
+        inactivity_timeout: int | None = None,
     ) -> WorkerOutcome:
         return WorkerSuccess(result={"outcome": "done"})
 

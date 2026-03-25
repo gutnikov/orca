@@ -91,11 +91,18 @@ def _parse_state(name: str, raw_data: dict[str, Any] | None) -> StateDef:
         kind: str = worker_data.get("kind", "")
         prompt: str = worker_data.get("prompt", "")
         timeout: int | None = worker_data.get("timeout")
+        inactivity_timeout: int | None = worker_data.get("inactivity_timeout")
         rf_data: dict[str, Any] = worker_data.get("result_format", {})
         result_format: dict[str, ResultFormatField] = {}
         for field_name, field_data in rf_data.items():
             result_format[field_name] = _parse_result_format_field(field_name, field_data)
-        worker = WorkerDef(kind=kind, prompt=prompt, result_format=result_format, timeout=timeout)
+        worker = WorkerDef(
+            kind=kind,
+            prompt=prompt,
+            result_format=result_format,
+            timeout=timeout,
+            inactivity_timeout=inactivity_timeout,
+        )
 
     on: dict[str, OnRule] = {}
     on_data = data.get("True") or data.get("on")

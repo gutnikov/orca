@@ -41,6 +41,7 @@ class WorkerDef:
     prompt: str
     result_format: dict[str, ResultFormatField]
     timeout: int | None = None
+    inactivity_timeout: int | None = None
 
 
 @dataclass(frozen=True)
