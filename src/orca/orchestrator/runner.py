@@ -396,7 +396,7 @@ def main() -> None:
         config = parse_config(config_path.read_text())
 
         app = OrcaApp(run_dir=run_dir, branch_name=branch_name, config=config, insights_enabled=args.insights)
-        app.run()
+        app.run(mouse=False)
 
         # Surface orchestrator errors before exiting
         if run_error is not None:
