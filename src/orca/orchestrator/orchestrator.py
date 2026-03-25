@@ -295,7 +295,39 @@ class Orchestrator:
 
         state_def = self.config.states.get(effect.state)
         inactivity_timeout = state_def.worker.inactivity_timeout if state_def and state_def.worker else None
-        return await worker.execute(enriched_effect, workdir, result_path, prompt_path, inactivity_timeout)
+
+        # Create PtySession and register it for TUI terminal rendering
+        pty_session = PtySession(cols=120, rows=40)
+
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+        log_dir = workdir / ".orca" / "sessions"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / f"{enriched_effect.state}-{timestamp}.raw"
+
+        with self._pty_lock:
+            self._pty_registry[tracking_id] = pty_session
+
+        try:
+            outcome = await worker.execute(
+                enriched_effect,
+                workdir,
+                result_path,
+                prompt_path,
+                inactivity_timeout,
+                pty_session=pty_session,
+                log_path=log_path,
+            )
+        finally:
+            with self._pty_lock:
+                self._pty_registry.pop(tracking_id, None)
+                try:
+                    frozen_lines = pty_session.snapshot()
+                except Exception:
+                    frozen_lines = []
+                self._frozen_registry[tracking_id] = frozen_lines
+            pty_session.close()
+
+        return outcome
 
     def _process_retry_signals(self, pending: list[DispatchWorkerEffect]) -> bool:
         """Check for retry signal files from the TUI. Returns True if any retries were queued."""

@@ -181,6 +181,8 @@ class _MockWorker:
         result_path: Path,
         prompt_path: Path | None = None,
         inactivity_timeout: int | None = None,
+        pty_session: Any = None,
+        log_path: Path | None = None,
     ) -> WorkerOutcome:
         return WorkerSuccess(result={"outcome": "done"})
 

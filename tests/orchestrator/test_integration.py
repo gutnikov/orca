@@ -40,6 +40,8 @@ class ScriptedWorker:
         result_path: Path,
         prompt_path: Path | None = None,
         inactivity_timeout: int | None = None,
+        pty_session: Any = None,
+        log_path: Path | None = None,
     ) -> WorkerOutcome:
         key = (effect.issue_id, effect.state)
         self.calls.append(key)

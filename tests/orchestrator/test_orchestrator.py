@@ -15,7 +15,7 @@ from orca.orchestrator.worker import WorkerFailure, WorkerOutcome, WorkerSuccess
 from orca.orchestrator.worktree import WorktreeManager
 
 
-class FakeWorktreeManager(WorktreeManager):  # type: ignore[misc]
+class FakeWorktreeManager(WorktreeManager):
     """WorktreeManager substitute that creates plain directories instead of git worktrees."""
 
     def __init__(self, base: Path) -> None:
@@ -24,7 +24,7 @@ class FakeWorktreeManager(WorktreeManager):  # type: ignore[misc]
     async def create(self, issue_id: str, branch_name: str, parent_branch: str) -> Path:
         p = self.resolve(branch_name)
         p.mkdir(parents=True, exist_ok=True)
-        return p  # type: ignore[no-any-return]
+        return p
 
 
 class MockWorker:
@@ -41,6 +41,8 @@ class MockWorker:
         result_path: Path,
         prompt_path: Path | None = None,
         inactivity_timeout: int | None = None,
+        pty_session: Any = None,
+        log_path: Path | None = None,
     ) -> WorkerOutcome:
         self.calls.append((effect.issue_id, effect.state))
         return self.outcomes.get(effect.state, WorkerFailure(error="no mock"))
@@ -166,6 +168,8 @@ class TestOrchestrator:
                 result_path: Path,
                 prompt_path: Path | None = None,
                 inactivity_timeout: int | None = None,
+                pty_session: Any = None,
+                log_path: Path | None = None,
             ) -> WorkerOutcome:
                 self.calls.append((effect.issue_id, effect.state))
                 count = call_count.get(effect.state, 0)
