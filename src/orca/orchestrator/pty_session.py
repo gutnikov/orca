@@ -54,12 +54,12 @@ class PtySession:
     ) -> None:
         """Spawn a process in a pty.
 
-        When *stdin_data* is provided, the prompt is written to a temp file
-        and piped to the command via bash (``cat file | cmd args``).  This
-        keeps stdin as a pipe (so the prompt doesn't echo) while stdout/stderr
-        go through the pty for TUI rendering.  The child's stdout is still a
-        tty so interactive programs render their TUI normally.
+        Uses two ptys when *stdin_data* is provided: one for stdout/stderr
+        (the "display" pty we read from) and a separate one for stdin so the
+        child sees a real tty on all three fds.  The prompt is written to the
+        stdin pty's master; echo goes back to that master (which we ignore).
         """
+        # Display pty — stdout/stderr.  This is the one we read from.
         master_fd, slave_fd = os.openpty()
 
         winsize = struct.pack("HHHH", self._rows, self._cols, 0, 0)
@@ -74,16 +74,12 @@ class PtySession:
             spawn_env.update(env)
 
         if stdin_data is not None:
-            # Write prompt to a temp file and use bash to pipe it.
-            # This keeps the child's stdout/stderr on the pty (tty) while
-            # stdin comes from a pipe — no echo, no buffer limits.
-            prompt_file = Path(str(cwd)) / ".orca" / ".prompt.tmp"
-            prompt_file.parent.mkdir(parents=True, exist_ok=True)
-            prompt_file.write_bytes(stdin_data)
-            shell_cmd = f"cat {prompt_file} | {cmd} {' '.join(args)}"
+            # Separate pty for stdin so the child sees a tty (required for
+            # raw mode) but prompt echo stays on this pty and is ignored.
+            stdin_master, stdin_slave = os.openpty()
             self._proc = subprocess.Popen(
-                ["bash", "-c", shell_cmd],
-                stdin=subprocess.DEVNULL,
+                [cmd, *args],
+                stdin=stdin_slave,
                 stdout=slave_fd,
                 stderr=slave_fd,
                 cwd=str(cwd),
@@ -91,6 +87,14 @@ class PtySession:
                 close_fds=True,
                 start_new_session=True,
             )
+            os.close(stdin_slave)
+
+            # Write prompt to the stdin pty master — arrives on child's stdin.
+            # Write in chunks to avoid filling the pty buffer (4KB on macOS).
+            _CHUNK = 4096
+            for i in range(0, len(stdin_data), _CHUNK):
+                os.write(stdin_master, stdin_data[i : i + _CHUNK])
+            os.close(stdin_master)  # sends EOF to child's stdin
         else:
             self._proc = subprocess.Popen(
                 [cmd, *args],
