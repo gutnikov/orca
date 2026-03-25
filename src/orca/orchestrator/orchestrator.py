@@ -298,8 +298,27 @@ class Orchestrator:
         # Create TmuxSession and register it for TUI terminal rendering
         tmux_session = PtySession(session_name=tracking_id, cols=120, rows=40)
 
+        # Set up session log path for periodic + final persistence
+        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+        log_dir = workdir / ".orca" / "sessions"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / f"{enriched_effect.state}-{timestamp}.log"
+
         with self._pty_lock:
             self._pty_registry[tracking_id] = tmux_session
+
+        # Periodically save scrollback every 30s so it survives crashes
+        async def _persist_scrollback() -> None:
+            while True:
+                await asyncio.sleep(30)
+                try:
+                    raw = tmux_session.capture_scrollback()
+                    if raw:
+                        log_path.write_text(raw)
+                except Exception:
+                    pass
+
+        persist_task = asyncio.create_task(_persist_scrollback())
 
         try:
             outcome = await worker.execute(
@@ -311,6 +330,8 @@ class Orchestrator:
                 pty_session=tmux_session,
             )
         finally:
+            persist_task.cancel()
+
             with self._pty_lock:
                 self._pty_registry.pop(tracking_id, None)
                 try:
@@ -319,17 +340,13 @@ class Orchestrator:
                 except Exception:
                     self._frozen_registry[tracking_id] = []
 
-            # Persist full scrollback to file before killing the session
+            # Final scrollback save before killing the session
             try:
-                timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
-                log_dir = workdir / ".orca" / "sessions"
-                log_dir.mkdir(parents=True, exist_ok=True)
-                log_path = log_dir / f"{enriched_effect.state}-{timestamp}.log"
                 raw = tmux_session.capture_scrollback()
                 if raw:
                     log_path.write_text(raw)
             except Exception:
-                pass  # best-effort
+                pass
 
             tmux_session.close()
 
