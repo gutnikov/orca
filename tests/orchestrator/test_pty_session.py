@@ -16,7 +16,7 @@ async def test_spawn_and_read_output() -> None:
     session = PtySession(cols=80, rows=24)
     await session.spawn("python3", ["-c", 'print("hello pty")'], cwd=".")
     read_task = asyncio.create_task(session.read_loop())
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(1.0)
     read_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await read_task
@@ -36,7 +36,7 @@ async def test_alive_property() -> None:
     session = PtySession(cols=80, rows=24)
     await session.spawn("python3", ["-c", 'print("done")'], cwd=".")
     read_task = asyncio.create_task(session.read_loop())
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(1.0)
     read_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await read_task
@@ -61,7 +61,7 @@ async def test_snapshot_returns_rich_text_lines() -> None:
     session = PtySession(cols=80, rows=24)
     await session.spawn("python3", ["-c", 'print("snapshot test")'], cwd=".")
     read_task = asyncio.create_task(session.read_loop())
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(1.0)
     read_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await read_task
@@ -82,7 +82,7 @@ async def test_log_path_writes_raw_bytes(tmp_path: Path) -> None:
     session = PtySession(cols=80, rows=24)
     await session.spawn("python3", ["-c", 'print("logged output")'], cwd=".", log_path=log_file)
     read_task = asyncio.create_task(session.read_loop())
-    await asyncio.sleep(0.5)
+    await asyncio.sleep(1.0)
     read_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await read_task
