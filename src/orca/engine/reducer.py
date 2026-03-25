@@ -346,6 +346,10 @@ def _handle_worker_failed(
     issue.failure_count += 1
     append_log(issue, event.timestamp, "worker_failed", {"state": issue.state, "error": event.error})
 
+    # Store the failure error in issue fields so retry prompts can reference it
+    if "failure_context" in config.issue_fields:
+        issue.fields["failure_context"] = event.error
+
     # Check retry limit
     if config.max_worker_retries > 0 and issue.failure_count >= config.max_worker_retries:
         # Give up — release the worker slot and log
