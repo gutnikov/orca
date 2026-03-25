@@ -48,7 +48,7 @@ class TerminalView(VerticalScroll):
         self._stop()
         self._pty_session = session
         self._frozen = None
-        self._render_screen()
+        self._static.update("*Connecting to live session...*")
         self._timer_handle = self.set_interval(1 / 20, self._render_screen)  # 50ms
 
     def show_frozen(self, frozen: FrozenTerminal) -> None:
@@ -68,17 +68,20 @@ class TerminalView(VerticalScroll):
         """Render current pyte screen state to the Static widget."""
         if self._pty_session is None:
             return
-        screen = self._pty_session.screen
-        # Take a shallow copy of buffer rows to avoid RuntimeError if
-        # the orchestrator thread mutates the buffer during iteration.
-        rows_copy = {row: dict(screen.buffer[row]) for row in range(screen.lines)}
-        lines: list[Text] = []
-        for row in range(screen.lines):
-            lines.append(PtySession.pyte_line_to_rich(rows_copy[row], screen.columns))
-        content = Text("\n").join(lines)
-        self._static.update(content)
-        if self.max_scroll_y - self.scroll_y < 5:
-            self.scroll_end(animate=False)
+        try:
+            screen = self._pty_session.screen
+            # Take a shallow copy of buffer rows to avoid RuntimeError if
+            # the orchestrator thread mutates the buffer during iteration.
+            rows_copy = {row: dict(screen.buffer[row]) for row in range(screen.lines)}
+            lines: list[Text] = []
+            for row in range(screen.lines):
+                lines.append(PtySession.pyte_line_to_rich(rows_copy[row], screen.columns))
+            content = Text("\n").join(lines)
+            self._static.update(content)
+            if self.max_scroll_y - self.scroll_y < 5:
+                self.scroll_end(animate=False)
+        except Exception:
+            pass  # Swallow render errors — next tick will retry
 
     def _stop(self) -> None:
         """Stop any active rendering."""

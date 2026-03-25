@@ -54,22 +54,16 @@ class PtySession:
     ) -> None:
         """Spawn a process in a pty.
 
-        All three standard fds (stdin/stdout/stderr) are connected to the pty
-        slave so the child sees a real tty.  When *stdin_data* is provided it
-        is written to the master fd with echo disabled so the prompt reaches
-        the child without polluting the terminal output.
+        When *stdin_data* is provided, the prompt is written to a temp file
+        and piped to the command via bash (``cat file | cmd args``).  This
+        keeps stdin as a pipe (so the prompt doesn't echo) while stdout/stderr
+        go through the pty for TUI rendering.  The child's stdout is still a
+        tty so interactive programs render their TUI normally.
         """
         master_fd, slave_fd = os.openpty()
 
         winsize = struct.pack("HHHH", self._rows, self._cols, 0, 0)
         fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
-
-        # Disable echo on the pty BEFORE spawning so prompt writes don't
-        # get reflected back to the master fd.
-        if stdin_data is not None:
-            attrs = termios.tcgetattr(slave_fd)
-            attrs[3] &= ~termios.ECHO  # lflags
-            termios.tcsetattr(slave_fd, termios.TCSANOW, attrs)
 
         flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
         fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
@@ -79,24 +73,38 @@ class PtySession:
         if env:
             spawn_env.update(env)
 
-        self._proc = subprocess.Popen(
-            [cmd, *args],
-            stdin=slave_fd,
-            stdout=slave_fd,
-            stderr=slave_fd,
-            cwd=str(cwd),
-            env=spawn_env,
-            close_fds=True,
-            start_new_session=True,
-        )
+        if stdin_data is not None:
+            # Write prompt to a temp file and use bash to pipe it.
+            # This keeps the child's stdout/stderr on the pty (tty) while
+            # stdin comes from a pipe — no echo, no buffer limits.
+            prompt_file = Path(str(cwd)) / ".orca" / ".prompt.tmp"
+            prompt_file.parent.mkdir(parents=True, exist_ok=True)
+            prompt_file.write_bytes(stdin_data)
+            shell_cmd = f"cat {prompt_file} | {cmd} {' '.join(args)}"
+            self._proc = subprocess.Popen(
+                ["bash", "-c", shell_cmd],
+                stdin=subprocess.DEVNULL,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                cwd=str(cwd),
+                env=spawn_env,
+                close_fds=True,
+                start_new_session=True,
+            )
+        else:
+            self._proc = subprocess.Popen(
+                [cmd, *args],
+                stdin=slave_fd,
+                stdout=slave_fd,
+                stderr=slave_fd,
+                cwd=str(cwd),
+                env=spawn_env,
+                close_fds=True,
+                start_new_session=True,
+            )
 
         os.close(slave_fd)
         self._master_fd = master_fd
-
-        # Write prompt to master fd — it arrives on the child's stdin.
-        # Echo is disabled so the prompt bytes won't be reflected back.
-        if stdin_data is not None:
-            os.write(master_fd, stdin_data)
 
         if log_path is not None:
             log_path.parent.mkdir(parents=True, exist_ok=True)
