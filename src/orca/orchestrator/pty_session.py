@@ -54,15 +54,22 @@ class PtySession:
     ) -> None:
         """Spawn a process in a pty.
 
-        When *stdin_data* is provided, the process receives it on a separate
-        pipe (so the prompt is not echoed through the pty) while stdout/stderr
-        still go through the pty for TUI rendering.  Without *stdin_data*,
-        stdin is connected to the pty slave fd.
+        All three standard fds (stdin/stdout/stderr) are connected to the pty
+        slave so the child sees a real tty.  When *stdin_data* is provided it
+        is written to the master fd with echo disabled so the prompt reaches
+        the child without polluting the terminal output.
         """
         master_fd, slave_fd = os.openpty()
 
         winsize = struct.pack("HHHH", self._rows, self._cols, 0, 0)
         fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
+
+        # Disable echo on the pty BEFORE spawning so prompt writes don't
+        # get reflected back to the master fd.
+        if stdin_data is not None:
+            attrs = termios.tcgetattr(slave_fd)
+            attrs[3] &= ~termios.ECHO  # lflags
+            termios.tcsetattr(slave_fd, termios.TCSANOW, attrs)
 
         flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
         fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
@@ -72,13 +79,9 @@ class PtySession:
         if env:
             spawn_env.update(env)
 
-        # When stdin_data is provided, use a pipe for stdin so the prompt
-        # doesn't echo through the pty.  stdout/stderr still go to the pty.
-        use_pipe = stdin_data is not None
-
         self._proc = subprocess.Popen(
             [cmd, *args],
-            stdin=subprocess.PIPE if use_pipe else slave_fd,
+            stdin=slave_fd,
             stdout=slave_fd,
             stderr=slave_fd,
             cwd=str(cwd),
@@ -90,10 +93,10 @@ class PtySession:
         os.close(slave_fd)
         self._master_fd = master_fd
 
-        # Write stdin data and close the pipe
-        if use_pipe and self._proc.stdin is not None and stdin_data is not None:
-            self._proc.stdin.write(stdin_data)
-            self._proc.stdin.close()
+        # Write prompt to master fd — it arrives on the child's stdin.
+        # Echo is disabled so the prompt bytes won't be reflected back.
+        if stdin_data is not None:
+            os.write(master_fd, stdin_data)
 
         if log_path is not None:
             log_path.parent.mkdir(parents=True, exist_ok=True)
