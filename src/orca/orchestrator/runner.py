@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
 from collections.abc import Callable
@@ -396,7 +397,7 @@ def main() -> None:
         config = parse_config(config_path.read_text())
 
         app = OrcaApp(run_dir=run_dir, branch_name=branch_name, config=config, insights_enabled=args.insights)
-        app.run(mouse=False)
+        app.run()
 
         # Surface orchestrator errors before exiting
         if run_error is not None:
@@ -406,21 +407,23 @@ def main() -> None:
             print("\nOrchestrator error:", file=sys.stderr)
             traceback.print_exception(type(run_error), run_error, run_error.__traceback__, file=sys.stderr)
 
-        # Reset terminal before force-killing — SIGTERM would leave escape
-        # sequences (focus reporting, alternate screen) enabled.
-        import sys
-
-        sys.stdout.write("\x1b[?1000l")  # disable normal mouse tracking
-        sys.stdout.write("\x1b[?1002l")  # disable button-event mouse tracking
-        sys.stdout.write("\x1b[?1003l")  # disable any-event mouse tracking
-        sys.stdout.write("\x1b[?1006l")  # disable SGR mouse reporting
-        sys.stdout.write("\x1b[?1004l")  # disable focus reporting
-        sys.stdout.write("\x1b[?1049l")  # exit alternate screen buffer
-        sys.stdout.write("\x1b[?25h")  # show cursor
-        sys.stdout.flush()
-
-        # Force exit to kill orchestrator thread and any subprocesses
+        # Reset terminal escape sequences that Textual enables.
+        # Write directly to fd to bypass any buffering, then force exit.
         import os
-        import signal
 
-        os.kill(os.getpid(), signal.SIGTERM)
+        reset = (
+            "\x1b[?1000l"  # disable normal mouse tracking
+            "\x1b[?1002l"  # disable button-event mouse tracking
+            "\x1b[?1003l"  # disable any-event mouse tracking
+            "\x1b[?1006l"  # disable SGR mouse reporting
+            "\x1b[?1004l"  # disable focus reporting
+            "\x1b[?1049l"  # exit alternate screen buffer
+            "\x1b[?25h"  # show cursor
+        )
+        with contextlib.suppress(OSError):
+            os.write(1, reset.encode())
+
+        # Force exit to kill orchestrator thread and any subprocesses.
+        # os._exit skips cleanup but guarantees immediate termination
+        # after the terminal reset bytes have been written to the fd.
+        os._exit(0)
