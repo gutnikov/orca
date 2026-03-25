@@ -49,7 +49,7 @@ class TerminalView(VerticalScroll):
         self._tmux_session = session
         self._frozen = None
         self._static.update("*Connecting to live session...*")
-        self._timer_handle = self.set_interval(0.5, self._render_screen)
+        self._timer_handle = self.set_interval(0.2, self._render_screen)  # 200ms
 
     def show_frozen(self, frozen: FrozenTerminal) -> None:
         """Display a frozen terminal snapshot."""
