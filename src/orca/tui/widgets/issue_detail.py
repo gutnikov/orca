@@ -168,15 +168,6 @@ class IssueDetail(VerticalScroll):
         if candidate.exists():
             return candidate
 
-        # Only fall back to most recent JSONL when we have NO claude_session_id
-        # (the session just started and hasn't reported its ID yet).
-        # With a known ID that doesn't match, we'd rather show "waiting"
-        # than display the wrong session's transcript (e.g. insights).
-        if not claude_session_id and project_dir.exists():
-            jsonl_files = sorted(project_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
-            if jsonl_files:
-                return jsonl_files[0]
-
         return None
 
     def show_insights(self, insights_path: Path) -> None:
