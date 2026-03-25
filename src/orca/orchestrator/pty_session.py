@@ -9,8 +9,9 @@ from pathlib import Path
 
 from rich.text import Text
 
-# Strip ALL background colors and bright white foreground (231) that clash with dark themes
-_STRIP_RE = re.compile(r"\x1b\[(?:48;[25];\d+(?:;\d+)*|38;5;231)m")
+# Strip background colors so Textual's theme background shows through.
+# Matches 48;5;N (256-color) and 48;2;R;G;B (truecolor) background sequences.
+_BG_RE = re.compile(r"\x1b\[48;[25];\d+(?:;\d+)*m")
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +120,7 @@ class TmuxSession:
         raw = self.capture_pane()
         if not raw:
             return Text("")
-        raw = _STRIP_RE.sub("", raw)
+        raw = _BG_RE.sub("", raw)
         return Text.from_ansi(raw)
 
     def snapshot(self) -> Text:
@@ -127,7 +128,7 @@ class TmuxSession:
         raw = self.capture_scrollback()
         if not raw:
             return Text("")
-        raw = _STRIP_RE.sub("", raw)
+        raw = _BG_RE.sub("", raw)
         return Text.from_ansi(raw)
 
     def resize(self, cols: int, rows: int) -> None:
