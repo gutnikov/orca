@@ -50,7 +50,15 @@ class PtySession:
         cwd: str | Path,
         env: dict[str, str] | None = None,
         log_path: Path | None = None,
+        stdin_data: bytes | None = None,
     ) -> None:
+        """Spawn a process in a pty.
+
+        When *stdin_data* is provided, the process receives it on a separate
+        pipe (so the prompt is not echoed through the pty) while stdout/stderr
+        still go through the pty for TUI rendering.  Without *stdin_data*,
+        stdin is connected to the pty slave fd.
+        """
         master_fd, slave_fd = os.openpty()
 
         winsize = struct.pack("HHHH", self._rows, self._cols, 0, 0)
@@ -64,9 +72,13 @@ class PtySession:
         if env:
             spawn_env.update(env)
 
+        # When stdin_data is provided, use a pipe for stdin so the prompt
+        # doesn't echo through the pty.  stdout/stderr still go to the pty.
+        use_pipe = stdin_data is not None
+
         self._proc = subprocess.Popen(
             [cmd, *args],
-            stdin=slave_fd,
+            stdin=subprocess.PIPE if use_pipe else slave_fd,
             stdout=slave_fd,
             stderr=slave_fd,
             cwd=str(cwd),
@@ -77,6 +89,11 @@ class PtySession:
 
         os.close(slave_fd)
         self._master_fd = master_fd
+
+        # Write stdin data and close the pipe
+        if use_pipe and self._proc.stdin is not None and stdin_data is not None:
+            self._proc.stdin.write(stdin_data)
+            self._proc.stdin.close()
 
         if log_path is not None:
             log_path.parent.mkdir(parents=True, exist_ok=True)

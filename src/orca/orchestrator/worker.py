@@ -86,17 +86,13 @@ class ClaudeCodeWorker:
         else:
             prompt = ""
 
-        # c. Write prompt to temp file
-        prompt_file = workdir / ".orca" / "prompt.txt"
-        prompt_file.parent.mkdir(parents=True, exist_ok=True)
-        prompt_file.write_text(prompt)
-
-        # d. Spawn claude via pty
+        # c. Spawn claude via pty — pipe prompt through stdin
         await pty_session.spawn(
             "claude",
-            ["-p", str(prompt_file), "--max-turns", "50", "--permission-mode", "bypassPermissions"],
+            ["--max-turns", "50", "--permission-mode", "bypassPermissions"],
             cwd=workdir,
             log_path=log_path,
+            stdin_data=prompt.encode(),
         )
 
         logger.debug(
