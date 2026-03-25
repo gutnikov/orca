@@ -26,13 +26,19 @@ class WorkerRunSelected(Message):
     """Posted when the user highlights a worker-run leaf in the tree."""
 
     def __init__(
-        self, session_id: str, active: bool = False, worktree_path: str = "", claude_session_id: str = ""
+        self,
+        session_id: str,
+        active: bool = False,
+        worktree_path: str = "",
+        claude_session_id: str = "",
+        state: str = "",
     ) -> None:
         super().__init__()
         self.session_id = session_id
         self.active = active
         self.worktree_path = worktree_path
         self.claude_session_id = claude_session_id
+        self.state = state
 
 
 class RetryIssue(Message):

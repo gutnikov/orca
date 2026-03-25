@@ -14,12 +14,18 @@ from orca.engine.types import State
 _PLACEHOLDER = "*Select an issue or worker run from the tree*"
 
 
-def _extract_claude_session_id(workdir: Path) -> str | None:
-    """Extract sessionId from the most recent session log in the workdir."""
+def _extract_claude_session_id(workdir: Path, state: str = "") -> str | None:
+    """Extract sessionId from the most recent session log in the workdir.
+
+    When *state* is provided, only session logs matching ``{state}-*.jsonl`` are
+    considered.  This prevents picking up logs from unrelated concurrent workers
+    (e.g. insights) that write to the same directory.
+    """
     sessions_dir = workdir / ".orca" / "sessions"
     if not sessions_dir.is_dir():
         return None
-    logs = sorted(sessions_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+    pattern = f"{state}-*.jsonl" if state else "*.jsonl"
+    logs = sorted(sessions_dir.glob(pattern), key=lambda p: p.stat().st_mtime, reverse=True)
     if not logs:
         return None
     try:
@@ -143,7 +149,13 @@ class IssueDetail(VerticalScroll):
         return ""
 
     def show_transcript(
-        self, session_id: str, *, active: bool = False, worktree_path: str = "", claude_session_id: str = ""
+        self,
+        session_id: str,
+        *,
+        active: bool = False,
+        worktree_path: str = "",
+        claude_session_id: str = "",
+        state: str = "",
     ) -> None:
         self.stop_auto_refresh()
 
@@ -157,13 +169,13 @@ class IssueDetail(VerticalScroll):
                 self._markdown.update(content)
                 if active:
                     self._jsonl_path = (
-                        self._find_jsonl(worktree_path, claude_session_id, session_id) if worktree_path else None
+                        self._find_jsonl(worktree_path, claude_session_id, session_id, state) if worktree_path else None
                     )
                 return
 
         # No .md — try JSONL directly
         if worktree_path:
-            jsonl = self._find_jsonl(worktree_path, claude_session_id, session_id)
+            jsonl = self._find_jsonl(worktree_path, claude_session_id, session_id, state)
             if jsonl is not None:
                 self._jsonl_path = jsonl
                 self._refresh_jsonl()
@@ -173,7 +185,7 @@ class IssueDetail(VerticalScroll):
         self._markdown.update(f"*Waiting for transcript for session {session_id[:8]}...*")
 
     @staticmethod
-    def _find_jsonl(worktree_path: str, claude_session_id: str, session_id: str) -> Path | None:
+    def _find_jsonl(worktree_path: str, claude_session_id: str, session_id: str, state: str = "") -> Path | None:
         """Locate the JSONL transcript file for a session."""
         claude_projects_root = Path.home() / ".claude" / "projects"
         if not claude_projects_root.exists():
@@ -195,8 +207,10 @@ class IssueDetail(VerticalScroll):
 
         # No claude_session_id yet — try to extract it from the worker's
         # session log (the first JSONL line contains sessionId).
+        # Pass state so we only consider logs for this specific worker,
+        # avoiding picking up concurrent insights/other worker logs.
         if not claude_session_id:
-            extracted = _extract_claude_session_id(Path(worktree_path))
+            extracted = _extract_claude_session_id(Path(worktree_path), state)
             if extracted:
                 candidate = project_dir / f"{extracted}.jsonl"
                 if candidate.exists():

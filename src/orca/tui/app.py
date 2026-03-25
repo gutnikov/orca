@@ -109,6 +109,7 @@ class OrcaApp(App[None]):
             active=message.active,
             worktree_path=message.worktree_path,
             claude_session_id=message.claude_session_id,
+            state=message.state,
         )
 
     def on_insights_selected(self, message: InsightsSelected) -> None:
