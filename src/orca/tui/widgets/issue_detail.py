@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Generator
 from pathlib import Path
 
@@ -10,6 +12,29 @@ from textual.widgets import Markdown
 from orca.engine.types import State
 
 _PLACEHOLDER = "*Select an issue or worker run from the tree*"
+
+
+def _extract_claude_session_id(workdir: Path) -> str | None:
+    """Extract sessionId from the most recent session log in the workdir."""
+    sessions_dir = workdir / ".orca" / "sessions"
+    if not sessions_dir.is_dir():
+        return None
+    logs = sorted(sessions_dir.glob("*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+    if not logs:
+        return None
+    try:
+        with logs[0].open() as f:
+            for _ in range(5):
+                line = f.readline()
+                if not line:
+                    break
+                msg = json.loads(line)
+                sid = msg.get("sessionId") or msg.get("session_id")
+                if sid:
+                    return str(sid)
+    except (json.JSONDecodeError, OSError):
+        pass
+    return None
 
 
 class IssueDetail(VerticalScroll):
@@ -154,7 +179,7 @@ class IssueDetail(VerticalScroll):
         if not claude_projects_root.exists():
             return None
 
-        project_hash = worktree_path.replace("/", "-").replace(".", "-")
+        project_hash = re.sub(r"[^a-zA-Z0-9-]", "-", worktree_path)
         project_dir = claude_projects_root / project_hash
 
         # Try exact match by Claude session ID first
@@ -167,6 +192,15 @@ class IssueDetail(VerticalScroll):
         candidate = project_dir / f"{session_id}.jsonl"
         if candidate.exists():
             return candidate
+
+        # No claude_session_id yet — try to extract it from the worker's
+        # session log (the first JSONL line contains sessionId).
+        if not claude_session_id:
+            extracted = _extract_claude_session_id(Path(worktree_path))
+            if extracted:
+                candidate = project_dir / f"{extracted}.jsonl"
+                if candidate.exists():
+                    return candidate
 
         return None
 
