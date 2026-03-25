@@ -17,5 +17,5 @@ def test_terminal_view_initial_state() -> None:
     """TerminalView starts in placeholder state with no session or frozen data."""
     view = TerminalView()
     assert view._frozen is None
-    assert view._pty_session is None
+    assert view._tmux_session is None
     assert view._timer_handle is None

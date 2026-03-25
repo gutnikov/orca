@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 from dataclasses import dataclass
@@ -86,70 +85,37 @@ class ClaudeCodeWorker:
         else:
             prompt = ""
 
-        # c. Spawn claude via pty — pipe prompt through stdin
+        # c. Spawn claude in a tmux session — prompt piped via file
         await pty_session.spawn(
             "claude",
             ["--dangerously-skip-permissions", "--max-turns", "50"],
             cwd=workdir,
-            log_path=log_path,
             stdin_data=prompt.encode(),
         )
 
         logger.debug(
-            "Pty subprocess started for issue %s",
+            "Tmux session started for issue %s",
             effect.issue_id,
             extra={
-                "event": "pty_subprocess_started",
+                "event": "tmux_session_started",
                 "issue_id": effect.issue_id,
                 "state": effect.state,
-                "pid": pty_session.pid,
+                "session": pty_session.session_name,
                 "workdir": str(workdir),
             },
         )
 
-        # e. Run read_loop concurrently, wait for process to exit
-        read_task = asyncio.create_task(pty_session.read_loop())
-
+        # d. Wait for tmux session to end (process exits → session closes)
         effective_timeout = float(inactivity_timeout) if inactivity_timeout else _INACTIVITY_TIMEOUT
-        try:
-            await asyncio.wait_for(
-                asyncio.to_thread(pty_session._proc.wait),  # type: ignore[union-attr]
-                timeout=effective_timeout,
-            )
-        except TimeoutError:
+        exit_code = await pty_session.wait(timeout=effective_timeout)
+
+        if exit_code != 0:
             logger.warning(
-                "Worker for issue %s inactive for %ds — killing",
+                "Worker for issue %s timed out or failed",
                 effect.issue_id,
-                int(effective_timeout),
-                extra={"event": "inactivity_timeout", "issue_id": effect.issue_id, "pid": pty_session.pid},
+                extra={"event": "tmux_session_failed", "issue_id": effect.issue_id},
             )
-            if pty_session._proc is not None:
-                pty_session._proc.kill()
-            read_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await read_task
             return WorkerFailure(error=f"worker killed after {int(effective_timeout)}s of inactivity")
-
-        # Cancel read loop (it will finish on EIO naturally, but cancel as safety)
-        read_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await read_task
-
-        # f. Check exit code
-        returncode = pty_session._proc.returncode if pty_session._proc else -1
-        logger.debug(
-            "Pty subprocess exited for issue %s with code %s",
-            effect.issue_id,
-            returncode,
-            extra={
-                "event": "pty_subprocess_exited",
-                "issue_id": effect.issue_id,
-                "state": effect.state,
-                "returncode": returncode,
-            },
-        )
-        if returncode != 0:
-            return WorkerFailure(error=f"claude exited with non-zero exit code: {returncode}")
 
         # g. Read result_path, parse JSON
         if not result_path.exists():

@@ -1,47 +1,47 @@
 from __future__ import annotations
 
 import asyncio
-import contextlib
-import errno
-import fcntl
-import os
-import struct
+import logging
+import shlex
 import subprocess
-import termios
 from pathlib import Path
-from typing import IO
 
-import pyte
-import pyte.screens
 from rich.text import Text
 
-_DEFAULT_HISTORY = 10_000
+logger = logging.getLogger(__name__)
+
+# Unique prefix for orca-managed tmux sessions
+_TMUX_PREFIX = "orca-worker-"
 
 
-class PtySession:
-    """Pty-backed subprocess with in-memory VT100 terminal emulator."""
+class TmuxSession:
+    """Manages a worker process inside a tmux session.
 
-    def __init__(self, cols: int = 120, rows: int = 40) -> None:
+    Spawns the command in a detached tmux session and provides methods to
+    capture the visible pane content (with ANSI colours) for TUI rendering.
+    """
+
+    def __init__(self, session_name: str, cols: int = 120, rows: int = 40) -> None:
+        self._session_name = f"{_TMUX_PREFIX}{session_name}"
         self._cols = cols
         self._rows = rows
-        self._stream = pyte.Stream()
-        self.screen: pyte.HistoryScreen = pyte.HistoryScreen(cols, rows, history=_DEFAULT_HISTORY)
-        self._stream.attach(self.screen)
-        self._master_fd: int | None = None
-        self._proc: subprocess.Popen[bytes] | None = None
-        self._log_file: IO[bytes] | None = None
+        self._alive = False
 
     @property
     def alive(self) -> bool:
-        if self._proc is None:
+        """Check if the tmux session still exists."""
+        if not self._alive:
             return False
-        return self._proc.poll() is None
+        result = subprocess.run(
+            ["tmux", "has-session", "-t", self._session_name],
+            capture_output=True,
+        )
+        self._alive = result.returncode == 0
+        return self._alive
 
     @property
-    def pid(self) -> int:
-        if self._proc is None:
-            raise RuntimeError("PtySession not spawned")
-        return self._proc.pid
+    def session_name(self) -> str:
+        return self._session_name
 
     async def spawn(
         self,
@@ -49,163 +49,111 @@ class PtySession:
         args: list[str],
         cwd: str | Path,
         env: dict[str, str] | None = None,
-        log_path: Path | None = None,
         stdin_data: bytes | None = None,
     ) -> None:
-        """Spawn a process in a pty.
+        """Spawn a process inside a new detached tmux session."""
+        full_cmd = shlex.join([cmd, *args])
 
-        Uses two ptys when *stdin_data* is provided: one for stdout/stderr
-        (the "display" pty we read from) and a separate one for stdin so the
-        child sees a real tty on all three fds.  The prompt is written to the
-        stdin pty's master; echo goes back to that master (which we ignore).
-        """
-        # Display pty — stdout/stderr.  This is the one we read from.
-        master_fd, slave_fd = os.openpty()
-
-        winsize = struct.pack("HHHH", self._rows, self._cols, 0, 0)
-        fcntl.ioctl(slave_fd, termios.TIOCSWINSZ, winsize)
-
-        flags = fcntl.fcntl(master_fd, fcntl.F_GETFL)
-        fcntl.fcntl(master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-
-        spawn_env = os.environ.copy()
-        spawn_env["TERM"] = "xterm-256color"
-        if env:
-            spawn_env.update(env)
-
+        # If we have stdin data, write it to a file and pipe it
         if stdin_data is not None:
-            # Separate pty for stdin so the child sees a tty (required for
-            # raw mode) but prompt echo stays on this pty and is ignored.
-            stdin_master, stdin_slave = os.openpty()
-            self._proc = subprocess.Popen(
-                [cmd, *args],
-                stdin=stdin_slave,
-                stdout=slave_fd,
-                stderr=slave_fd,
-                cwd=str(cwd),
-                env=spawn_env,
-                close_fds=True,
-                start_new_session=True,
-            )
-            os.close(stdin_slave)
+            prompt_file = Path(str(cwd)) / ".orca" / ".prompt.tmp"
+            prompt_file.parent.mkdir(parents=True, exist_ok=True)
+            prompt_file.write_bytes(stdin_data)
+            full_cmd = f"cat {shlex.quote(str(prompt_file))} | {full_cmd}"
 
-            # Write prompt in a background thread — the pty buffer is only
-            # 4KB on macOS so large prompts block until the child reads.
-            # Doing this synchronously would deadlock the event loop.
-            import threading
+        tmux_args = [
+            "tmux",
+            "new-session",
+            "-d",
+            "-s",
+            self._session_name,
+            "-x",
+            str(self._cols),
+            "-y",
+            str(self._rows),
+            full_cmd,
+        ]
 
-            def _feed_stdin() -> None:
-                try:
-                    _CHUNK = 4096
-                    for i in range(0, len(stdin_data), _CHUNK):
-                        os.write(stdin_master, stdin_data[i : i + _CHUNK])
-                finally:
-                    os.close(stdin_master)  # sends EOF to child's stdin
+        proc = await asyncio.create_subprocess_exec(
+            *tmux_args,
+            cwd=str(cwd),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await proc.wait()
 
-            threading.Thread(target=_feed_stdin, daemon=True).start()
-        else:
-            self._proc = subprocess.Popen(
-                [cmd, *args],
-                stdin=slave_fd,
-                stdout=slave_fd,
-                stderr=slave_fd,
-                cwd=str(cwd),
-                env=spawn_env,
-                close_fds=True,
-                start_new_session=True,
-            )
+        if proc.returncode != 0:
+            raise RuntimeError(f"Failed to create tmux session {self._session_name}")
 
-        os.close(slave_fd)
-        self._master_fd = master_fd
+        self._alive = True
+        logger.debug("Tmux session %s started", self._session_name)
 
-        if log_path is not None:
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            self._log_file = open(log_path, "wb")  # noqa: SIM115
+    def capture_pane(self) -> str:
+        """Capture the current visible pane content with ANSI escape sequences."""
+        result = subprocess.run(
+            ["tmux", "capture-pane", "-t", self._session_name, "-p", "-e"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return ""
+        return result.stdout
 
-    async def read_loop(self) -> None:
-        if self._master_fd is None:
-            raise RuntimeError("PtySession not spawned")
+    def capture_scrollback(self) -> str:
+        """Capture full scrollback history with ANSI escape sequences."""
+        result = subprocess.run(
+            ["tmux", "capture-pane", "-t", self._session_name, "-p", "-e", "-S", "-"],
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode != 0:
+            return ""
+        return result.stdout
 
-        loop = asyncio.get_running_loop()
-        fd = self._master_fd
-        event = asyncio.Event()
+    def capture_rich(self) -> Text:
+        """Capture pane content as a Rich Text object with ANSI styling."""
+        raw = self.capture_pane()
+        return Text.from_ansi(raw) if raw else Text("")
 
-        def _on_readable() -> None:
-            event.set()
-
-        loop.add_reader(fd, _on_readable)
-        try:
-            while True:
-                await event.wait()
-                event.clear()
-                try:
-                    data = os.read(fd, 65536)
-                except OSError as e:
-                    if e.errno == errno.EIO:
-                        break
-                    if e.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
-                        continue
-                    raise
-                if not data:
-                    break
-                if self._log_file is not None:
-                    self._log_file.write(data)
-                self._stream.feed(data.decode("utf-8", errors="replace"))
-        finally:
-            loop.remove_reader(fd)
-            if self._log_file is not None:
-                self._log_file.close()
-                self._log_file = None
+    def snapshot(self) -> Text:
+        """Capture full scrollback as a Rich Text object (for frozen display)."""
+        raw = self.capture_scrollback()
+        return Text.from_ansi(raw) if raw else Text("")
 
     def resize(self, cols: int, rows: int) -> None:
-        """Resize the terminal to *cols* x *rows*."""
+        """Resize the tmux window."""
         self._cols = cols
         self._rows = rows
-        self.screen.resize(rows, cols)
-        if self._master_fd is not None:
-            winsize = struct.pack("HHHH", rows, cols, 0, 0)
-            fcntl.ioctl(self._master_fd, termios.TIOCSWINSZ, winsize)
+        subprocess.run(
+            ["tmux", "resize-window", "-t", self._session_name, "-x", str(cols), "-y", str(rows)],
+            capture_output=True,
+        )
 
-    @staticmethod
-    def pyte_line_to_rich(row_data: dict[int, pyte.screens.Char], cols: int) -> Text:
-        """Convert a pyte row (dict of column -> Char) to a Rich Text."""
-        text = Text()
-        for col in range(cols):
-            char = row_data.get(col, pyte.screens.Char(" "))
-            style_parts: list[str] = []
-            if char.fg and char.fg != "default":
-                style_parts.append(char.fg)
-            if char.bg and char.bg != "default":
-                style_parts.append(f"on {char.bg}")
-            if char.bold:
-                style_parts.append("bold")
-            if char.italics:
-                style_parts.append("italic")
-            if char.underscore:
-                style_parts.append("underline")
-            style_str = " ".join(style_parts) if style_parts else ""
-            text.append(char.data, style=style_str)
-        return text
+    async def wait(self, timeout: float | None = None) -> int:
+        """Wait for the tmux session to end. Returns 0 on normal exit."""
+        interval = 0.5
+        elapsed = 0.0
+        while self.alive:
+            await asyncio.sleep(interval)
+            elapsed += interval
+            if timeout is not None and elapsed >= timeout:
+                self.kill()
+                return -1
+        return 0
 
-    def snapshot(self) -> list[Text]:
-        """Return the full terminal state as a list of Rich Text lines."""
-        lines: list[Text] = []
-        # Scrollback history
-        for row_data in self.screen.history.top:
-            lines.append(self.pyte_line_to_rich(row_data, self._cols))
-        # Current screen buffer
-        for row in range(self.screen.lines):
-            lines.append(self.pyte_line_to_rich(self.screen.buffer[row], self._cols))
-        return lines
+    def kill(self) -> None:
+        """Kill the tmux session."""
+        subprocess.run(
+            ["tmux", "kill-session", "-t", self._session_name],
+            capture_output=True,
+        )
+        self._alive = False
 
     def close(self) -> None:
-        if self._master_fd is not None:
-            with contextlib.suppress(OSError):
-                os.close(self._master_fd)
-            self._master_fd = None
-        if self._proc is not None and self._proc.poll() is None:
-            self._proc.kill()
-            self._proc.wait()
-        if self._log_file is not None:
-            self._log_file.close()
-            self._log_file = None
+        """Clean up the tmux session if it's still running."""
+        if self.alive:
+            self.kill()
+
+
+# Keep PtySession as an alias for backward compatibility in imports
+PtySession = TmuxSession
