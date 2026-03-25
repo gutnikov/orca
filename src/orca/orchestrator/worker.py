@@ -89,7 +89,7 @@ class ClaudeCodeWorker:
         # c. Spawn claude via pty — pipe prompt through stdin
         await pty_session.spawn(
             "claude",
-            ["--max-turns", "50", "--permission-mode", "bypassPermissions"],
+            ["--dangerously-skip-permissions", "--max-turns", "50"],
             cwd=workdir,
             log_path=log_path,
             stdin_data=prompt.encode(),
@@ -194,8 +194,7 @@ class ClaudeCodeWorker:
             "--verbose",
             "--max-turns",
             "50",
-            "--permission-mode",
-            "bypassPermissions",
+            "--dangerously-skip-permissions",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             cwd=workdir,
@@ -303,8 +302,7 @@ class ClaudeCodeWorker:
             "--verbose",
             "--max-turns",
             "50",
-            "--permission-mode",
-            "bypassPermissions",
+            "--dangerously-skip-permissions",
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             cwd=workdir,
