@@ -318,6 +318,19 @@ class Orchestrator:
                     self._frozen_registry[tracking_id] = [frozen_snapshot]
                 except Exception:
                     self._frozen_registry[tracking_id] = []
+
+            # Persist full scrollback to file before killing the session
+            try:
+                timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+                log_dir = workdir / ".orca" / "sessions"
+                log_dir.mkdir(parents=True, exist_ok=True)
+                log_path = log_dir / f"{enriched_effect.state}-{timestamp}.log"
+                raw = tmux_session.capture_scrollback()
+                if raw:
+                    log_path.write_text(raw)
+            except Exception:
+                pass  # best-effort
+
             tmux_session.close()
 
         return outcome
