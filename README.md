@@ -8,23 +8,17 @@ Orca orchestrates fleets of AI agents that decompose, plan, build, and merge cod
 
 ![Orca TUI](docs/screenshots/tui.png)
 
-## Prerequisites
-
-Install [OpenCode](https://opencode.ai):
-
-```bash
-curl -fsSL https://opencode.ai/install | bash
-```
-
-Log in to your provider using OpenCode and choose a preferred model.
-
 ## Install
 
 ```bash
-./setup.sh
+pipx install "git+ssh://git@github.com/gutnikov/orca.git"
 ```
 
-The setup script will guide you through configuration interactively.
+Update to latest:
+
+```bash
+pipx install --force "git+ssh://git@github.com/gutnikov/orca.git"
+```
 
 ## Example
 
@@ -34,9 +28,67 @@ See [`example/`](example/) for a complete working setup — config, prompts, and
 cp -r example/* your-repo/
 ```
 
-## Quick start
+## Setup
 
-### 1. Run it
+### 1. Create a workflow config
+
+Add `orca.yml` to your repo root. You can have multiple workflow files (e.g. `orca.develop.yml`, `orca.test.yml`) and select them with `-w`.
+
+```yaml
+issue:
+  fields:
+    title:
+      type: string
+      description: Issue title
+
+initial: todo
+
+states:
+  todo:
+    worker:
+      kind: claude-code
+      prompt: prompts/implement.md
+      result_format:
+        outcome:
+          type: enum
+          values: [complete, reject]
+          description: Implementation result
+        reason:
+          type: string
+          description: Why rejected
+          required_when: [reject]
+    on:
+      complete: done
+      reject: todo
+
+  done:
+    terminal: true
+```
+
+### 2. Write worker prompts
+
+Prompts are Jinja2 templates. Create `prompts/implement.md`:
+
+```markdown
+You are working on: {{ issue.title }}
+
+{{ issue.description }}
+
+Implement this feature. When done, respond with your result.
+```
+
+### 3. Write a task file
+
+A task file is plain text — first line is the title, rest is the description:
+
+```
+Add user authentication
+Implement JWT-based auth with login, register, and token refresh endpoints.
+```
+
+Save it as `task.md` (or any filename).
+
+### 4. Run it
 
 ```bash
 orca task.md
@@ -47,7 +99,7 @@ Orca uses the current git branch as the base, then:
 - Routes each issue through the state machine
 - Shows live progress in the TUI
 
-### 2. Options
+## Options
 
 | Flag | Description |
 |------|-------------|
@@ -114,7 +166,16 @@ states:
 | Key | Action |
 |-----|--------|
 | `q` | Quit |
-| `r` | Refresh content pane |
+| `r` | Refresh state and content pane |
 | `n` | Retry failed issue |
 | `h` / `l` or Left / Right | Focus tree / content panel |
 | `j` / `k` | Scroll content down / up |
+
+## Development
+
+```bash
+uv sync                        # install dependencies
+uv run pytest                  # run tests
+uv run ruff check .            # lint
+uv run mypy src/               # type-check
+```
