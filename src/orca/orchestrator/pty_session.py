@@ -9,9 +9,9 @@ from pathlib import Path
 
 from rich.text import Text
 
-# Strip background colors so Textual's theme background shows through.
-# Matches 48;5;N (256-color) and 48;2;R;G;B (truecolor) background sequences.
-_BG_RE = re.compile(r"\x1b\[48;[25];\d+(?:;\d+)*m")
+# Strip background colors and reverse video so Textual's theme background shows through.
+# Matches: 48;5;N (256-color bg), 48;2;R;G;B (truecolor bg), 7 (reverse video), 27 (reverse off).
+_BG_RE = re.compile(r"\x1b\[(?:48;[25];\d+(?:;\d+)*|(?:27|7))m")
 
 logger = logging.getLogger(__name__)
 
