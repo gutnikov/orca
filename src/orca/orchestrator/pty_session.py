@@ -89,12 +89,20 @@ class PtySession:
             )
             os.close(stdin_slave)
 
-            # Write prompt to the stdin pty master — arrives on child's stdin.
-            # Write in chunks to avoid filling the pty buffer (4KB on macOS).
-            _CHUNK = 4096
-            for i in range(0, len(stdin_data), _CHUNK):
-                os.write(stdin_master, stdin_data[i : i + _CHUNK])
-            os.close(stdin_master)  # sends EOF to child's stdin
+            # Write prompt in a background thread — the pty buffer is only
+            # 4KB on macOS so large prompts block until the child reads.
+            # Doing this synchronously would deadlock the event loop.
+            import threading
+
+            def _feed_stdin() -> None:
+                try:
+                    _CHUNK = 4096
+                    for i in range(0, len(stdin_data), _CHUNK):
+                        os.write(stdin_master, stdin_data[i : i + _CHUNK])
+                finally:
+                    os.close(stdin_master)  # sends EOF to child's stdin
+
+            threading.Thread(target=_feed_stdin, daemon=True).start()
         else:
             self._proc = subprocess.Popen(
                 [cmd, *args],
