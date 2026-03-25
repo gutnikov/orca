@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import IO
 
 import pyte
+import pyte.screens
+from rich.text import Text
 
 _DEFAULT_HISTORY = 10_000
 
@@ -114,6 +116,47 @@ class PtySession:
             if self._log_file is not None:
                 self._log_file.close()
                 self._log_file = None
+
+    def resize(self, cols: int, rows: int) -> None:
+        """Resize the terminal to *cols* x *rows*."""
+        self._cols = cols
+        self._rows = rows
+        self.screen.resize(rows, cols)
+        if self._master_fd is not None:
+            winsize = struct.pack("HHHH", rows, cols, 0, 0)
+            fcntl.ioctl(self._master_fd, termios.TIOCSWINSZ, winsize)
+
+    @staticmethod
+    def pyte_line_to_rich(row_data: dict[int, pyte.screens.Char], cols: int) -> Text:
+        """Convert a pyte row (dict of column -> Char) to a Rich Text."""
+        text = Text()
+        for col in range(cols):
+            char = row_data.get(col, pyte.screens.Char(" "))
+            style_parts: list[str] = []
+            if char.fg and char.fg != "default":
+                style_parts.append(char.fg)
+            if char.bg and char.bg != "default":
+                style_parts.append(f"on {char.bg}")
+            if char.bold:
+                style_parts.append("bold")
+            if char.italics:
+                style_parts.append("italic")
+            if char.underscore:
+                style_parts.append("underline")
+            style_str = " ".join(style_parts) if style_parts else ""
+            text.append(char.data, style=style_str)
+        return text
+
+    def snapshot(self) -> list[Text]:
+        """Return the full terminal state as a list of Rich Text lines."""
+        lines: list[Text] = []
+        # Scrollback history
+        for row_data in self.screen.history.top:
+            lines.append(self.pyte_line_to_rich(row_data, self._cols))
+        # Current screen buffer
+        for row in range(self.screen.lines):
+            lines.append(self.pyte_line_to_rich(self.screen.buffer[row], self._cols))
+        return lines
 
     def close(self) -> None:
         if self._master_fd is not None:
