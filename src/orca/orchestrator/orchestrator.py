@@ -246,7 +246,13 @@ class Orchestrator:
         # preliminary path recorded in _spawn_worker when the branch didn't exist yet).
         if self._session_sync is not None:
             self._session_sync.manifest.update_worktree_path(tracking_id, str(workdir))
-        result_path = workdir / ".orca" / "result.json"
+        # When the root issue reuses an existing branch, workdir is the repo
+        # root.  Avoid polluting .orca/ with result.json — write it to the
+        # run directory (.orca/runs/{branch}/) instead.
+        if workdir == self.repo_root:
+            result_path = self.persistence.state_path.parent / "result.json"
+        else:
+            result_path = workdir / ".orca" / "result.json"
 
         prompt_path: Path | None = None
         if self.repo_root is not None:
