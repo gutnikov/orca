@@ -17,7 +17,7 @@ class IssueDetail(VerticalScroll):
     DEFAULT_CSS = """
     IssueDetail {
         width: 1fr;
-        padding: 1;
+        padding: 0 1;
     }
     """
 
