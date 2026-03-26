@@ -30,14 +30,27 @@ class WorktreeManager:
         git_branch_name = branch_name.replace("/", "-")
 
         worktree_path.parent.mkdir(parents=True, exist_ok=True)
-        proc = await asyncio.create_subprocess_exec(
+
+        # Check if the branch already exists; if so, use it directly instead of creating a new one.
+        check_proc = await asyncio.create_subprocess_exec(
             "git",
-            "worktree",
-            "add",
-            "-b",
+            "rev-parse",
+            "--verify",
             git_branch_name,
-            str(worktree_path),
-            parent_branch,
+            cwd=str(self.repo_root),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        await check_proc.communicate()
+        branch_exists = check_proc.returncode == 0
+
+        if branch_exists:
+            cmd = ["git", "worktree", "add", str(worktree_path), git_branch_name]
+        else:
+            cmd = ["git", "worktree", "add", "-b", git_branch_name, str(worktree_path), parent_branch]
+
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
             cwd=str(self.repo_root),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,

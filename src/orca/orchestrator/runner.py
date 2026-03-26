@@ -26,7 +26,7 @@ from orca.engine.types import (
     WorkerResultEvent,
 )
 from orca.orchestrator.branches import BranchMap
-from orca.orchestrator.config_types import SlackConfig, parse_integrations
+from orca.orchestrator.config_types import SlackConfig, parse_integrations, parse_orchestrator_config
 from orca.orchestrator.log import setup_logging
 from orca.orchestrator.persistence import Persistence
 from orca.orchestrator.validation import validate_result
@@ -55,6 +55,33 @@ def _generate_id() -> str:
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def resolve_base_ref(cli_base: str | None, config_base: str) -> str:
+    """Resolve the base ref for branch creation.
+
+    Priority: CLI --base > config base_branch > "origin/main" (config default).
+    """
+    if cli_base is not None:
+        return cli_base
+    return config_base
+
+
+async def _git_create_branch(branch_name: str, base_ref: str, repo_root: Path) -> None:
+    """Create a git branch from a base ref."""
+    proc = await asyncio.create_subprocess_exec(
+        "git",
+        "branch",
+        branch_name,
+        base_ref,
+        cwd=str(repo_root),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        msg = f"Failed to create branch '{branch_name}' from '{base_ref}': {stderr.decode()}"
+        raise RuntimeError(msg)
 
 
 async def _git_branch_exists(branch_name: str, repo_root: Path) -> bool:
@@ -243,6 +270,7 @@ async def run(
     task_file: Path,
     branch_name: str,
     config_path: Path,
+    base_ref: str | None = None,
     insights_enabled: bool = False,
     hot_sessions: set[str] | None = None,
     session_log_paths: dict[str, str] | None = None,
@@ -303,21 +331,30 @@ async def run(
         # Fresh start
         root_issue_id = _generate_id()
 
-        # Check if the branch already exists (e.g. user is on it).
-        # If so, use repo_root directly instead of creating a worktree.
-        branch_exists = await _git_branch_exists(branch_name, repo_root)
-        if branch_exists:
-            logger.info(
-                "Branch %s already exists — using repo root as root workdir",
-                branch_name,
-                extra={"event": "branch_reuse", "branch": branch_name},
-            )
-        else:
+        if base_ref is not None:
+            # -b mode: create integration branch and worktree
+            if not await _git_branch_exists(branch_name, repo_root):
+                await _git_create_branch(branch_name, base_ref, repo_root)
             await worktree_mgr.create(
                 issue_id=root_issue_id,
                 branch_name=branch_name,
-                parent_branch="HEAD",
+                parent_branch=base_ref,
             )
+        else:
+            # Legacy mode: use repo root if branch already checked out
+            branch_exists = await _git_branch_exists(branch_name, repo_root)
+            if branch_exists:
+                logger.info(
+                    "Branch %s already exists — using repo root as root workdir",
+                    branch_name,
+                    extra={"event": "branch_reuse", "branch": branch_name},
+                )
+            else:
+                await worktree_mgr.create(
+                    issue_id=root_issue_id,
+                    branch_name=branch_name,
+                    parent_branch=branch_name,
+                )
 
         # Create initial state and event
         state = State(issues={}, worker_queues={})
@@ -402,21 +439,44 @@ async def run(
     )
 
 
-def main() -> None:
-    """CLI entry point: orca <task_file> [-w workflow] [--headless] [--insights]."""
+def build_parser() -> argparse.ArgumentParser:
+    """Build the CLI argument parser."""
     parser = argparse.ArgumentParser(prog="orca", description="Orca orchestrator CLI")
     parser.add_argument("task_file", type=Path, help="Path to the task file")
     parser.add_argument(
         "-w", "--workflow", type=str, default=None, help="Workflow name shorthand (e.g. 'develop' -> orca.develop.yml)"
     )
+    parser.add_argument("-b", "--branch", type=str, default=None, help="Integration branch name for this run")
+    parser.add_argument(
+        "--base", type=str, default=None, help="Base ref to branch from (default: config or origin/main)"
+    )
     parser.add_argument("--headless", action="store_true", help="Run without TUI (headless mode)")
     parser.add_argument("--insights", action="store_true", help="Enable insights agent for progress monitoring")
+    return parser
 
+
+def main() -> None:
+    """CLI entry point: orca <task_file> [-b branch] [--base ref] [-w workflow] [--headless] [--insights]."""
+    parser = build_parser()
     args = parser.parse_args()
 
     repo_root = Path.cwd()
     config_path = resolve_config_path(repo_root, args.workflow)
-    branch_name = resolve_branch()
+
+    # Parse orchestrator config for base_branch default
+    raw_config: dict[str, Any] = yaml.safe_load(config_path.read_text())
+    orch_config = parse_orchestrator_config(raw_config)
+
+    if args.base is not None and args.branch is None:
+        print("Error: --base requires -b/--branch", file=sys.stderr)
+        raise SystemExit(1)
+
+    if args.branch is not None:
+        branch_name = args.branch
+        base_ref: str | None = resolve_base_ref(args.base, orch_config.base_branch)
+    else:
+        branch_name = resolve_branch()
+        base_ref = None
 
     # Validate task file exists before starting
     if not args.task_file.exists():
@@ -424,7 +484,7 @@ def main() -> None:
         raise SystemExit(1)
 
     if args.headless:
-        asyncio.run(run(args.task_file, branch_name, config_path, insights_enabled=args.insights))
+        asyncio.run(run(args.task_file, branch_name, config_path, base_ref=base_ref, insights_enabled=args.insights))
     else:
         # Shared state between orchestrator (daemon thread) and TUI (main thread).
         # hot_sessions: TUI writes which session to capture frequently
@@ -443,6 +503,7 @@ def main() -> None:
                         args.task_file,
                         branch_name,
                         config_path,
+                        base_ref=base_ref,
                         insights_enabled=args.insights,
                         hot_sessions=hot_sessions,
                         session_log_paths=session_log_paths,
@@ -479,7 +540,6 @@ def main() -> None:
 
         # Surface orchestrator errors before exiting
         if run_error is not None:
-            import sys
             import traceback
 
             print("\nOrchestrator error:", file=sys.stderr)
