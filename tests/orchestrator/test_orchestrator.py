@@ -41,7 +41,7 @@ class MockWorker:
         prompt_path: Path | None = None,
         inactivity_timeout: int | None = None,
         pty_session: Any = None,
-        log_path: Path | None = None,
+        env: dict[str, str] | None = None,
     ) -> WorkerOutcome:
         self.calls.append((effect.issue_id, effect.state))
         return self.outcomes.get(effect.state, WorkerFailure(error="no mock"))
@@ -168,7 +168,7 @@ class TestOrchestrator:
                 prompt_path: Path | None = None,
                 inactivity_timeout: int | None = None,
                 pty_session: Any = None,
-                log_path: Path | None = None,
+                env: dict[str, str] | None = None,
             ) -> WorkerOutcome:
                 self.calls.append((effect.issue_id, effect.state))
                 count = call_count.get(effect.state, 0)

@@ -57,6 +57,7 @@ class Orchestrator:
         hot_sessions: set[str] | None = None,
         session_log_paths: dict[str, str] | None = None,
         insights_state: dict[str, str] | None = None,
+        slack_mcp_url: str | None = None,
     ) -> None:
         self.config = config
         self.state = state
@@ -77,6 +78,7 @@ class Orchestrator:
         # Shared with TUI: maps tracking_id -> log file path
         self._session_log_paths: dict[str, str] = session_log_paths if session_log_paths is not None else {}
         # Internal: maps tracking_id -> TmuxSession (orchestrator only)
+        self._slack_mcp_url = slack_mcp_url
         self._tmux_sessions: dict[str, PtySession] = {}
         self._last_save: dict[str, float] = {}
         # Maps asyncio.Task -> (issue_id, tracking_id)
@@ -284,7 +286,9 @@ class Orchestrator:
         )
 
         state_def = self.config.states.get(effect.state)
-        inactivity_timeout = state_def.worker.inactivity_timeout if state_def and state_def.worker else None
+        inactivity_timeout = (
+            state_def.worker.inactivity_timeout or state_def.worker.timeout if state_def and state_def.worker else None
+        )
 
         # Create TmuxSession and register log path for TUI
         tmux_session = PtySession(session_name=tracking_id, cols=120, rows=40)
@@ -296,6 +300,10 @@ class Orchestrator:
         self._tmux_sessions[tracking_id] = tmux_session
         self._session_log_paths[tracking_id] = str(log_path)
 
+        worker_env: dict[str, str] | None = None
+        if self._slack_mcp_url:
+            worker_env = {"SLACK_HITL_MCP_URL": self._slack_mcp_url}
+
         try:
             outcome = await worker.execute(
                 enriched_effect,
@@ -304,6 +312,7 @@ class Orchestrator:
                 prompt_path,
                 inactivity_timeout,
                 pty_session=tmux_session,
+                env=worker_env,
             )
         finally:
             # Final scrollback save before killing the session

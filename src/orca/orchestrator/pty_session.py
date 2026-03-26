@@ -52,12 +52,17 @@ class TmuxSession:
         """Spawn a process inside a new detached tmux session."""
         full_cmd = shlex.join([cmd, *args])
 
-        # If we have stdin data, write it to a file and pipe it
+        # If we have stdin data, write it to a per-session file and pipe it
         if stdin_data is not None:
-            prompt_file = Path(str(cwd)) / ".orca" / ".prompt.tmp"
+            prompt_file = Path(str(cwd)) / ".orca" / f".prompt-{self._session_name}.tmp"
             prompt_file.parent.mkdir(parents=True, exist_ok=True)
             prompt_file.write_bytes(stdin_data)
             full_cmd = f"cat {shlex.quote(str(prompt_file))} | {full_cmd}"
+
+        # Prepend env vars as shell exports
+        if env:
+            exports = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
+            full_cmd = f"export {exports}; {full_cmd}"
 
         tmux_args = [
             "tmux",

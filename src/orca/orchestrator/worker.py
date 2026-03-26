@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from dataclasses import dataclass
@@ -13,7 +14,14 @@ from orca.orchestrator.validation import validate_result
 
 logger = logging.getLogger(__name__)
 
-# Kill the worker if no stdout output is received for this long.
+# Poll result file and session liveness every this many seconds.
+_POLL_INTERVAL = 2.0
+
+# Grace period after detecting a valid result before killing the session.
+# Allows the worker to flush remaining writes (git commits, file saves).
+_RESULT_GRACE_PERIOD = 30.0
+
+# Kill the worker if no valid result file is produced within this time.
 _INACTIVITY_TIMEOUT = 300.0  # 5 minutes
 
 
@@ -39,6 +47,7 @@ class Worker(Protocol):
         prompt_path: Path | None = None,
         inactivity_timeout: int | None = None,
         pty_session: PtySession | None = None,
+        env: dict[str, str] | None = None,
     ) -> WorkerOutcome: ...
 
 
@@ -56,6 +65,7 @@ class ClaudeCodeWorker:
         prompt_path: Path | None = None,
         inactivity_timeout: int | None = None,
         pty_session: PtySession | None = None,
+        env: dict[str, str] | None = None,
     ) -> WorkerOutcome:
         assert pty_session is not None, "pty_session is required"
 
@@ -74,6 +84,7 @@ class ClaudeCodeWorker:
             ["--dangerously-skip-permissions", "--max-turns", "50"],
             cwd=workdir,
             stdin_data=prompt.encode(),
+            env=env,
         )
 
         logger.debug(
@@ -88,30 +99,65 @@ class ClaudeCodeWorker:
             },
         )
 
-        # d. Wait for tmux session to end (process exits -> session closes)
-        effective_timeout = float(inactivity_timeout) if inactivity_timeout else _INACTIVITY_TIMEOUT
-        exit_code = await pty_session.wait(timeout=effective_timeout)
+        # d. Poll for result file or session exit
+        effective_timeout = float(inactivity_timeout) if inactivity_timeout is not None else _INACTIVITY_TIMEOUT
+        elapsed = 0.0
+        result_detected_at: float | None = None
+        result_detected_while_alive = False
 
-        if exit_code != 0:
-            logger.warning(
-                "Worker for issue %s timed out or failed",
-                effect.issue_id,
-                extra={"event": "tmux_session_failed", "issue_id": effect.issue_id},
-            )
-            return WorkerFailure(error=f"worker killed after {int(effective_timeout)}s of inactivity")
+        while True:
+            await asyncio.sleep(_POLL_INTERVAL)
+            elapsed += _POLL_INTERVAL
 
-        # e. Read result_path, parse JSON
-        if not result_path.exists():
-            return WorkerFailure(error="result file not found after claude exited successfully")
+            # Check for valid result file
+            if result_detected_at is None and result_path.exists():
+                try:
+                    candidate = json.loads(result_path.read_text())
+                    error = validate_result(candidate, effect.result_format)
+                    if error is None:
+                        result_detected_at = elapsed
+                        result_detected_while_alive = pty_session.alive
+                        logger.info(
+                            "Valid result detected for issue %s — grace period started",
+                            effect.issue_id,
+                            extra={"event": "result_detected", "issue_id": effect.issue_id},
+                        )
+                except (json.JSONDecodeError, OSError):
+                    pass
 
-        try:
-            result: dict[str, Any] = json.loads(result_path.read_text())
-        except (json.JSONDecodeError, OSError) as e:
-            return WorkerFailure(error=f"failed to parse result file: {e}")
+            # Grace period elapsed — kill session, return success
+            if result_detected_at is not None and elapsed - result_detected_at >= _RESULT_GRACE_PERIOD:
+                result = json.loads(result_path.read_text())
+                if pty_session.alive:
+                    pty_session.kill()
+                return WorkerSuccess(result=result)
 
-        # f. Validate result
-        error = validate_result(result, effect.result_format)
-        if error is not None:
-            return WorkerFailure(error=error)
+            # Session exited on its own — check result
+            if not pty_session.alive:
+                if result_detected_at is not None:
+                    # Result was already validated during grace period; session exited on its own.
+                    # Kill to ensure cleanup if it was alive when result was detected.
+                    if result_detected_while_alive:
+                        pty_session.kill()
+                    result = json.loads(result_path.read_text())
+                    return WorkerSuccess(result=result)
+                if result_path.exists():
+                    try:
+                        result = json.loads(result_path.read_text())
+                        error = validate_result(result, effect.result_format)
+                        if error is None:
+                            return WorkerSuccess(result=result)
+                        return WorkerFailure(error=error)
+                    except (json.JSONDecodeError, OSError) as e:
+                        return WorkerFailure(error=f"failed to parse result file: {e}")
+                return WorkerFailure(error="result file not found after session exited")
 
-        return WorkerSuccess(result=result)
+            # Timeout — no result produced in time
+            if result_detected_at is None and elapsed >= effective_timeout:
+                logger.warning(
+                    "Worker for issue %s timed out with no result",
+                    effect.issue_id,
+                    extra={"event": "worker_timeout", "issue_id": effect.issue_id},
+                )
+                pty_session.kill()
+                return WorkerFailure(error=f"no valid result after {int(effective_timeout)}s")
