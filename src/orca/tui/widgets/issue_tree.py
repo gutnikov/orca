@@ -172,12 +172,14 @@ class IssueTree(Tree[str]):
         result_outcomes: dict[str, str] | None = None,
         failure_errors: dict[str, str] | None = None,
         visit_counts: dict[str, int] | None = None,
+        is_last_for_state: bool = True,
+        failed_states: set[str] | None = None,
     ) -> Text:
         label = Text()
         is_active = session.get("completed_at") is None
-        is_failed = session.get("exit_code") not in (None, 0) or (
-            failure_errors is not None and state_name in failure_errors
-        )
+        # A completed session is failed only if it's the LAST session for this
+        # state AND the state is in the failed set (last worker event was failure).
+        is_failed = not is_active and is_last_for_state and failed_states is not None and state_name in failed_states
 
         if is_active:
             frame = _SPINNER[self._tick % len(_SPINNER)]
@@ -278,26 +280,31 @@ class IssueTree(Tree[str]):
             # Show only the last few sessions to avoid flooding the tree
             if len(issue_sessions) > 5:
                 issue_sessions = issue_sessions[-5:]
-            for session in issue_sessions:
+            # Track last session per state for failure detection
+            last_session_per_state: dict[str, int] = {}
+            for idx, s in enumerate(issue_sessions):
+                last_session_per_state[str(s.get("state", ""))] = idx
+
+            for idx, session in enumerate(issue_sessions):
                 sname = str(session.get("state", "unknown"))
+                is_last = last_session_per_state.get(sname) == idx
                 run_label = self._worker_run_label(
                     sname,
                     session,
                     result_outcomes=result_outcomes,
                     failure_errors=failure_errors,
                     visit_counts=issue.visit_counts,
+                    is_last_for_state=is_last,
+                    failed_states=failed_states,
                 )
                 session_id = str(session.get("session_id", ""))
                 node.add_leaf(run_label, data=f"session:{session_id}")
 
-                # Add inline failure error below failed runs
-                if failure_errors and sname in failure_errors:
-                    is_completed = session.get("completed_at") is not None
-                    is_failed = session.get("exit_code") not in (None, 0)
-                    if is_completed and is_failed:
-                        err_label = Text()
-                        err_label.append(f"  {failure_errors[sname]}", style="dim red")
-                        node.add_leaf(err_label, data=f"error:{session_id}")
+                # Add inline failure error below failed runs (only for last session of that state)
+                if is_last and sname in failed_states and failure_errors and sname in failure_errors:
+                    err_label = Text()
+                    err_label.append(f"  {failure_errors[sname]}", style="dim red")
+                    node.add_leaf(err_label, data=f"error:{session_id}")
 
             # Pending steps (dimmed, not-yet-visited states)
             if self._config is not None:
