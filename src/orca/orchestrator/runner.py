@@ -57,6 +57,33 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def resolve_base_ref(cli_base: str | None, config_base: str) -> str:
+    """Resolve the base ref for branch creation.
+
+    Priority: CLI --base > config base_branch > "origin/main" (config default).
+    """
+    if cli_base is not None:
+        return cli_base
+    return config_base
+
+
+async def _git_create_branch(branch_name: str, base_ref: str, repo_root: Path) -> None:
+    """Create a git branch from a base ref."""
+    proc = await asyncio.create_subprocess_exec(
+        "git",
+        "branch",
+        branch_name,
+        base_ref,
+        cwd=str(repo_root),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    _, stderr = await proc.communicate()
+    if proc.returncode != 0:
+        msg = f"Failed to create branch '{branch_name}' from '{base_ref}': {stderr.decode()}"
+        raise RuntimeError(msg)
+
+
 async def _git_branch_exists(branch_name: str, repo_root: Path) -> bool:
     """Check if a git branch exists locally."""
     proc = await asyncio.create_subprocess_exec(
