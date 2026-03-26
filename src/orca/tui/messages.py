@@ -30,11 +30,13 @@ class WorkerRunSelected(Message):
         session_id: str,
         active: bool = False,
         worktree_path: str = "",
+        issue_id: str = "",
     ) -> None:
         super().__init__()
         self.session_id = session_id
         self.active = active
         self.worktree_path = worktree_path
+        self.issue_id = issue_id
 
 
 class RetryIssue(Message):

@@ -194,11 +194,13 @@ class IssueTree(Tree[str]):
             session = next((s for s in self._sessions if s.get("session_id") == session_id), None)
             active = session is not None and session.get("completed_at") is None
             worktree_path = str(session.get("worktree_path", "")) if session else ""
+            issue_id = str(session.get("issue_id", "")) if session else ""
             self.post_message(
                 WorkerRunSelected(
                     session_id,
                     active=active,
                     worktree_path=worktree_path,
+                    issue_id=issue_id,
                 )
             )
         elif data == "insights":
