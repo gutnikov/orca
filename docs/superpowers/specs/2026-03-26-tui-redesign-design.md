@@ -31,7 +31,7 @@ Replace Textual's default `Header` with a custom widget showing:
 **Fields:**
 - **Branch/run name** (from `branch_name`)
 - **Status dot**: green (running), red (has failures), green checkmark (completed)
-- **Step N/M**: current step position / total unique states in the workflow config. "Current step" = the index of the active state in the config's state list. For parallel workers, show the furthest-progressed state.
+- **Step N/M**: tracks the **root issue only**. N = number of unique non-terminal states the root issue has visited. M = total non-terminal states in the config. This is an approximation — in looping workflows N can exceed M (show `N/M` capped at M). In decompose workflows, the root issue sits in a waiting state while children work; the header reflects the root's state, not children's.
 - **Workers N**: count of currently active workers
 - **Failures** (conditional): "1 failed" in red, shown only when `failure_count > 0` on any issue
 - **Elapsed time**: since run start (from first session's `started_at`)
@@ -87,12 +87,15 @@ Completed worker runs show the `outcome` field from their `result.json` as a sma
   ✓ scoping — 2m          decompose    ← green badge
 ```
 
-**Badge styling:**
-- Success outcomes: green text on dark green background (`#1a3020`)
-- Failure outcomes: red text on dark red background (`#301a1a`)
-- Loopback outcomes (e.g., `needs_revision`): yellow text on dark yellow background (`#302a1a`)
+**Badge styling — color classification:**
+The badge color is determined by what transition the outcome triggered:
+- **Green** (forward/terminal): the outcome led to a state with a higher index in the config, or to a terminal state. Background `#1a3020`.
+- **Yellow** (loopback): the outcome led to a state with a lower or equal index (a loop). Background `#302a1a`.
+- **Red** (failure): the worker failed (no result.json, non-zero exit). Background `#301a1a`.
 
-**Data source:** `result.json` is read by the orchestrator and stored in the session manifest or state. The TUI reads the `outcome` field from the worker result event log entry.
+This is derived by comparing the issue's state before and after the worker result event in the event log. No manual classification needed — the engine's transition determines the color.
+
+**Data source:** The `outcome` field comes from the `WorkerResultEvent.result` dict stored in the issue's event log. For failed workers, the `WorkerFailedEvent.error` string is shown instead.
 
 ### 5. Failure Context in Tree
 
