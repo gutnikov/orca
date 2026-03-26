@@ -353,7 +353,7 @@ class TestDecomposeCreatesChildren:
         for cid in child_ids:
             child = state.issues[cid]
             assert child.decomposed_from == "P"
-            assert child.state == config.initial  # "todo"
+            assert child.state == config.root_type_def.initial  # "todo"
 
 
 class TestDecomposeWithDependsOn:

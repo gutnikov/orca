@@ -325,6 +325,12 @@ def _parse_legacy_config(raw: dict[str, Any]) -> StateMachineConfig:
     max_hops = raw.get("max_hops")
     max_worker_retries = raw.get("max_worker_retries", 5)
 
+    # For legacy single-type configs, default decompose child_type to "default"
+    for state_def in states.values():
+        for key, rule in state_def.on.items():
+            if isinstance(rule, OnDecompose) and rule.child_type is None:
+                state_def.on[key] = OnDecompose(child_type="default", then=rule.then)
+
     type_def = TypeDef(fields=issue_fields, initial=initial, states=states)
     config = StateMachineConfig(
         root_type="default",

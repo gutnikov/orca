@@ -125,7 +125,7 @@ class TestWorkerFailedRetainsSlot:
         )
         assert state.issues["B"].state == "apply"
         assert state.issues["B"].worker_active is False
-        assert "B" in state.worker_queues.get("apply", [])
+        assert "B" in state.worker_queues.get("default:apply", [])
 
         # A's worker fails — slot is retained, B stays queued
         state, effects = reduce(
@@ -140,7 +140,7 @@ class TestWorkerFailedRetainsSlot:
         assert state.issues["A"].worker_active is True
         # B still queued, not dispatched
         assert state.issues["B"].worker_active is False
-        assert "B" in state.worker_queues.get("apply", [])
+        assert "B" in state.worker_queues.get("default:apply", [])
 
         # Only A gets a retry dispatch, not B
         dispatch_effects = [e for e in effects if isinstance(e, DispatchWorkerEffect)]

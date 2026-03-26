@@ -273,7 +273,7 @@ class TestQueueOrderSurvivesRoundtrip:
         state = _roundtrip(state)
 
         # Verify queue survived
-        assert state.worker_queues.get("work") == ["Q-2", "Q-3", "Q-4", "Q-5"]
+        assert state.worker_queues.get("default:work") == ["Q-2", "Q-3", "Q-4", "Q-5"]
 
         # Complete Q-1 on restored state
         state, effects = reduce(

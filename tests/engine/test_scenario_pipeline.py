@@ -137,7 +137,7 @@ class TestSerializedMerge4Issues:
             assert state.issues[iid].worker_active is False
 
         # Queue should contain P-2, P-3, P-4
-        assert state.worker_queues.get("apply") == ["P-2", "P-3", "P-4"]
+        assert state.worker_queues.get("default:apply") == ["P-2", "P-3", "P-4"]
 
         # Merge them one by one
         for i, iid in enumerate(ids):
@@ -184,7 +184,7 @@ class TestConflictFreesSlotForNext:
 
         assert state.issues["P-1"].worker_active is True
         assert state.issues["P-2"].worker_active is False
-        assert state.worker_queues.get("apply") == ["P-2"]
+        assert state.worker_queues.get("default:apply") == ["P-2"]
 
         # P-1 conflicts → goes back to implementing, P-2 gets dispatched in apply
         state, effects = reduce(
@@ -219,7 +219,7 @@ class TestConflictReenterAtBackOfQueue:
             state = _advance_to_apply(config, state, iid, gen)
 
         assert state.issues["P-1"].worker_active is True
-        assert state.worker_queues.get("apply") == ["P-2", "P-3"]
+        assert state.worker_queues.get("default:apply") == ["P-2", "P-3"]
 
         # P-1 conflicts → goes back to implementing
         state, effects = reduce(
@@ -236,7 +236,7 @@ class TestConflictReenterAtBackOfQueue:
         assert state.issues["P-2"].state == "apply"
 
         # Queue should now be just P-3
-        assert state.worker_queues.get("apply") == ["P-3"]
+        assert state.worker_queues.get("default:apply") == ["P-3"]
 
         # P-1 goes back through implementing→qa→apply, should end up queued behind P-3
         state, _ = reduce(
@@ -248,7 +248,7 @@ class TestConflictReenterAtBackOfQueue:
 
         assert state.issues["P-1"].state == "apply"
         assert state.issues["P-1"].worker_active is False
-        assert state.worker_queues.get("apply") == ["P-3", "P-1"]
+        assert state.worker_queues.get("default:apply") == ["P-3", "P-1"]
 
 
 class TestWorkerFailedRetainsSlot:
@@ -266,7 +266,7 @@ class TestWorkerFailedRetainsSlot:
             state = _advance_to_apply(config, state, iid, gen)
 
         assert state.issues["P-1"].worker_active is True
-        assert state.worker_queues.get("apply") == ["P-2"]
+        assert state.worker_queues.get("default:apply") == ["P-2"]
 
         # Worker fails on P-1 → slot retained, P-2 stays queued
         state, effects = reduce(
@@ -283,4 +283,4 @@ class TestWorkerFailedRetainsSlot:
 
         # P-2 should still be queued
         assert state.issues["P-2"].worker_active is False
-        assert state.worker_queues.get("apply") == ["P-2"]
+        assert state.worker_queues.get("default:apply") == ["P-2"]

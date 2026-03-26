@@ -12,6 +12,7 @@ from orca.engine.types import (
     State,
     StateDef,
     StateMachineConfig,
+    TypeDef,
     WorkerDef,
 )
 
@@ -34,21 +35,26 @@ def _clock(value: str = "2026-01-01T00:00:00Z") -> Callable[[], str]:
 def _passive_initial_config() -> StateMachineConfig:
     """Config where initial state 'backlog' is passive (no worker)."""
     return StateMachineConfig(
-        issue_fields={"title": FieldDef(type="string", description="Title")},
-        initial="backlog",
-        states={
-            "backlog": StateDef(),
-            "todo": StateDef(
-                worker=WorkerDef(
-                    kind="claude-code",
-                    prompt="prompts/default.md",
-                    result_format={
-                        "outcome": EnumFieldDef(values=["start"], description="Decision"),
-                    },
-                ),
-                on={},
-            ),
-            "done": StateDef(terminal=True),
+        root_type="default",
+        types={
+            "default": TypeDef(
+                fields={"title": FieldDef(type="string", description="Title")},
+                initial="backlog",
+                states={
+                    "backlog": StateDef(),
+                    "todo": StateDef(
+                        worker=WorkerDef(
+                            kind="claude-code",
+                            prompt="prompts/default.md",
+                            result_format={
+                                "outcome": EnumFieldDef(values=["start"], description="Decision"),
+                            },
+                        ),
+                        on={},
+                    ),
+                    "done": StateDef(terminal=True),
+                },
+            )
         },
     )
 
@@ -56,20 +62,25 @@ def _passive_initial_config() -> StateMachineConfig:
 def _active_initial_config() -> StateMachineConfig:
     """Config where initial state 'todo' is active (has worker)."""
     return StateMachineConfig(
-        issue_fields={"title": FieldDef(type="string", description="Title")},
-        initial="todo",
-        states={
-            "todo": StateDef(
-                worker=WorkerDef(
-                    kind="claude-code",
-                    prompt="prompts/default.md",
-                    result_format={
-                        "outcome": EnumFieldDef(values=["start"], description="Decision"),
-                    },
-                ),
-                on={},
-            ),
-            "done": StateDef(terminal=True),
+        root_type="default",
+        types={
+            "default": TypeDef(
+                fields={"title": FieldDef(type="string", description="Title")},
+                initial="todo",
+                states={
+                    "todo": StateDef(
+                        worker=WorkerDef(
+                            kind="claude-code",
+                            prompt="prompts/default.md",
+                            result_format={
+                                "outcome": EnumFieldDef(values=["start"], description="Decision"),
+                            },
+                        ),
+                        on={},
+                    ),
+                    "done": StateDef(terminal=True),
+                },
+            )
         },
     )
 
