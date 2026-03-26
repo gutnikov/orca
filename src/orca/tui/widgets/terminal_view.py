@@ -7,7 +7,8 @@ from typing import Any
 
 from rich.text import Text
 from textual.app import ComposeResult
-from textual.containers import VerticalScroll
+from textual.containers import Horizontal, VerticalScroll
+from textual.events import Click
 from textual.widgets import Static
 
 # Strip all background colors, reverse video, and near-white foregrounds
@@ -47,14 +48,22 @@ class TerminalView(VerticalScroll):
     TerminalView #tab-bar {
         dock: top;
         height: 1;
-        padding: 0 1;
         background: #1e1e30;
+        padding: 0 1;
+    }
+    TerminalView #tab-session, TerminalView #tab-result {
+        width: auto;
+        height: 1;
+        padding: 0 1;
+        margin: 0 1 0 0;
     }
     """
 
     def __init__(self) -> None:
         super().__init__(id="terminal-view")
-        self._tab_bar = Static("", id="tab-bar")
+        self._tab_session = Static(" Session ", id="tab-session")
+        self._tab_result = Static(" Result ", id="tab-result")
+        self._tab_bar = Horizontal(self._tab_session, self._tab_result, id="tab-bar")
         self._static = Static(_PLACEHOLDER)
         self._log_path: Path | None = None
         self._last_mtime: float = 0.0
@@ -131,35 +140,34 @@ class TerminalView(VerticalScroll):
 
     def _render_tabs(self) -> None:
         """Update tab bar display."""
-        if self._log_path is None:
-            with contextlib.suppress(Exception):
-                self._tab_bar.update("")
-            return
-
-        tabs = Text()
-        tabs.append_text(Text(" "))
-
-        # Session tab
-        if self._active_tab == "session":
-            session_label = Text(" Session ", style=f"bold on {_TAB_BG} underline {_TAB_ACTIVE_ACCENT}")
-        else:
-            session_label = Text(" Session ", style=f"on {_TAB_BG} {_TAB_INACTIVE}")
-        tabs.append_text(session_label)
-
-        tabs.append_text(Text("  "))
-
-        # Result tab
-        if self._result_data is not None:
-            if self._active_tab == "result":
-                result_label = Text(" Result ", style=f"bold on {_TAB_BG} underline {_TAB_ACTIVE_ACCENT}")
-            else:
-                result_label = Text(" Result ", style=f"on {_TAB_BG} {_TAB_INACTIVE}")
-        else:
-            result_label = Text(" Result ", style=f"on {_TAB_BG} dim {_TAB_INACTIVE}")
-        tabs.append_text(result_label)
-
         with contextlib.suppress(Exception):
-            self._tab_bar.update(tabs)
+            if self._log_path is None:
+                self._tab_session.update("")
+                self._tab_result.update("")
+                return
+
+            # Session tab
+            if self._active_tab == "session":
+                self._tab_session.update(Text(" Session ", style=f"bold underline {_TAB_ACTIVE_ACCENT}"))
+            else:
+                self._tab_session.update(Text(" Session ", style=_TAB_INACTIVE))
+
+            # Result tab
+            if self._result_data is not None:
+                if self._active_tab == "result":
+                    self._tab_result.update(Text(" Result ", style=f"bold underline {_TAB_ACTIVE_ACCENT}"))
+                else:
+                    self._tab_result.update(Text(" Result ", style=_TAB_INACTIVE))
+            else:
+                self._tab_result.update(Text(" Result ", style=f"dim {_TAB_INACTIVE}"))
+
+    def on_click(self, event: Click) -> None:
+        """Handle click on tab widgets."""
+        widget = event.widget
+        if (widget is self._tab_session and self._active_tab != "session") or (
+            widget is self._tab_result and self._result_data is not None and self._active_tab != "result"
+        ):
+            self.toggle_tab()
 
     def _render_result(self) -> None:
         """Render result.json as formatted key/value pairs."""
