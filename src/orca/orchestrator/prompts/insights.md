@@ -111,7 +111,7 @@ After each investigation cycle:
 On each wake-up, check `state.json`. When ALL issues have terminal states (check the workflow config to know which states are terminal), write a final summary entry and stop.
 
 **Final summary entry** (severity: `summary`):
-- **title**: "Pipeline completed: {elapsed}m, {completed}/{total} issues succeeded"
+- **title**: "Pipeline completed: {{elapsed}}m, {{completed}}/{{total}} issues succeeded"
 - **detail**: Total elapsed time, issues created/completed/failed, worker runs total/succeeded/failed/retried, notable events
 - **remediation**: Ordered list of all recommendations from this run, ranked by potential impact (HIGH/MEDIUM/LOW). Consolidate from all previous findings. Include any workflow optimization suggestions.
 

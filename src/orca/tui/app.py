@@ -27,6 +27,9 @@ class OrcaApp(App[None]):
     THEME = "flexoki"
 
     CSS = """
+    Screen {
+        padding: 0;
+    }
     #main-panels {
         height: 1fr;
     }
@@ -37,7 +40,7 @@ class OrcaApp(App[None]):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("n", "retry_failed", "Retry"),
+        Binding("n", "retry_failed", "Retry", show=False),
         Binding("h,left", "focus_tree", "Tree", show=False),
         Binding("l,right", "focus_detail", "Detail", show=False),
         Binding("j", "scroll_detail_down", "Scroll ↓", show=False),

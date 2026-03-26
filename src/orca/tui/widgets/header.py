@@ -72,44 +72,35 @@ class OrcaHeader(Static):
     def render_text(self) -> str:
         """Render the header text. Public for testability."""
         if self._state is None:
-            return f"  orca \u2502 {self._branch_name} \u2502 waiting\u2026"
+            return f"  {self._branch_name} \u2502 waiting\u2026"
 
         # Check if all issues are in terminal states
         all_terminal = self._all_terminal()
         has_failures = any(issue.failure_count > 0 for issue in self._state.issues.values())
 
-        parts: list[str] = ["  orca"]
-
-        # Status dot + branch name
         if all_terminal:
-            parts.append(f"\u2713 {self._branch_name}")
-        elif has_failures:
-            parts.append(f"[red]\u25cf[/red] {self._branch_name}")
+            left = f"  \u2713 {self._branch_name} \u2502 completed"
         else:
-            parts.append(f"[green]\u25cf[/green] {self._branch_name}")
+            # Status dot + branch name
+            dot = "[red]\u25cf[/red]" if has_failures else "[green]\u25cf[/green]"
 
-        # Step N/M for root issue
-        step_text = self._step_text()
-        if step_text:
-            parts.append(step_text)
+            parts: list[str] = [f"  {dot} {self._branch_name}"]
 
-        # Workers N
-        parts.append(f"Workers {self._active_workers}")
+            # Workers N
+            parts.append(f"Workers {self._active_workers}")
 
-        # Failures (conditional)
-        total_failures = sum(issue.failure_count for issue in self._state.issues.values())
-        if total_failures > 0:
-            parts.append(f"[red]{total_failures} failed[/red]")
+            # Failures (conditional)
+            total_failures = sum(issue.failure_count for issue in self._state.issues.values())
+            if total_failures > 0:
+                parts.append(f"[red]{total_failures} failed[/red]")
 
-        # Elapsed time
+            left = " \u2502 ".join(parts)
+
+        # Elapsed time on the right
         elapsed_text = self._elapsed_text()
         if elapsed_text:
-            parts.append(elapsed_text)
-
-        if all_terminal:
-            return f"  orca \u2502 \u2713 {self._branch_name} \u2502 completed"
-
-        return " \u2502 ".join(parts)
+            return f"{left}[right]{elapsed_text}  [/right]"
+        return left
 
     def _all_terminal(self) -> bool:
         """Check if all issues are in terminal states."""

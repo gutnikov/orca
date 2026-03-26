@@ -40,7 +40,7 @@ class TerminalView(VerticalScroll):
     DEFAULT_CSS = """
     TerminalView {
         width: 1fr;
-        padding: 0;
+        padding: 1 2;
     }
     TerminalView Static {
         width: 1fr;

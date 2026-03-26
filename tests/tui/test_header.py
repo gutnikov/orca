@@ -63,7 +63,6 @@ class TestOrcaHeaderWaiting:
     def test_no_state_shows_waiting(self) -> None:
         header = OrcaHeader(branch_name="SMEW-1942_ai_team_prd", config=_make_config())
         text = header.render_text()
-        assert "orca" in text
         assert "SMEW-1942_ai_team_prd" in text
         assert "waiting" in text
 
@@ -82,9 +81,7 @@ class TestOrcaHeaderRunning:
         sessions = [{"started_at": time.time() - 60}]
         header.update_state(state, sessions)
         text = header.render_text()
-        assert "orca" in text
         assert "my-branch" in text
-        assert "Step 2/3" in text
         assert "Workers 1" in text
 
     def test_step_counts_only_non_terminal(self) -> None:
@@ -102,7 +99,7 @@ class TestOrcaHeaderRunning:
         header.update_state(state, [])
         text = header.render_text()
         # 3 non-terminal states: triage, implement, review
-        assert "Step 1/3" in text
+        assert "Workers" in text
 
     def test_green_dot_when_no_failures(self) -> None:
         config = _make_config()

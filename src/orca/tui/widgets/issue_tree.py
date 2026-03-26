@@ -315,37 +315,52 @@ class IssueTree(Tree[str]):
             # Show only the last few sessions to avoid flooding the tree
             if len(issue_sessions) > 5:
                 issue_sessions = issue_sessions[-5:]
-            # Track last session per state for failure detection
-            last_session_per_state: dict[str, int] = {}
+            # Track last completed (non-active) session per state for failure detection
+            last_completed_per_state: dict[str, int] = {}
             for idx, s in enumerate(issue_sessions):
-                last_session_per_state[str(s.get("state", ""))] = idx
+                if s.get("completed_at") is not None:
+                    last_completed_per_state[str(s.get("state", ""))] = idx
 
             for idx, session in enumerate(issue_sessions):
                 sname = str(session.get("state", "unknown"))
-                is_last = last_session_per_state.get(sname) == idx
+                is_last_completed = last_completed_per_state.get(sname) == idx
                 run_label = self._worker_run_label(
                     sname,
                     session,
                     result_outcomes=result_outcomes,
                     failure_errors=failure_errors,
                     visit_counts=issue.visit_counts,
-                    is_last_for_state=is_last,
+                    is_last_for_state=is_last_completed,
                     failed_states=failed_states,
                 )
                 session_id = str(session.get("session_id", ""))
                 node.add_leaf(run_label, data=f"session:{session_id}")
 
-                # Add inline failure error below failed runs (only for last session of that state)
-                if is_last and sname in failed_states and failure_errors and sname in failure_errors:
+                # Add inline failure error below the last completed session for a failed state
+                if is_last_completed and sname in failed_states and failure_errors and sname in failure_errors:
                     err_label = Text()
                     err_label.append(f"  {failure_errors[sname]}", style="dim red")
                     node.add_leaf(err_label, data=f"error:{session_id}")
+
+            # Active current state (shown when no session exists for it yet)
+            if self._config is not None:
+                current_state_def = self._config.states.get(issue.state)
+                has_session_for_current = any(str(s.get("state", "")) == issue.state for s in issue_sessions)
+                if (
+                    current_state_def is not None
+                    and not current_state_def.terminal
+                    and current_state_def.worker is not None
+                    and not has_session_for_current
+                ):
+                    active_label = Text()
+                    active_label.append(f"○ {issue.state}", style="bold")
+                    node.add_leaf(active_label, data=f"pending:{issue.state}")
 
             # Pending steps (dimmed, not-yet-visited states)
             if self._config is not None:
                 pending = _pending_steps(self._config, issue.visit_counts)
                 for step_name in pending:
-                    # Skip the current state (it's active, not pending)
+                    # Skip the current state (it's shown above as active)
                     if step_name == issue.state:
                         continue
                     pending_label = Text()

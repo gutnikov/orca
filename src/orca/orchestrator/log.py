@@ -21,6 +21,8 @@ class JSONFormatter(logging.Formatter):
         for key, value in record.__dict__.items():
             if key not in _STANDARD_LOG_RECORD_ATTRS and key not in entry:
                 entry[key] = value
+        if record.exc_info and record.exc_info[1] is not None:
+            entry["exception"] = self.formatException(record.exc_info)
         return json.dumps(entry, default=str)
 
 
