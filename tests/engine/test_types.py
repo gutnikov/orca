@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from orca.engine.types import (
     AdvanceEvent,
     CreateEvent,
@@ -18,6 +20,7 @@ from orca.engine.types import (
     StateDef,
     StateMachineConfig,
     StringFieldDef,
+    TypeDef,
     WorkerDef,
     WorkerFailedEvent,
     WorkerResultEvent,
@@ -27,6 +30,7 @@ from orca.engine.types import (
 class TestIssueConstruction:
     def test_issue_with_all_dag_fields(self) -> None:
         issue = Issue(
+            type="issue",
             fields={"title": "Fix bug", "priority": "high"},
             state="open",
             worker_active=False,
@@ -47,6 +51,7 @@ class TestIssueConstruction:
 
     def test_issue_without_decomposed_from(self) -> None:
         issue = Issue(
+            type="issue",
             fields={"title": "Root issue"},
             state="open",
             worker_active=False,
@@ -88,6 +93,7 @@ class TestSerializationRoundTrip:
         state = State(
             issues={
                 "ISS-1": Issue(
+                    type="issue",
                     fields={"title": "Do thing"},
                     state="open",
                     worker_active=False,
@@ -113,6 +119,7 @@ class TestSerializationRoundTrip:
         state = State(
             issues={
                 "ISS-1": Issue(
+                    type="issue",
                     fields={"title": "Task"},
                     state="review",
                     worker_active=False,
@@ -160,6 +167,7 @@ class TestSerializationRoundTrip:
         state = State(
             issues={
                 "ISS-1": Issue(
+                    type="issue",
                     fields={},
                     state="blocked",
                     worker_active=False,
@@ -180,6 +188,7 @@ class TestSerializationRoundTrip:
 
     def test_issue_visit_counts_hop_count_round_trip(self) -> None:
         issue = Issue(
+            type="issue",
             fields={"title": "Test"},
             state="review",
             worker_active=False,
@@ -197,6 +206,7 @@ class TestSerializationRoundTrip:
     def test_issue_from_dict_backward_compat(self) -> None:
         """from_dict handles missing visit_counts, hop_count, and event_log."""
         raw = {
+            "type": "issue",
             "fields": {"title": "Old"},
             "state": "open",
             "worker_active": False,
@@ -239,6 +249,7 @@ class TestEffects:
     def test_dispatch_worker_effect(self) -> None:
         e = DispatchWorkerEffect(
             issue_id="ISS-1",
+            issue_type="issue",
             state="triage",
             result_format={"decision": {"type": "enum", "values": ["approve", "reject"]}},
             issue={"title": "Fix bug"},
@@ -345,8 +356,8 @@ class TestConfigTypes:
         assert s.max_visits == 5
 
     def test_state_machine_config(self) -> None:
-        config = StateMachineConfig(
-            issue_fields={
+        td = TypeDef(
+            fields={
                 "title": FieldDef(type="string", description="Title"),
                 "priority": FieldDef(type="enum", description="Priority level"),
             },
@@ -369,17 +380,153 @@ class TestConfigTypes:
                 "closed": StateDef(terminal=True),
             },
         )
-        assert config.initial == "triage"
-        assert len(config.states) == 3
-        assert config.states["closed"].terminal is True
-        assert len(config.issue_fields) == 2
+        config = StateMachineConfig(root_type="issue", types={"issue": td})
+        assert config.root_type_def.initial == "triage"
+        assert len(config.root_type_def.states) == 3
+        assert config.root_type_def.states["closed"].terminal is True
+        assert len(config.root_type_def.fields) == 2
         assert config.max_hops is None
 
     def test_state_machine_config_with_max_hops(self) -> None:
-        config = StateMachineConfig(
-            issue_fields={},
+        td = TypeDef(
+            fields={},
             initial="todo",
             states={"todo": StateDef(terminal=True)},
+        )
+        config = StateMachineConfig(
+            root_type="issue",
+            types={"issue": td},
             max_hops=50,
         )
         assert config.max_hops == 50
+
+
+class TestTypeDef:
+    def test_type_def_holds_fields_initial_states(self) -> None:
+        td = TypeDef(
+            fields={"title": FieldDef(type="string", description="t")},
+            initial="todo",
+            states={"todo": StateDef(terminal=True)},
+        )
+        assert td.initial == "todo"
+        assert "title" in td.fields
+        assert "todo" in td.states
+
+
+class TestStateMachineConfigWithTypes:
+    def test_config_has_root_type_and_types(self) -> None:
+        td = TypeDef(
+            fields={},
+            initial="done",
+            states={"done": StateDef(terminal=True)},
+        )
+        cfg = StateMachineConfig(
+            root_type="epic",
+            types={"epic": td},
+            max_hops=None,
+            max_worker_retries=5,
+        )
+        assert cfg.root_type == "epic"
+        assert "epic" in cfg.types
+
+
+class TestConfigHelpers:
+    def _make_config(self) -> StateMachineConfig:
+        worker = WorkerDef(
+            kind="claude-code",
+            prompt="p.md",
+            result_format={"outcome": EnumFieldDef(values=["done"], description="d")},
+        )
+        epic = TypeDef(
+            fields={"title": FieldDef(type="string", description="t")},
+            initial="todo",
+            states={
+                "todo": StateDef(worker=worker, on={"done": OnTransition(target="done")}),
+                "done": StateDef(terminal=True),
+            },
+        )
+        return StateMachineConfig(root_type="epic", types={"epic": epic})
+
+    def test_get_type_def(self) -> None:
+        cfg = self._make_config()
+        td = cfg.get_type("epic")
+        assert td.initial == "todo"
+
+    def test_get_state_def(self) -> None:
+        cfg = self._make_config()
+        sd = cfg.get_state("epic", "todo")
+        assert sd.worker is not None
+
+    def test_get_state_def_unknown_type_raises(self) -> None:
+        cfg = self._make_config()
+        with pytest.raises(KeyError):
+            cfg.get_state("unknown", "todo")
+
+    def test_root_type_def(self) -> None:
+        cfg = self._make_config()
+        td = cfg.root_type_def
+        assert td.initial == "todo"
+
+
+class TestOnDecomposeChildType:
+    def test_child_type_default_none(self) -> None:
+        rule = OnDecompose()
+        assert rule.child_type is None
+        assert rule.then is None
+
+    def test_child_type_set(self) -> None:
+        rule = OnDecompose(child_type="task", then="done")
+        assert rule.child_type == "task"
+        assert rule.then == "done"
+
+
+class TestIssueType:
+    def test_issue_has_type(self) -> None:
+        issue = Issue(
+            type="epic",
+            fields={"title": "t"},
+            state="todo",
+            worker_active=False,
+            decomposed_from=None,
+            depends_on=[],
+            event_log=[],
+        )
+        assert issue.type == "epic"
+
+    def test_issue_to_dict_includes_type(self) -> None:
+        issue = Issue(
+            type="task",
+            fields={},
+            state="done",
+            worker_active=False,
+            decomposed_from=None,
+            depends_on=[],
+            event_log=[],
+        )
+        d = issue.to_dict()
+        assert d["type"] == "task"
+
+    def test_issue_from_dict_reads_type(self) -> None:
+        d = {
+            "type": "subtask",
+            "fields": {},
+            "state": "coding",
+            "worker_active": False,
+            "decomposed_from": None,
+            "depends_on": [],
+            "event_log": [],
+        }
+        issue = Issue.from_dict(d)
+        assert issue.type == "subtask"
+
+
+class TestDispatchWorkerEffectIssueType:
+    def test_effect_has_issue_type(self) -> None:
+        e = DispatchWorkerEffect(
+            issue_id="I1",
+            issue_type="task",
+            state="implementing",
+            result_format={},
+            issue={},
+        )
+        assert e.issue_type == "task"
