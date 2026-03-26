@@ -68,7 +68,7 @@ class OrcaApp(App[None]):
     def compose(self) -> ComposeResult:
         yield OrcaHeader(branch_name=self._branch_name, config=self._config)
         with Horizontal(id="main-panels"):
-            yield IssueTree(insights_enabled=self._insights_enabled)
+            yield IssueTree(insights_enabled=self._insights_enabled, config=self._config)
             yield IssueDetail()
             yield TerminalView()
         yield Footer()

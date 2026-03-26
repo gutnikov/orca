@@ -7,11 +7,17 @@ from rich.text import Text
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
-from orca.engine.types import Issue, State
+from orca.engine.types import EventLogEntry, Issue, State, StateMachineConfig
 from orca.tui.messages import InsightsSelected, IssueSelected, WorkerRunSelected
 
 # Braille dot spinner frames
 _SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+
+# Progress bar colors
+_COLOR_DONE = "#8bc88b"
+_COLOR_ACTIVE = "#d4a064"
+_COLOR_FAILED = "#e06070"
+_COLOR_PENDING = "#333333"
 
 
 def _elapsed_str(started_at: str) -> str:
@@ -46,6 +52,78 @@ def _duration_str(started_at: str, completed_at: str) -> str:
         return ""
 
 
+def _progress_bar_text(
+    config: StateMachineConfig,
+    visit_counts: dict[str, int],
+    current_state: str,
+    failed_states: set[str],
+) -> Text | None:
+    """Return a Rich Text with colored block segments for each non-terminal state."""
+    non_terminal = [name for name, sdef in config.states.items() if not sdef.terminal]
+    if not non_terminal:
+        return None
+    bar = Text()
+    for name in non_terminal:
+        if name in failed_states:
+            bar.append("█", style=_COLOR_FAILED)
+        elif name == current_state:
+            bar.append("█", style=_COLOR_ACTIVE)
+        elif name in visit_counts:
+            bar.append("█", style=_COLOR_DONE)
+        else:
+            bar.append("█", style=_COLOR_PENDING)
+    return bar
+
+
+def _pending_steps(config: StateMachineConfig, visit_counts: dict[str, int]) -> list[str]:
+    """Return non-terminal states not yet visited."""
+    return [name for name, sdef in config.states.items() if not sdef.terminal and name not in visit_counts]
+
+
+def _extract_result_outcomes(event_log: list[EventLogEntry]) -> dict[str, str]:
+    """Extract outcome for each worker_result event, keyed by state.
+
+    Returns dict like {"planning": "ready", "scoping": "decompose"}.
+    Multiple results for same state: last one wins.
+    """
+    outcomes: dict[str, str] = {}
+    for entry in event_log:
+        if entry.type == "worker_result":
+            state = entry.data.get("state", "")
+            outcome = entry.data.get("outcome", "")
+            if state and outcome:
+                outcomes[state] = outcome
+    return outcomes
+
+
+def _extract_failure_errors(event_log: list[EventLogEntry]) -> dict[str, str]:
+    """Extract error for each worker_failed event, keyed by state.
+
+    Returns dict like {"planning": "exit code 1"}.
+    Multiple failures for same state: last one wins.
+    """
+    errors: dict[str, str] = {}
+    for entry in event_log:
+        if entry.type == "worker_failed":
+            state = entry.data.get("state", "")
+            error = entry.data.get("error", "")
+            if state and error:
+                errors[state] = error
+    return errors
+
+
+def _compute_failed_states(issue: Issue) -> set[str]:
+    """States where the last event was worker_failed (retries exhausted)."""
+    # Track per-state: was the last worker event a failure?
+    last_event_type: dict[str, str] = {}
+    for entry in issue.event_log:
+        if entry.type in ("worker_result", "worker_failed"):
+            state = entry.data.get("state", "")
+            if state:
+                last_event_type[state] = entry.type
+    return {s for s, t in last_event_type.items() if t == "worker_failed"}
+
+
 class IssueTree(Tree[str]):
     """Hierarchical tree view of issues with worker runs as children."""
 
@@ -61,7 +139,7 @@ class IssueTree(Tree[str]):
     }
     """
 
-    def __init__(self, insights_enabled: bool = False) -> None:
+    def __init__(self, insights_enabled: bool = False, config: StateMachineConfig | None = None) -> None:
         super().__init__("", id="issue-tree")
         self.show_root = False
         self.show_guides = False
@@ -69,6 +147,7 @@ class IssueTree(Tree[str]):
         self._state: State | None = None
         self._tick: int = 0
         self._insights_enabled = insights_enabled
+        self._config = config
 
     def _issue_label(self, issue: Issue) -> Text:
         title = str(issue.fields.get("title", "untitled"))
@@ -85,9 +164,21 @@ class IssueTree(Tree[str]):
             label.append(f" [{issue.state}]", style="dim")
         return label
 
-    def _worker_run_label(self, state_name: str, session: dict[str, Any]) -> Text:
+    def _worker_run_label(
+        self,
+        state_name: str,
+        session: dict[str, Any],
+        *,
+        result_outcomes: dict[str, str] | None = None,
+        failure_errors: dict[str, str] | None = None,
+        visit_counts: dict[str, int] | None = None,
+    ) -> Text:
         label = Text()
         is_active = session.get("completed_at") is None
+        is_failed = session.get("exit_code") not in (None, 0) or (
+            failure_errors is not None and state_name in failure_errors
+        )
+
         if is_active:
             frame = _SPINNER[self._tick % len(_SPINNER)]
             elapsed = _elapsed_str(str(session.get("started_at", "")))
@@ -95,12 +186,26 @@ class IssueTree(Tree[str]):
             label.append(state_name)
             if elapsed:
                 label.append(f" {elapsed}", style="dim")
-        else:
-            label.append("  ", style="green")
-            label.append(state_name, style="dim")
+            # Visit count badge
+            if visit_counts and visit_counts.get(state_name, 0) > 1:
+                label.append(f"  visit {visit_counts[state_name]}", style="dim")
+        elif is_failed:
+            label.append("✗ ", style="bold red")
+            label.append(state_name)
             duration = _duration_str(str(session.get("started_at", "")), str(session.get("completed_at", "")))
             if duration:
-                label.append(f" - {duration}", style="dim")
+                label.append(f" — {duration}", style="dim")
+            label.append("  failed", style="bold red")
+        else:
+            label.append("✓ ", style="green")
+            label.append(state_name)
+            duration = _duration_str(str(session.get("started_at", "")), str(session.get("completed_at", "")))
+            if duration:
+                label.append(f" — {duration}", style="dim")
+            # Result outcome badge
+            if result_outcomes and state_name in result_outcomes:
+                outcome = result_outcomes[state_name]
+                label.append(f"  {outcome}", style="bold green")
         return label
 
     def update_state(self, state: State, sessions: list[dict[str, Any]]) -> None:
@@ -157,14 +262,53 @@ class IssueTree(Tree[str]):
 
         # Add worker run leaves for this issue (only if no child issues — leaf issue)
         if not children:
+            # Compute enhanced data for this issue
+            result_outcomes = _extract_result_outcomes(issue.event_log)
+            failure_errors = _extract_failure_errors(issue.event_log)
+            failed_states = _compute_failed_states(issue)
+
+            # Progress bar
+            if self._config is not None:
+                bar = _progress_bar_text(self._config, issue.visit_counts, issue.state, failed_states)
+                if bar is not None:
+                    node.add_leaf(bar, data=f"progress:{issue_id}")
+
+            # Worker session runs
             issue_sessions = [s for s in self._sessions if s.get("issue_id") == issue_id]
             # Show only the last few sessions to avoid flooding the tree
             if len(issue_sessions) > 5:
                 issue_sessions = issue_sessions[-5:]
             for session in issue_sessions:
-                run_label = self._worker_run_label(str(session.get("state", "unknown")), session)
+                sname = str(session.get("state", "unknown"))
+                run_label = self._worker_run_label(
+                    sname,
+                    session,
+                    result_outcomes=result_outcomes,
+                    failure_errors=failure_errors,
+                    visit_counts=issue.visit_counts,
+                )
                 session_id = str(session.get("session_id", ""))
                 node.add_leaf(run_label, data=f"session:{session_id}")
+
+                # Add inline failure error below failed runs
+                if failure_errors and sname in failure_errors:
+                    is_completed = session.get("completed_at") is not None
+                    is_failed = session.get("exit_code") not in (None, 0)
+                    if is_completed and is_failed:
+                        err_label = Text()
+                        err_label.append(f"  {failure_errors[sname]}", style="dim red")
+                        node.add_leaf(err_label, data=f"error:{session_id}")
+
+            # Pending steps (dimmed, not-yet-visited states)
+            if self._config is not None:
+                pending = _pending_steps(self._config, issue.visit_counts)
+                for step_name in pending:
+                    # Skip the current state (it's active, not pending)
+                    if step_name == issue.state:
+                        continue
+                    pending_label = Text()
+                    pending_label.append(f"○ {step_name}", style="dim")
+                    node.add_leaf(pending_label, data=f"pending:{step_name}")
 
     def _restore_cursor(self, data: str) -> bool:
         found = self._find_by_data(self.root, data)
@@ -187,6 +331,8 @@ class IssueTree(Tree[str]):
         if not event.node.data:
             return
         data = event.node.data
+        if data.startswith(("progress:", "pending:", "error:")):
+            return
         if data.startswith("issue:"):
             self.post_message(IssueSelected(data[6:]))
         elif data.startswith("session:"):
