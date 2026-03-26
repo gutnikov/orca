@@ -6,11 +6,12 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
-from textual.widgets import Footer, Header
+from textual.widgets import Footer
 
 from orca.engine.types import State, StateMachineConfig
 from orca.tui.messages import InsightsSelected, IssueSelected, StateUpdated, WorkerRunSelected
 from orca.tui.state_reader import StateReader
+from orca.tui.widgets.header import OrcaHeader
 from orca.tui.widgets.issue_detail import IssueDetail
 from orca.tui.widgets.issue_tree import IssueTree
 from orca.tui.widgets.terminal_view import TerminalView
@@ -65,7 +66,7 @@ class OrcaApp(App[None]):
         self._selected_session_id: str | None = None
 
     def compose(self) -> ComposeResult:
-        yield Header()
+        yield OrcaHeader(branch_name=self._branch_name, config=self._config)
         with Horizontal(id="main-panels"):
             yield IssueTree(insights_enabled=self._insights_enabled)
             yield IssueDetail()
@@ -73,7 +74,6 @@ class OrcaApp(App[None]):
         yield Footer()
 
     def on_mount(self) -> None:
-        self.title = f"orca watch — {self._branch_name}"
         self._poll_state()
         self.set_interval(1.5, self._poll_state)
         self.set_interval(0.15, self._tick_spinners)
@@ -107,6 +107,8 @@ class OrcaApp(App[None]):
     def on_state_updated(self, message: StateUpdated) -> None:
         tree = self.query_one(IssueTree)
         tree.update_state(message.state, message.sessions)
+        header = self.query_one(OrcaHeader)
+        header.update_state(message.state, message.sessions)
         self._update_status()
 
     def on_issue_selected(self, message: IssueSelected) -> None:
