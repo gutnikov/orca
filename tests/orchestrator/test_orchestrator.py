@@ -42,6 +42,8 @@ class MockWorker:
         inactivity_timeout: int | None = None,
         pty_session: Any = None,
         env: dict[str, str] | None = None,
+        model: str | None = None,
+        extra_args: list[str] | None = None,
     ) -> WorkerOutcome:
         self.calls.append((effect.issue_id, effect.state))
         return self.outcomes.get(effect.state, WorkerFailure(error="no mock"))
@@ -169,6 +171,8 @@ class TestOrchestrator:
                 inactivity_timeout: int | None = None,
                 pty_session: Any = None,
                 env: dict[str, str] | None = None,
+                model: str | None = None,
+                extra_args: list[str] | None = None,
             ) -> WorkerOutcome:
                 self.calls.append((effect.issue_id, effect.state))
                 count = call_count.get(effect.state, 0)
