@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -204,84 +203,3 @@ class TestOrchestrator:
         assert final_state.issues["issue-1"].state == "done"
         # Verify we had at least 2 calls on 'todo' (one failure + one success)
         assert call_count.get("todo", 0) >= 2
-
-
-@pytest.mark.asyncio()
-class TestInsightsLoop:
-    async def test_insights_not_started_when_no_worker(self, tmp_path: Path) -> None:
-        """Default (no insights_worker) means no insights.md created."""
-        config = parse_config(SIMPLE_CONFIG)
-        state = State(issues={}, worker_queues={})
-        create_event = CreateEvent(issue_id="issue-1", fields={"title": "Test"}, timestamp=_now())
-        state, initial_effects = reduce(config, state, create_event, _counter(), _now)
-
-        persistence = Persistence(tmp_path, "main")
-        persistence.save(state)
-        branches = BranchMap(tmp_path, "main")
-
-        worker = MockWorker(
-            outcomes={
-                "todo": WorkerSuccess(result={"outcome": "start"}),
-                "implementing": WorkerSuccess(result={"outcome": "complete"}),
-            }
-        )
-
-        orchestrator = Orchestrator(
-            config=config,
-            state=state,
-            root_branch="main",
-            persistence=persistence,
-            branches=branches,
-            workers={"claude-code": worker},
-            generate_id=_counter(),
-            now=_now,
-            worktree_mgr=FakeWorktreeManager(tmp_path),
-        )
-
-        await orchestrator.run("issue-1", initial_effects)
-        assert orchestrator.state.issues["issue-1"].state == "done"
-        # No insights.md should exist
-        run_dir = tmp_path / ".orca" / "runs" / "main"
-        insights_path = run_dir / "insights.md"
-        assert not insights_path.exists()
-
-    async def test_insights_worker_called_when_provided(self, tmp_path: Path) -> None:
-        """With insights_worker provided, execute_raw is called."""
-        config = parse_config(SIMPLE_CONFIG)
-        state = State(issues={}, worker_queues={})
-        create_event = CreateEvent(issue_id="issue-1", fields={"title": "Test"}, timestamp=_now())
-        state, initial_effects = reduce(config, state, create_event, _counter(), _now)
-
-        persistence = Persistence(tmp_path, "main")
-        persistence.save(state)
-        branches = BranchMap(tmp_path, "main")
-
-        worker = MockWorker(
-            outcomes={
-                "todo": WorkerSuccess(result={"outcome": "start"}),
-                "implementing": WorkerSuccess(result={"outcome": "complete"}),
-            }
-        )
-
-        mock_insights = MagicMock()
-        mock_insights.execute_raw = AsyncMock(return_value=WorkerSuccess(result={}))
-
-        orchestrator = Orchestrator(
-            config=config,
-            state=state,
-            root_branch="main",
-            persistence=persistence,
-            branches=branches,
-            workers={"claude-code": worker},
-            generate_id=_counter(),
-            now=_now,
-            worktree_mgr=FakeWorktreeManager(tmp_path),
-            repo_root=tmp_path,
-            insights_worker=mock_insights,
-            insights_interval=0.05,
-        )
-
-        await orchestrator.run("issue-1", initial_effects)
-        assert orchestrator.state.issues["issue-1"].state == "done"
-        # The final insights run should have been called at minimum
-        assert mock_insights.execute_raw.call_count >= 1

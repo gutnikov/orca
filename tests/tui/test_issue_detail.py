@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 from textual.app import App, ComposeResult
 
@@ -48,12 +46,9 @@ class TestIssueDetail:
             await pilot.pause()
 
     @pytest.mark.asyncio
-    async def test_shows_insights(self, tmp_path: Path) -> None:
-        insights_path = tmp_path / "insights.md"
-        insights_path.write_text("# Insights\n\nAll good")
-
+    async def test_shows_issue_text(self) -> None:
         app = IssueDetailApp()
         async with app.run_test() as pilot:
             detail = app.query_one(IssueDetail)
-            detail.show_insights(insights_path)
+            detail.show_issue_text("Insights", "# Insights\n\nAll good")
             await pilot.pause()

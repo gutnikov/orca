@@ -20,15 +20,10 @@ from orca.engine.types import (
     WorkerResultEvent,
 )
 from orca.orchestrator.branches import BranchMap
-from orca.orchestrator.insights import (
-    serialize_state_for_insights,
-    truncate_insights_so_far,
-)
 from orca.orchestrator.persistence import Persistence
 from orca.orchestrator.pty_session import PtySession
 from orca.orchestrator.session_sync import SessionSync
-from orca.orchestrator.template import render_insights_prompt
-from orca.orchestrator.worker import ClaudeCodeWorker, Worker, WorkerFailure, WorkerOutcome, WorkerSuccess
+from orca.orchestrator.worker import Worker, WorkerFailure, WorkerOutcome, WorkerSuccess
 from orca.orchestrator.worktree import WorktreeManager
 
 logger = logging.getLogger(__name__)
@@ -58,11 +53,10 @@ class Orchestrator:
         worktree_mgr: WorktreeManager,
         repo_root: Path | None = None,
         session_sync: SessionSync | None = None,
-        insights_worker: ClaudeCodeWorker | None = None,
-        insights_interval: float = 300.0,
-        insights_timeout: float = 120.0,
+        insights_enabled: bool = False,
         hot_sessions: set[str] | None = None,
         session_log_paths: dict[str, str] | None = None,
+        insights_state: dict[str, str] | None = None,
     ) -> None:
         self.config = config
         self.state = state
@@ -75,10 +69,9 @@ class Orchestrator:
         self.worktree_mgr = worktree_mgr
         self.repo_root = repo_root
         self._session_sync = session_sync
-        self._insights_worker = insights_worker
-        self._insights_interval = insights_interval
-        self._insights_timeout = insights_timeout
-        self._insights_in_flight = False
+        self._insights_enabled = insights_enabled
+        self._insights_state = insights_state
+        self._insights_tracking_id: str = ""
         # Shared with TUI: which sessions should be captured frequently
         self._hot_sessions: set[str] = hot_sessions if hot_sessions is not None else set()
         # Shared with TUI: maps tracking_id -> log file path
@@ -102,6 +95,10 @@ class Orchestrator:
     def session_log_paths(self) -> dict[str, str]:
         """Map of tracking_id -> log file path (shared with TUI)."""
         return self._session_log_paths
+
+    @property
+    def insights_tracking_id(self) -> str:
+        return self._insights_tracking_id
 
     def _is_terminal(self, issue_id: str) -> bool:
         """Return True if the issue's current state is terminal in config."""
@@ -382,75 +379,21 @@ class Orchestrator:
                     extra={"event": "error_effect", "issue_id": effect.issue_id, "error": effect.message},
                 )
 
-    async def _run_insights_once(self, root_issue_id: str) -> None:
-        """Run a single insights worker invocation."""
-        if self.repo_root is None or self._insights_worker is None:
-            return
-
+    def _build_insights_prompt(self) -> str:
+        prompt_path = Path(__file__).parent / "prompts" / "insights.md"
+        template = prompt_path.read_text()
         run_dir = self.persistence.state_path.parent
-        insights_path = run_dir / "insights.md"
-        template_path = Path(__file__).parent / "prompts" / "insights.md.j2"
-        is_final = self._is_terminal(root_issue_id)
-        mode = "final" if is_final else "incremental"
-
-        state_data = serialize_state_for_insights(self.state)
-        insights_so_far = truncate_insights_so_far(insights_path.read_text()) if insights_path.exists() else ""
-
-        prompt = render_insights_prompt(
-            template_path=template_path,
-            state=state_data,
-            transcripts={},
-            mode=mode,
-            insights_so_far=insights_so_far,
-            output_path=str(insights_path),
-        )
-
-        tracking_id = str(uuid4())
-        timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
-        session_log_dir = self.repo_root / ".orca" / "sessions"
-        session_log_dir.mkdir(parents=True, exist_ok=True)
-        session_log_path = session_log_dir / f"insights-{timestamp}.jsonl"
-
-        if self._session_sync is not None:
-            self._session_sync.manifest.append(
-                issue_id="__insights__",
-                state=mode,
-                session_id=tracking_id,
-                worktree_path=str(self.repo_root),
-                started_at=self.now(),
-            )
-
-        self._insights_in_flight = True
-        try:
-            outcome = await self._insights_worker.execute_raw(
-                prompt, self.repo_root, session_log_path, timeout=self._insights_timeout
-            )
-
-            if self._session_sync is not None:
-                self._session_sync.manifest.mark_completed(tracking_id, self.now())
-
-            if isinstance(outcome, WorkerFailure):
-                logger.warning("Insights worker failed: %s", outcome.error)
-            else:
-                logger.info("Insights worker completed successfully")
-        except Exception:
-            logger.exception("Insights worker raised exception")
-        finally:
-            self._insights_in_flight = False
-
-    async def _insights_loop(self, root_issue_id: str) -> None:
-        """Periodically run the insights agent to analyze progress."""
-        while True:
-            await asyncio.sleep(self._insights_interval)
-
-            if self._insights_in_flight:
-                logger.debug("Insights worker still in flight, skipping tick")
-                continue
-
-            await self._run_insights_once(root_issue_id)
-
-            if self._is_terminal(root_issue_id):
+        config_path = ""
+        if self.repo_root:
+            for candidate in sorted(self.repo_root.glob("orca*.yml")):
+                config_path = str(candidate)
                 break
+        return template.format(
+            run_dir=str(run_dir),
+            branch_name=self.root_branch,
+            config_path=config_path,
+            repo_root=str(self.repo_root or "."),
+        )
 
     async def _session_capture_loop(self) -> None:
         """Periodically capture tmux scrollback to log files.
@@ -481,14 +424,34 @@ class Orchestrator:
 
     async def run(self, root_issue_id: str, initial_effects: list[Effect]) -> None:
         """Drive the orchestrator event loop until the root issue is terminal."""
-        insights_task: asyncio.Task[None] | None = None
-        if self._insights_worker is not None:
-            insights_task = asyncio.create_task(self._insights_loop(root_issue_id))
-
         capture_task = asyncio.create_task(self._session_capture_loop())
 
         pending: list[DispatchWorkerEffect] = []
         self._route_effects(initial_effects, pending)
+
+        # Spawn insights tmux session if enabled
+        insights_session: PtySession | None = None
+        if self._insights_enabled and self.repo_root is not None:
+            from orca.orchestrator.pty_session import TmuxSession
+
+            insights_id = f"insights-{uuid4()}"
+            self._insights_tracking_id = insights_id
+            insights_session = TmuxSession(session_name=insights_id, cols=120, rows=40)
+            prompt = self._build_insights_prompt()
+            log_dir = self.repo_root / ".orca" / "sessions"
+            log_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
+            insights_log = log_dir / f"insights-{ts}.log"
+            await insights_session.spawn(
+                "claude",
+                ["--dangerously-skip-permissions", "--max-turns", "200"],
+                cwd=self.repo_root,
+                stdin_data=prompt.encode(),
+            )
+            self._tmux_sessions[insights_id] = insights_session
+            self._session_log_paths[insights_id] = str(insights_log)
+            if self._insights_state is not None:
+                self._insights_state["tracking_id"] = insights_id
 
         while not self._is_terminal(root_issue_id):
             # Spawn all pending dispatch effects
@@ -620,19 +583,18 @@ class Orchestrator:
             await asyncio.gather(*self._in_flight.keys(), return_exceptions=True)
         self._in_flight.clear()
 
+        # Clean up insights session
+        if insights_session is not None:
+            await asyncio.sleep(10)  # brief wait for agent to notice completion
+            try:
+                raw = insights_session.capture_scrollback()
+                if raw and self._insights_tracking_id in self._session_log_paths:
+                    Path(self._session_log_paths[self._insights_tracking_id]).write_text(raw)
+            except Exception:
+                pass
+            self._tmux_sessions.pop(self._insights_tracking_id, None)
+            insights_session.close()
+
         capture_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await capture_task
-
-        if insights_task is not None:
-            insights_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await insights_task
-
-        if self._insights_worker is not None and self._is_terminal(root_issue_id):
-            try:
-                await asyncio.wait_for(self._run_insights_once(root_issue_id), timeout=self._insights_timeout)
-            except TimeoutError:
-                logger.warning("Final insights summary timed out")
-            except Exception:
-                logger.exception("Final insights summary failed")

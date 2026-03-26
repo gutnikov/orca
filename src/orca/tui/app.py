@@ -10,7 +10,7 @@ from textual.containers import Horizontal
 from textual.widgets import Footer
 
 from orca.engine.types import State, StateMachineConfig
-from orca.tui.messages import InsightsSelected, IssueSelected, StateUpdated, WorkerRunSelected
+from orca.tui.messages import InsightEntrySelected, InsightsSelected, IssueSelected, StateUpdated, WorkerRunSelected
 from orca.tui.state_reader import StateReader
 from orca.tui.widgets.header import OrcaHeader
 from orca.tui.widgets.issue_detail import IssueDetail
@@ -53,6 +53,7 @@ class OrcaApp(App[None]):
         insights_enabled: bool = False,
         hot_sessions: set[str] | None = None,
         session_log_paths: dict[str, str] | None = None,
+        insights_state: dict[str, str] | None = None,
     ) -> None:
         super().__init__()
         self._reader = StateReader(run_dir)
@@ -64,13 +65,18 @@ class OrcaApp(App[None]):
         # Shared with orchestrator thread
         self._hot_sessions: set[str] = hot_sessions if hot_sessions is not None else set()
         self._session_log_paths: dict[str, str] = session_log_paths if session_log_paths is not None else {}
+        self._insights_state: dict[str, str] = insights_state if insights_state is not None else {}
         self._selected_session_id: str | None = None
         self._sessions: list[dict[str, object]] = []
+
+    @property
+    def _insights_tracking_id(self) -> str:
+        return self._insights_state.get("tracking_id", "")
 
     def compose(self) -> ComposeResult:
         yield OrcaHeader(branch_name=self._branch_name, config=self._config)
         with Horizontal(id="main-panels"):
-            yield IssueTree(insights_enabled=self._insights_enabled, config=self._config)
+            yield IssueTree(insights_enabled=self._insights_enabled, config=self._config, run_dir=self._run_dir)
             yield IssueDetail()
             yield TerminalView()
         yield Footer()
@@ -90,11 +96,6 @@ class OrcaApp(App[None]):
     def _tick_spinners(self) -> None:
         tree = self.query_one(IssueTree)
         tree.refresh_tick()
-
-    def action_refresh_all(self) -> None:
-        """Refresh the content pane."""
-        detail = self.query_one(IssueDetail)
-        detail.refresh_transcript()
 
     def action_focus_tree(self) -> None:
         self.query_one(IssueTree).focus()
@@ -175,10 +176,34 @@ class OrcaApp(App[None]):
 
     def on_insights_selected(self, message: InsightsSelected) -> None:
         self._deselect_session()
-        self.query_one(TerminalView).styles.display = "none"
+        detail = self.query_one(IssueDetail)
+        terminal = self.query_one(TerminalView)
+        tid = self._insights_tracking_id
+        log_path_str = self._session_log_paths.get(tid, "")
+        if log_path_str:
+            detail.styles.display = "none"
+            terminal.styles.display = "block"
+            self._selected_session_id = tid
+            self._hot_sessions.add(tid)
+            terminal.show_log_file(Path(log_path_str), active=True)
+        else:
+            terminal.styles.display = "none"
+            detail.styles.display = "block"
+            detail.show_issue_text("Insights", "*Waiting for insights agent to start...*")
+
+    def on_insight_entry_selected(self, message: InsightEntrySelected) -> None:
+        self._deselect_session()
+        terminal = self.query_one(TerminalView)
+        terminal.styles.display = "none"
         detail = self.query_one(IssueDetail)
         detail.styles.display = "block"
-        detail.show_insights(self._run_dir / "insights.md")
+        icon = {"error": "●", "warning": "⚠", "info": "ℹ", "summary": "◆"}.get(message.severity, "ℹ")
+        content = f"# {icon} {message.title}\n\n"
+        if message.detail:
+            content += f"{message.detail}\n\n"
+        if message.remediation:
+            content += f"## Remediation\n\n{message.remediation}\n"
+        detail.show_issue_text(message.title, content)
 
     def _deselect_session(self) -> None:
         """Remove the previous session from hot set."""

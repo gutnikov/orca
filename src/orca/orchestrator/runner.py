@@ -220,6 +220,7 @@ async def run(
     insights_enabled: bool = False,
     hot_sessions: set[str] | None = None,
     session_log_paths: dict[str, str] | None = None,
+    insights_state: dict[str, str] | None = None,
 ) -> None:
     """Main entry point: read task file, set up state, run orchestrator."""
     repo_root = Path.cwd()
@@ -320,7 +321,6 @@ async def run(
 
     # Set up worker, session sync, and orchestrator
     worker = ClaudeCodeWorker(repo_root)
-    insights_worker = worker if insights_enabled else None
 
     from orca.orchestrator.orchestrator import Orchestrator
     from orca.orchestrator.session_sync import SessionSync
@@ -340,9 +340,10 @@ async def run(
         worktree_mgr=worktree_mgr,
         repo_root=repo_root,
         session_sync=session_sync,
-        insights_worker=insights_worker,
+        insights_enabled=insights_enabled,
         hot_sessions=hot_sessions,
         session_log_paths=session_log_paths,
+        insights_state=insights_state,
     )
 
     try:
@@ -385,6 +386,7 @@ def main() -> None:
         # session_log_paths: orchestrator writes log file paths for each worker
         hot_sessions: set[str] = set()
         session_log_paths: dict[str, str] = {}
+        insights_state: dict[str, str] = {}
 
         run_error: BaseException | None = None
 
@@ -399,6 +401,7 @@ def main() -> None:
                         insights_enabled=args.insights,
                         hot_sessions=hot_sessions,
                         session_log_paths=session_log_paths,
+                        insights_state=insights_state,
                     )
                 )
             except BaseException as e:
@@ -425,6 +428,7 @@ def main() -> None:
             insights_enabled=args.insights,
             hot_sessions=hot_sessions,
             session_log_paths=session_log_paths,
+            insights_state=insights_state,
         )
         app.run()
 

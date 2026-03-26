@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from rich.text import Text
@@ -139,7 +141,12 @@ class IssueTree(Tree[str]):
     }
     """
 
-    def __init__(self, insights_enabled: bool = False, config: StateMachineConfig | None = None) -> None:
+    def __init__(
+        self,
+        insights_enabled: bool = False,
+        config: StateMachineConfig | None = None,
+        run_dir: Path | None = None,
+    ) -> None:
         super().__init__("", id="issue-tree")
         self.show_root = False
         self.show_guides = False
@@ -148,6 +155,19 @@ class IssueTree(Tree[str]):
         self._tick: int = 0
         self._insights_enabled = insights_enabled
         self._config = config
+        self._run_dir = run_dir
+
+    def _read_insights(self) -> list[dict[str, Any]]:
+        if self._run_dir is None:
+            return []
+        p = self._run_dir / "insights.json"
+        if not p.exists():
+            return []
+        try:
+            data: list[dict[str, Any]] = json.loads(p.read_text())
+            return data
+        except (json.JSONDecodeError, OSError):
+            return []
 
     def _issue_label(self, issue: Issue) -> Text:
         title = str(issue.fields.get("title", "untitled"))
@@ -227,12 +247,27 @@ class IssueTree(Tree[str]):
         for iid, issue in roots:
             self._add_issue_node(self.root, iid, issue, state)
 
-        # Add Insights leaf node when insights are enabled
+        # Add Insights parent node with children when insights are enabled
         if self._insights_enabled:
             insights_label = Text()
             insights_label.append("◆ ", style="bold cyan")
             insights_label.append("Insights", style="cyan")
-            self.root.add_leaf(insights_label, data="insights")
+            insights_node = self.root.add(insights_label, data="insights")
+            insights_node.expand()
+            for i, entry in enumerate(self._read_insights()):
+                sev = entry.get("severity", "info")
+                title = str(entry.get("title", "Untitled"))[:60]
+                lbl = Text()
+                if sev == "error":
+                    lbl.append("● ", style="bold red")
+                elif sev == "warning":
+                    lbl.append("⚠ ", style="bold yellow")
+                elif sev == "summary":
+                    lbl.append("◆ ", style="bold cyan")
+                else:
+                    lbl.append("ℹ ", style="dim")
+                lbl.append(title)
+                insights_node.add_leaf(lbl, data=f"insight:{i}")
 
         self.root.expand()
 
@@ -358,6 +393,21 @@ class IssueTree(Tree[str]):
             )
         elif data == "insights":
             self.post_message(InsightsSelected())
+        elif data.startswith("insight:"):
+            idx = int(data[8:])
+            entries = self._read_insights()
+            if 0 <= idx < len(entries):
+                e = entries[idx]
+                from orca.tui.messages import InsightEntrySelected
+
+                self.post_message(
+                    InsightEntrySelected(
+                        title=str(e.get("title", "")),
+                        detail=str(e.get("detail", "")),
+                        remediation=str(e.get("remediation", "")),
+                        severity=str(e.get("severity", "info")),
+                    )
+                )
 
     def refresh_tick(self) -> None:
         """Called by the app timer to advance the spinner without full rebuild."""
