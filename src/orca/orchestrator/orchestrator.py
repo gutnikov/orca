@@ -331,6 +331,8 @@ class Orchestrator:
                 env=worker_env,
                 model=model,
                 extra_args=list(extra_args) if extra_args else None,
+                session_manifest=self._session_sync.manifest if self._session_sync else None,
+                session_id=tracking_id,
             )
         finally:
             # Final scrollback save before killing the session

@@ -9,6 +9,7 @@ from typing import Any, Protocol
 
 from orca.engine.types import DispatchWorkerEffect
 from orca.orchestrator.pty_session import PtySession
+from orca.orchestrator.session_sync import SessionManifest
 from orca.orchestrator.template import render_prompt
 from orca.orchestrator.validation import validate_result
 
@@ -50,6 +51,8 @@ class Worker(Protocol):
         env: dict[str, str] | None = None,
         model: str | None = None,
         extra_args: list[str] | None = None,
+        session_manifest: SessionManifest | None = None,
+        session_id: str | None = None,
     ) -> WorkerOutcome: ...
 
 
@@ -78,6 +81,17 @@ KIND_REGISTRY: dict[str, KindConfig] = {
 }
 
 
+def _build_correction_message(error: str, result_format: dict[str, Any], result_path: Path) -> str:
+    """Build a message telling the worker to fix its invalid result.json."""
+    format_json = json.dumps(result_format, indent=2)
+    return (
+        f"URGENT: Your result file at {result_path} is INVALID. "
+        f"Error: {error}. "
+        f"You MUST rewrite the file with the correct format. "
+        f"Required schema: {format_json}"
+    )
+
+
 class CliAgentWorker:
     """Spawns a CLI agent as a subprocess, streams output to a session log, reads/validates result."""
 
@@ -96,6 +110,8 @@ class CliAgentWorker:
         env: dict[str, str] | None = None,
         model: str | None = None,
         extra_args: list[str] | None = None,
+        session_manifest: SessionManifest | None = None,
+        session_id: str | None = None,
     ) -> WorkerOutcome:
         assert pty_session is not None, "pty_session is required"
 
@@ -146,6 +162,8 @@ class CliAgentWorker:
         elapsed = 0.0
         result_detected_at: float | None = None
         result_detected_while_alive = False
+        last_validation_error: str | None = None
+        correction_sent = False
 
         while True:
             await asyncio.sleep(_POLL_INTERVAL)
@@ -159,11 +177,38 @@ class CliAgentWorker:
                     if error is None:
                         result_detected_at = elapsed
                         result_detected_while_alive = pty_session.alive
+                        last_validation_error = None
+                        if session_manifest and session_id:
+                            session_manifest.update_result_error(session_id, None)
                         logger.info(
                             "Valid result detected for issue %s — grace period started",
                             effect.issue_id,
                             extra={"event": "result_detected", "issue_id": effect.issue_id},
                         )
+                    else:
+                        last_validation_error = error
+                        logger.warning(
+                            "Invalid result.json for issue %s: %s",
+                            effect.issue_id,
+                            error,
+                            extra={
+                                "event": "result_validation_failed",
+                                "issue_id": effect.issue_id,
+                                "validation_error": error,
+                            },
+                        )
+                        if session_manifest and session_id:
+                            session_manifest.update_result_error(session_id, error)
+                        # Send correction message to the worker (once)
+                        if not correction_sent and pty_session.alive:
+                            correction_msg = _build_correction_message(error, effect.result_format, result_path)
+                            if pty_session.send_keys(correction_msg):
+                                correction_sent = True
+                                logger.info(
+                                    "Sent result correction message to worker for issue %s",
+                                    effect.issue_id,
+                                    extra={"event": "correction_sent", "issue_id": effect.issue_id},
+                                )
                 except (json.JSONDecodeError, OSError):
                     pass
 
@@ -196,10 +241,14 @@ class CliAgentWorker:
 
             # Timeout — no result produced in time
             if result_detected_at is None and elapsed >= effective_timeout:
+                error_detail = f"no valid result after {int(effective_timeout)}s"
+                if last_validation_error:
+                    error_detail += f" (result.json invalid: {last_validation_error})"
                 logger.warning(
-                    "Worker for issue %s timed out with no result",
+                    "Worker for issue %s timed out: %s",
                     effect.issue_id,
+                    error_detail,
                     extra={"event": "worker_timeout", "issue_id": effect.issue_id},
                 )
                 pty_session.kill()
-                return WorkerFailure(error=f"no valid result after {int(effective_timeout)}s")
+                return WorkerFailure(error=error_detail)

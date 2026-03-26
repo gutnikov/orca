@@ -210,10 +210,18 @@ class IssueTree(Tree[str]):
         if is_active:
             frame = _SPINNER[self._tick % len(_SPINNER)]
             elapsed = _elapsed_str(str(session.get("started_at", "")))
-            label.append(f"{frame} ", style="bold yellow")
-            label.append(state_name)
-            if elapsed:
-                label.append(f" {elapsed}", style="dim")
+            result_error = session.get("result_error")
+            if result_error:
+                label.append(f"{frame} ", style="bold red")
+                label.append(state_name)
+                if elapsed:
+                    label.append(f" {elapsed}", style="dim")
+                label.append("  invalid result", style="bold red")
+            else:
+                label.append(f"{frame} ", style="bold yellow")
+                label.append(state_name)
+                if elapsed:
+                    label.append(f" {elapsed}", style="dim")
             # Visit count badge
             if visit_counts and visit_counts.get(state_name, 0) > 1:
                 label.append(f"  visit {visit_counts[state_name]}", style="dim")
@@ -336,8 +344,13 @@ class IssueTree(Tree[str]):
                 session_id = str(session.get("session_id", ""))
                 node.add_leaf(run_label, data=f"session:{session_id}")
 
-                # Add inline failure error below the last completed session for a failed state
-                if is_last_completed and sname in failed_states and failure_errors and sname in failure_errors:
+                # Add inline error: validation error for active sessions, failure error for completed
+                result_error = session.get("result_error")
+                if result_error and session.get("completed_at") is None:
+                    err_label = Text()
+                    err_label.append(f"  {result_error}", style="dim red")
+                    node.add_leaf(err_label, data=f"error:{session_id}")
+                elif is_last_completed and sname in failed_states and failure_errors and sname in failure_errors:
                     err_label = Text()
                     err_label.append(f"  {failure_errors[sname]}", style="dim red")
                     node.add_leaf(err_label, data=f"error:{session_id}")

@@ -62,6 +62,19 @@ class SessionManifest:
             logger.warning("mark_completed: session %s not found in manifest", session_id)
         self._write(entries)
 
+    def update_result_error(self, session_id: str, error: str | None) -> None:
+        """Store or clear a result validation error on a session entry."""
+        entries = self.read()
+        for entry in entries:
+            if entry["session_id"] == session_id:
+                if error:
+                    entry["result_error"] = error
+                else:
+                    entry.pop("result_error", None)
+                self._write(entries)
+                return
+        logger.warning("update_result_error: session %s not found in manifest", session_id)
+
     def mark_orphans_completed(self, completed_at: str) -> int:
         """Mark all incomplete sessions as completed (orphans from a crashed run)."""
         entries = self.read()

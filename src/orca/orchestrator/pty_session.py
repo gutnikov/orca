@@ -114,6 +114,23 @@ class TmuxSession:
                 return -1
         return 0
 
+    def send_keys(self, text: str) -> bool:
+        """Send literal text to the tmux session pane followed by Enter. Returns True on success."""
+        if not self.alive:
+            return False
+        result = subprocess.run(
+            ["tmux", "send-keys", "-t", self._session_name, "-l", text],
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            return False
+        # Send Enter to submit the message
+        subprocess.run(
+            ["tmux", "send-keys", "-t", self._session_name, "Enter"],
+            capture_output=True,
+        )
+        return True
+
     def kill(self) -> None:
         """Kill the tmux session."""
         subprocess.run(
