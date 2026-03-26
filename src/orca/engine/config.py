@@ -18,6 +18,8 @@ from orca.engine.types import (
     WorkerDef,
 )
 
+_ALLOWED_WORKER_KINDS = {"claude-code", "opencode"}
+
 
 class ConfigValidationError(Exception):
     pass
@@ -96,12 +98,17 @@ def _parse_state(name: str, raw_data: dict[str, Any] | None) -> StateDef:
         result_format: dict[str, ResultFormatField] = {}
         for field_name, field_data in rf_data.items():
             result_format[field_name] = _parse_result_format_field(field_name, field_data)
+        model: str | None = worker_data.get("model")
+        raw_args = worker_data.get("args")
+        args: tuple[str, ...] | None = tuple(str(a) for a in raw_args) if raw_args is not None else None
         worker = WorkerDef(
             kind=kind,
             prompt=prompt,
             result_format=result_format,
             timeout=timeout,
             inactivity_timeout=inactivity_timeout,
+            model=model,
+            args=args,
         )
 
     on: dict[str, OnRule] = {}
@@ -158,8 +165,9 @@ def _validate(config: StateMachineConfig) -> None:
     for name, state in config.states.items():
         # Validate worker fields
         if state.worker is not None:
-            if state.worker.kind != "claude-code":
-                msg = f"Worker for state '{name}': kind must be 'claude-code', got '{state.worker.kind}'"
+            if state.worker.kind not in _ALLOWED_WORKER_KINDS:
+                allowed_kinds = sorted(_ALLOWED_WORKER_KINDS)
+                msg = f"Worker for state '{name}': kind must be one of {allowed_kinds}, got '{state.worker.kind}'"
                 raise ConfigValidationError(msg)
             if not state.worker.prompt:
                 msg = f"Worker prompt for state '{name}' must be a non-empty string"

@@ -538,7 +538,7 @@ states:
     terminal: true
 initial: todo
 """
-        with pytest.raises(ConfigValidationError, match="kind must be 'claude-code'"):
+        with pytest.raises(ConfigValidationError, match="kind must be one of"):
             parse_config(yaml_str)
 
     def test_missing_prompt_rejected(self) -> None:
@@ -586,3 +586,107 @@ initial: todo
 """
         with pytest.raises(ConfigValidationError, match="timeout"):
             parse_config(yaml_str)
+
+    def test_parse_worker_with_model(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      kind: claude-code
+      prompt: prompts/work.md
+      model: anthropic/claude-sonnet-4-5
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+  done:
+    terminal: true
+initial: todo
+"""
+        cfg = parse_config(yaml_str)
+        worker = cfg.states["todo"].worker
+        assert worker is not None
+        assert worker.model == "anthropic/claude-sonnet-4-5"
+
+    def test_parse_worker_with_args(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      kind: claude-code
+      prompt: prompts/work.md
+      args: ["--max-turns", "100"]
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+  done:
+    terminal: true
+initial: todo
+"""
+        cfg = parse_config(yaml_str)
+        worker = cfg.states["todo"].worker
+        assert worker is not None
+        assert worker.args == ("--max-turns", "100")
+
+    def test_parse_worker_model_and_args_default_none(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      kind: claude-code
+      prompt: prompts/work.md
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+  done:
+    terminal: true
+initial: todo
+"""
+        cfg = parse_config(yaml_str)
+        worker = cfg.states["todo"].worker
+        assert worker is not None
+        assert worker.model is None
+        assert worker.args is None
+
+    def test_opencode_kind_accepted(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      kind: opencode
+      prompt: prompts/work.md
+      model: anthropic/claude-sonnet-4-5
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+  done:
+    terminal: true
+initial: todo
+"""
+        cfg = parse_config(yaml_str)
+        worker = cfg.states["todo"].worker
+        assert worker is not None
+        assert worker.kind == "opencode"

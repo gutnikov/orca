@@ -42,6 +42,8 @@ class WorkerDef:
     result_format: dict[str, ResultFormatField]
     timeout: int | None = None
     inactivity_timeout: int | None = None
+    model: str | None = None
+    args: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)

@@ -48,14 +48,42 @@ class Worker(Protocol):
         inactivity_timeout: int | None = None,
         pty_session: PtySession | None = None,
         env: dict[str, str] | None = None,
+        model: str | None = None,
+        extra_args: list[str] | None = None,
     ) -> WorkerOutcome: ...
 
 
-class ClaudeCodeWorker:
-    """Spawns claude CLI as a subprocess, streams output to a session log, reads/validates result."""
+@dataclass(frozen=True)
+class KindConfig:
+    """Describes how to invoke a specific CLI agent."""
 
-    def __init__(self, repo_root: Path) -> None:
+    bin: str
+    prompt_via: str  # "stdin" or "arg"
+    subcommand: str | None = None
+    default_args: tuple[str, ...] = ()
+
+
+KIND_REGISTRY: dict[str, KindConfig] = {
+    "claude-code": KindConfig(
+        bin="claude",
+        prompt_via="stdin",
+        default_args=("--dangerously-skip-permissions", "--max-turns", "50"),
+    ),
+    "opencode": KindConfig(
+        bin="opencode",
+        prompt_via="arg",
+        subcommand="run",
+        default_args=(),
+    ),
+}
+
+
+class CliAgentWorker:
+    """Spawns a CLI agent as a subprocess, streams output to a session log, reads/validates result."""
+
+    def __init__(self, repo_root: Path, kind_config: KindConfig) -> None:
         self._repo_root = repo_root
+        self._kind_config = kind_config
 
     async def execute(
         self,
@@ -66,6 +94,8 @@ class ClaudeCodeWorker:
         inactivity_timeout: int | None = None,
         pty_session: PtySession | None = None,
         env: dict[str, str] | None = None,
+        model: str | None = None,
+        extra_args: list[str] | None = None,
     ) -> WorkerOutcome:
         assert pty_session is not None, "pty_session is required"
 
@@ -78,12 +108,24 @@ class ClaudeCodeWorker:
         else:
             prompt = ""
 
-        # c. Spawn claude in a tmux session — prompt piped via file
+        # c. Build command
+        cmd_parts: list[str] = [self._kind_config.bin]
+        if self._kind_config.subcommand:
+            cmd_parts.append(self._kind_config.subcommand)
+        if self._kind_config.prompt_via == "arg":
+            cmd_parts.append(prompt)
+        cmd_parts.extend(self._kind_config.default_args)
+        if extra_args:
+            cmd_parts.extend(extra_args)
+        if model:
+            cmd_parts.extend(["-m", model])
+
+        # d. Spawn in tmux session
         await pty_session.spawn(
-            "claude",
-            ["--dangerously-skip-permissions", "--max-turns", "50"],
+            cmd_parts[0],
+            cmd_parts[1:],
             cwd=workdir,
-            stdin_data=prompt.encode(),
+            stdin_data=prompt.encode() if self._kind_config.prompt_via == "stdin" else None,
             env=env,
         )
 
@@ -99,7 +141,7 @@ class ClaudeCodeWorker:
             },
         )
 
-        # d. Poll for result file or session exit
+        # e. Poll for result file or session exit
         effective_timeout = float(inactivity_timeout) if inactivity_timeout is not None else _INACTIVITY_TIMEOUT
         elapsed = 0.0
         result_detected_at: float | None = None

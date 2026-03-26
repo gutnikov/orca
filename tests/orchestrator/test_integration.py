@@ -42,6 +42,8 @@ class ScriptedWorker:
         inactivity_timeout: int | None = None,
         pty_session: Any = None,
         env: dict[str, str] | None = None,
+        model: str | None = None,
+        extra_args: list[str] | None = None,
     ) -> WorkerOutcome:
         key = (effect.issue_id, effect.state)
         self.calls.append(key)
