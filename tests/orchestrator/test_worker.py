@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from orca.engine.types import DispatchWorkerEffect
-from orca.orchestrator.worker import ClaudeCodeWorker, WorkerFailure, WorkerSuccess
+from orca.orchestrator.worker import KIND_REGISTRY, CliAgentWorker, KindConfig, WorkerFailure, WorkerSuccess
 
 
 def _make_effect(state: str = "implementing") -> DispatchWorkerEffect:
@@ -90,7 +90,79 @@ def _make_mock_pty(
 
 
 @pytest.mark.asyncio()
-class TestClaudeCodeWorker:
+class TestCommandAssembly:
+    """Verify CliAgentWorker builds the correct CLI command per kind."""
+
+    async def _spawn_and_capture(
+        self,
+        kind_config: KindConfig,
+        tmp_path: Path,
+        model: str | None = None,
+        extra_args: list[str] | None = None,
+    ) -> tuple[str, list[str], bytes | None]:
+        """Run worker with a mock pty that captures spawn args. Returns (cmd, args, stdin_data)."""
+        effect = _make_effect()
+        result_path = tmp_path / "result.json"
+        prompt_path = tmp_path / "prompt.md"
+        prompt_path.write_text("Do the thing")
+        valid_result: dict[str, Any] = {"outcome": "done", "summary": "All done"}
+        pty = _make_mock_pty(exit_code=0, write_result=valid_result, result_path=result_path)
+
+        worker = CliAgentWorker(repo_root=tmp_path, kind_config=kind_config)
+        await worker.execute(
+            effect,
+            tmp_path,
+            result_path,
+            prompt_path,
+            pty_session=pty,
+            model=model,
+            extra_args=extra_args,
+        )
+        call_args = pty.spawn.call_args
+        return call_args[0][0], list(call_args[0][1]), call_args[1].get("stdin_data")
+
+    async def test_claude_code_command(self, tmp_path: Path) -> None:
+        kind_config = KIND_REGISTRY["claude-code"]
+        cmd, args, stdin_data = await self._spawn_and_capture(kind_config, tmp_path)
+        assert cmd == "claude"
+        assert "--dangerously-skip-permissions" in args
+        assert "--max-turns" in args
+        assert "50" in args
+        assert stdin_data is not None
+        assert len(stdin_data) > 0
+
+    async def test_opencode_command(self, tmp_path: Path) -> None:
+        kind_config = KIND_REGISTRY["opencode"]
+        cmd, args, stdin_data = await self._spawn_and_capture(
+            kind_config, tmp_path, model="anthropic/claude-sonnet-4-5"
+        )
+        assert cmd == "opencode"
+        assert args[0] == "run"
+        # Prompt is the second arg (positional after subcommand)
+        assert len(args[1]) > 0  # prompt text
+        assert "-m" in args
+        assert "anthropic/claude-sonnet-4-5" in args
+        assert stdin_data is None
+
+    async def test_extra_args_appended(self, tmp_path: Path) -> None:
+        kind_config = KIND_REGISTRY["claude-code"]
+        cmd, args, stdin_data = await self._spawn_and_capture(
+            kind_config,
+            tmp_path,
+            extra_args=["--verbose"],
+        )
+        assert "--verbose" in args
+        # Default args still present
+        assert "--dangerously-skip-permissions" in args
+
+    async def test_model_ignored_when_none(self, tmp_path: Path) -> None:
+        kind_config = KIND_REGISTRY["claude-code"]
+        cmd, args, stdin_data = await self._spawn_and_capture(kind_config, tmp_path, model=None)
+        assert "-m" not in args
+
+
+@pytest.mark.asyncio()
+class TestCliAgentWorker:
     async def test_result_detected_while_alive(self, tmp_path: Path) -> None:
         """Result file appears while session is alive -> WorkerSuccess, session killed."""
         effect = _make_effect()
@@ -107,7 +179,7 @@ class TestClaudeCodeWorker:
             write_after_spawns=1,
         )
 
-        worker = ClaudeCodeWorker(repo_root=tmp_path)
+        worker = CliAgentWorker(repo_root=tmp_path, kind_config=KIND_REGISTRY["claude-code"])
         outcome = await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty)
 
         assert isinstance(outcome, WorkerSuccess)
@@ -124,7 +196,7 @@ class TestClaudeCodeWorker:
         # Session stays alive forever (high alive_count), no result written
         pty = _make_polling_pty(alive_count=9999)
 
-        worker = ClaudeCodeWorker(repo_root=tmp_path)
+        worker = CliAgentWorker(repo_root=tmp_path, kind_config=KIND_REGISTRY["claude-code"])
         # Use inactivity_timeout=0 for immediate timeout
         outcome = await worker.execute(
             effect, tmp_path, result_path, prompt_path, inactivity_timeout=0, pty_session=pty
@@ -142,7 +214,7 @@ class TestClaudeCodeWorker:
         # Session exits immediately (alive_count=0), no result written
         pty = _make_polling_pty(alive_count=0)
 
-        worker = ClaudeCodeWorker(repo_root=tmp_path)
+        worker = CliAgentWorker(repo_root=tmp_path, kind_config=KIND_REGISTRY["claude-code"])
         outcome = await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty)
 
         assert isinstance(outcome, WorkerFailure)
@@ -158,7 +230,7 @@ class TestClaudeCodeWorker:
         # Session exits immediately, result written on spawn
         pty = _make_polling_pty(alive_count=0, write_result=invalid_result, result_path=result_path)
 
-        worker = ClaudeCodeWorker(repo_root=tmp_path)
+        worker = CliAgentWorker(repo_root=tmp_path, kind_config=KIND_REGISTRY["claude-code"])
         outcome = await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty)
 
         assert isinstance(outcome, WorkerFailure)
@@ -178,7 +250,7 @@ class TestClaudeCodeWorker:
         # Session exits immediately, writes nothing new — stale file was deleted by worker
         pty = _make_polling_pty(alive_count=0)
 
-        worker = ClaudeCodeWorker(repo_root=tmp_path)
+        worker = CliAgentWorker(repo_root=tmp_path, kind_config=KIND_REGISTRY["claude-code"])
         outcome = await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty)
 
         assert isinstance(outcome, WorkerFailure)
@@ -194,7 +266,7 @@ class TestClaudeCodeWorker:
         # Session exits immediately (alive_count=0), result written on spawn
         pty = _make_polling_pty(alive_count=0, write_result=valid_result, result_path=result_path)
 
-        worker = ClaudeCodeWorker(repo_root=tmp_path)
+        worker = CliAgentWorker(repo_root=tmp_path, kind_config=KIND_REGISTRY["claude-code"])
         outcome = await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty)
 
         assert isinstance(outcome, WorkerSuccess)
@@ -212,7 +284,7 @@ class TestClaudeCodeWorker:
         pty = _make_mock_pty(exit_code=0, write_result=valid_result, result_path=result_path)
 
         env = {"SLACK_HITL_MCP_URL": "http://127.0.0.1:9999/sse"}
-        worker = ClaudeCodeWorker(repo_root=tmp_path)
+        worker = CliAgentWorker(repo_root=tmp_path, kind_config=KIND_REGISTRY["claude-code"])
         await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty, env=env)
 
         # Verify env was passed to spawn

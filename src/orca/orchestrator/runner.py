@@ -30,7 +30,7 @@ from orca.orchestrator.config_types import SlackConfig, parse_integrations
 from orca.orchestrator.log import setup_logging
 from orca.orchestrator.persistence import Persistence
 from orca.orchestrator.validation import validate_result
-from orca.orchestrator.worker import ClaudeCodeWorker
+from orca.orchestrator.worker import KIND_REGISTRY, CliAgentWorker
 from orca.orchestrator.worktree import WorktreeManager
 
 logger = logging.getLogger(__name__)
@@ -355,7 +355,7 @@ async def run(
         logger.info("Slack HITL MCP server started", extra={"event": "slack_mcp_started", "url": slack_mcp_url})
 
     # Set up worker, session sync, and orchestrator
-    worker = ClaudeCodeWorker(repo_root)
+    worker = CliAgentWorker(repo_root, KIND_REGISTRY["claude-code"])
 
     from orca.orchestrator.orchestrator import Orchestrator
     from orca.orchestrator.session_sync import SessionSync
