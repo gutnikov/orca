@@ -23,80 +23,119 @@ def _make_effect(state: str = "implementing") -> DispatchWorkerEffect:
     )
 
 
-def _make_mock_pty(
-    exit_code: int = 0, write_result: dict[str, Any] | None = None, result_path: Path | None = None
+def _make_polling_pty(
+    *,
+    alive_count: int = 0,
+    write_result: dict[str, Any] | None = None,
+    result_path: Path | None = None,
+    write_after_spawns: int = 0,
 ) -> MagicMock:
-    """Create a mock PtySession that optionally writes a result file on spawn."""
+    """Create a mock PtySession for the polling-based worker.
+
+    Args:
+        alive_count: How many times .alive returns True before returning False.
+            0 means session exits immediately after spawn.
+        write_result: If set, write this JSON to result_path.
+        result_path: Where to write the result file.
+        write_after_spawns: Write result file after this many .alive checks.
+            0 means write on spawn. Only used if write_result is set.
+    """
     pty = MagicMock()
     pty.session_name = "mock-session"
 
-    async def _spawn(*args: Any, **kwargs: Any) -> None:
-        if write_result is not None and result_path is not None:
+    call_count = 0
+    written = False
+
+    def _alive_side_effect() -> bool:
+        nonlocal call_count, written
+        call_count += 1
+        if not written and write_result is not None and result_path is not None and call_count > write_after_spawns:
             result_path.write_text(json.dumps(write_result))
+            written = True
+        return call_count <= alive_count
+
+    type(pty).alive = property(lambda self: _alive_side_effect())
+
+    async def _spawn(*args: Any, **kwargs: Any) -> None:
+        nonlocal written
+        if write_after_spawns == 0 and write_result is not None and result_path is not None:
+            result_path.write_text(json.dumps(write_result))
+            written = True
 
     pty.spawn = AsyncMock(side_effect=_spawn)
-    pty.wait = AsyncMock(return_value=exit_code)
+    pty.kill = MagicMock()
     pty.close = MagicMock()
     return pty
 
 
 @pytest.mark.asyncio()
 class TestClaudeCodeWorker:
-    async def test_successful_execution(self, tmp_path: Path) -> None:
-        """Pty session exits 0, writes valid result file, assert WorkerSuccess."""
+    async def test_result_detected_while_alive(self, tmp_path: Path) -> None:
+        """Result file appears while session is alive -> WorkerSuccess, session killed."""
         effect = _make_effect()
         result_path = tmp_path / "result.json"
         prompt_path = tmp_path / "prompt.md"
         prompt_path.write_text("Do the thing")
 
         valid_result: dict[str, Any] = {"outcome": "done", "summary": "All done"}
-        pty = _make_mock_pty(exit_code=0, write_result=valid_result, result_path=result_path)
+        # Session stays alive (alive_count=3), result written after 1 alive check
+        pty = _make_polling_pty(
+            alive_count=3,
+            write_result=valid_result,
+            result_path=result_path,
+            write_after_spawns=1,
+        )
 
         worker = ClaudeCodeWorker(repo_root=tmp_path)
         outcome = await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty)
 
         assert isinstance(outcome, WorkerSuccess)
         assert outcome.result == valid_result
+        pty.kill.assert_called_once()
 
-    async def test_nonzero_exit_code(self, tmp_path: Path) -> None:
-        """Pty session exits -1 (timeout), assert WorkerFailure with 'inactivity' in error."""
+    async def test_timeout_no_result(self, tmp_path: Path) -> None:
+        """Session stays alive, no result written -> timeout -> WorkerFailure."""
         effect = _make_effect()
         result_path = tmp_path / "result.json"
         prompt_path = tmp_path / "prompt.md"
         prompt_path.write_text("Do the thing")
 
-        pty = _make_mock_pty(exit_code=-1)
+        # Session stays alive forever (high alive_count), no result written
+        pty = _make_polling_pty(alive_count=9999)
 
         worker = ClaudeCodeWorker(repo_root=tmp_path)
-        outcome = await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty)
+        # Use inactivity_timeout=0 for immediate timeout
+        outcome = await worker.execute(
+            effect, tmp_path, result_path, prompt_path, inactivity_timeout=0, pty_session=pty
+        )
 
         assert isinstance(outcome, WorkerFailure)
-        assert "inactivity" in outcome.error
 
-    async def test_missing_result_file(self, tmp_path: Path) -> None:
-        """Pty session succeeds but no result file written, assert WorkerFailure with 'result file'."""
+    async def test_session_exits_no_result(self, tmp_path: Path) -> None:
+        """Session exits naturally with no result file -> WorkerFailure."""
         effect = _make_effect()
         result_path = tmp_path / "result.json"
         prompt_path = tmp_path / "prompt.md"
         prompt_path.write_text("Do the thing")
 
-        pty = _make_mock_pty(exit_code=0)
+        # Session exits immediately (alive_count=0), no result written
+        pty = _make_polling_pty(alive_count=0)
 
         worker = ClaudeCodeWorker(repo_root=tmp_path)
         outcome = await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty)
 
         assert isinstance(outcome, WorkerFailure)
-        assert "result file" in outcome.error
 
     async def test_invalid_result_validation(self, tmp_path: Path) -> None:
-        """Result file has missing required summary, assert WorkerFailure with 'summary'."""
+        """Result file has missing required field -> WorkerFailure."""
         effect = _make_effect()
         result_path = tmp_path / "result.json"
         prompt_path = tmp_path / "prompt.md"
         prompt_path.write_text("Do the thing")
 
         invalid_result: dict[str, Any] = {"outcome": "done"}  # missing required summary
-        pty = _make_mock_pty(exit_code=0, write_result=invalid_result, result_path=result_path)
+        # Session exits immediately, result written on spawn
+        pty = _make_polling_pty(alive_count=0, write_result=invalid_result, result_path=result_path)
 
         worker = ClaudeCodeWorker(repo_root=tmp_path)
         outcome = await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty)
@@ -105,7 +144,7 @@ class TestClaudeCodeWorker:
         assert "summary" in outcome.error
 
     async def test_previous_result_file_deleted(self, tmp_path: Path) -> None:
-        """Pre-existing stale result file: pty session exits 0 but writes nothing -> WorkerFailure."""
+        """Stale result deleted, session exits with no new result -> WorkerFailure."""
         effect = _make_effect()
         result_path = tmp_path / "result.json"
         prompt_path = tmp_path / "prompt.md"
@@ -115,11 +154,28 @@ class TestClaudeCodeWorker:
         stale_result: dict[str, Any] = {"outcome": "done", "summary": "Stale"}
         result_path.write_text(json.dumps(stale_result))
 
-        pty = _make_mock_pty(exit_code=0)
-        # pty session exits 0 but writes nothing new -- stale file was deleted
+        # Session exits immediately, writes nothing new — stale file was deleted by worker
+        pty = _make_polling_pty(alive_count=0)
 
         worker = ClaudeCodeWorker(repo_root=tmp_path)
         outcome = await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty)
 
         assert isinstance(outcome, WorkerFailure)
-        assert "result file" in outcome.error
+
+    async def test_session_exits_with_valid_result(self, tmp_path: Path) -> None:
+        """Session exits naturally with valid result -> WorkerSuccess, kill NOT called."""
+        effect = _make_effect()
+        result_path = tmp_path / "result.json"
+        prompt_path = tmp_path / "prompt.md"
+        prompt_path.write_text("Do the thing")
+
+        valid_result: dict[str, Any] = {"outcome": "done", "summary": "All done"}
+        # Session exits immediately (alive_count=0), result written on spawn
+        pty = _make_polling_pty(alive_count=0, write_result=valid_result, result_path=result_path)
+
+        worker = ClaudeCodeWorker(repo_root=tmp_path)
+        outcome = await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty)
+
+        assert isinstance(outcome, WorkerSuccess)
+        assert outcome.result == valid_result
+        pty.kill.assert_not_called()
