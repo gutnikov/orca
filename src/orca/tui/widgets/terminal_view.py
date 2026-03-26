@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import re
 from pathlib import Path
+from typing import Any
 
 from rich.text import Text
 from textual.app import ComposeResult
@@ -26,6 +28,10 @@ _STRIP_RE = re.compile(
 
 _PLACEHOLDER = "*Select a worker run to view its terminal output*"
 
+_TAB_BG = "#1e1e30"
+_TAB_ACTIVE_ACCENT = "#7c6ff7"
+_TAB_INACTIVE = "#555570"
+
 
 class TerminalView(VerticalScroll):
     """Displays worker terminal output by reading session log files."""
@@ -38,35 +44,163 @@ class TerminalView(VerticalScroll):
     TerminalView Static {
         width: 1fr;
     }
+    TerminalView #tab-bar {
+        height: 1;
+        padding: 0 1;
+    }
     """
 
     def __init__(self) -> None:
         super().__init__(id="terminal-view")
+        self._tab_bar = Static("", id="tab-bar")
         self._static = Static(_PLACEHOLDER)
         self._log_path: Path | None = None
         self._last_mtime: float = 0.0
         self._timer_handle: object | None = None
+        self._active_tab: str = "session"
+        self._result_data: dict[str, Any] | None = None
+        self._result_state: str = ""
+        self._result_duration: str = ""
+        self._is_active_worker: bool = False
 
     def compose(self) -> ComposeResult:
+        yield self._tab_bar
         yield self._static
 
-    def show_log_file(self, path: Path, *, active: bool = False) -> None:
-        """Display a session log file. If active, poll for updates."""
+    def show_log_file(
+        self,
+        path: Path,
+        *,
+        active: bool = False,
+        result: dict[str, Any] | None = None,
+        state_name: str = "",
+        duration: str = "",
+    ) -> None:
+        """Display a session log file. If result provided, enable tab switching.
+
+        For completed workers (not active) with result data, auto-show Result tab.
+        """
         self._stop()
         self._log_path = path
         self._last_mtime = 0.0
-        self._render_log()
+        self._result_data = result
+        self._result_state = state_name
+        self._result_duration = duration
+        self._is_active_worker = active
+
+        # Determine default tab
+        if not active and result is not None:
+            self._active_tab = "result"
+        else:
+            self._active_tab = "session"
+
+        self._render_tabs()
+
+        if self._active_tab == "result":
+            self._render_result()
+        else:
+            self._render_log()
+
         if active:
             self._timer_handle = self.set_interval(1.0, self._render_log)
 
     def show_placeholder(self) -> None:
         """Reset to placeholder state."""
         self._stop()
+        self._result_data = None
+        self._result_state = ""
+        self._result_duration = ""
+        self._is_active_worker = False
+        self._active_tab = "session"
         self._static.update(_PLACEHOLDER)
+        self._render_tabs()
+
+    def toggle_tab(self) -> None:
+        """Switch between session and result tabs."""
+        if self._result_data is None:
+            return  # no result to switch to
+        if self._active_tab == "session":
+            self._active_tab = "result"
+            self._render_result()
+        else:
+            self._active_tab = "session"
+            self._render_log()
+        self._render_tabs()
+
+    def _render_tabs(self) -> None:
+        """Update tab bar display."""
+        if self._log_path is None:
+            with contextlib.suppress(Exception):
+                self._tab_bar.update("")
+            return
+
+        tabs = Text()
+        tabs.append_text(Text(" "))
+
+        # Session tab
+        if self._active_tab == "session":
+            session_label = Text(" Session ", style=f"bold on {_TAB_BG} underline {_TAB_ACTIVE_ACCENT}")
+        else:
+            session_label = Text(" Session ", style=f"on {_TAB_BG} {_TAB_INACTIVE}")
+        tabs.append_text(session_label)
+
+        tabs.append_text(Text("  "))
+
+        # Result tab
+        if self._result_data is not None:
+            if self._active_tab == "result":
+                result_label = Text(" Result ", style=f"bold on {_TAB_BG} underline {_TAB_ACTIVE_ACCENT}")
+            else:
+                result_label = Text(" Result ", style=f"on {_TAB_BG} {_TAB_INACTIVE}")
+        else:
+            result_label = Text(" Result ", style=f"on {_TAB_BG} dim {_TAB_INACTIVE}")
+        tabs.append_text(result_label)
+
+        with contextlib.suppress(Exception):
+            self._tab_bar.update(tabs)
+
+    def _render_result(self) -> None:
+        """Render result.json as formatted key/value pairs."""
+        if self._result_data is None:
+            return
+
+        lines = Text()
+
+        # Header line
+        icon = "\u2713" if not self._is_active_worker else "\u25cb"
+        header_parts: list[str] = []
+        if self._result_state:
+            header_parts.append(self._result_state)
+        if self._result_duration:
+            header_parts.append(f"completed in {self._result_duration}")
+        header_suffix = " \u2014 ".join(header_parts) if header_parts else ""
+
+        lines.append_text(Text(f"\n  {icon} {header_suffix}\n\n", style="bold"))
+
+        # Key/value pairs
+        max_key_len = max((len(str(k)) for k in self._result_data), default=0)
+        col_width = max(max_key_len + 2, 20)
+
+        for key, value in self._result_data.items():
+            formatted_values = _format_value(value)
+            for i, line in enumerate(formatted_values):
+                if i == 0:
+                    label = f"  {key:<{col_width}}"
+                    lines.append_text(Text(label, style="bold #8888aa"))
+                    lines.append_text(Text(f"{line}\n"))
+                else:
+                    padding = " " * (col_width + 2)
+                    lines.append_text(Text(f"{padding}{line}\n"))
+
+        with contextlib.suppress(Exception):
+            self._static.update(lines)
 
     def _render_log(self) -> None:
         """Read log file and render to the Static widget."""
         if self._log_path is None:
+            return
+        # Skip if we're on the result tab (don't overwrite result with log)
+        if self._active_tab == "result":
             return
         try:
             if not self._log_path.exists():
@@ -99,3 +233,19 @@ class TerminalView(VerticalScroll):
 
     def clear(self) -> None:
         self.show_placeholder()
+
+
+def _format_value(value: Any) -> list[str]:
+    """Format a result value into display lines."""
+    if isinstance(value, list):
+        if not value:
+            return ["(empty)"]
+        return [str(item) for item in value]
+    if isinstance(value, dict):
+        if not value:
+            return ["{}"]
+        lines: list[str] = []
+        for k, v in value.items():
+            lines.append(f"{k}: {v}")
+        return lines
+    return [str(value)]

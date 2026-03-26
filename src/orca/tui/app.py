@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from datetime import datetime
 from pathlib import Path
 
 from textual.app import App, ComposeResult
@@ -42,6 +43,7 @@ class OrcaApp(App[None]):
         Binding("l,right", "focus_detail", "Detail", show=False),
         Binding("j", "scroll_detail_down", "Scroll ↓", show=False),
         Binding("k", "scroll_detail_up", "Scroll ↑", show=False),
+        Binding("t", "toggle_tab", "Toggle Tab", show=False),
     ]
 
     def __init__(
@@ -64,6 +66,7 @@ class OrcaApp(App[None]):
         self._hot_sessions: set[str] = hot_sessions if hot_sessions is not None else set()
         self._session_log_paths: dict[str, str] = session_log_paths if session_log_paths is not None else {}
         self._selected_session_id: str | None = None
+        self._sessions: list[dict[str, object]] = []
 
     def compose(self) -> ComposeResult:
         yield OrcaHeader(branch_name=self._branch_name, config=self._config)
@@ -105,6 +108,7 @@ class OrcaApp(App[None]):
             self.query_one(IssueDetail).focus()
 
     def on_state_updated(self, message: StateUpdated) -> None:
+        self._sessions = message.sessions
         tree = self.query_one(IssueTree)
         tree.update_state(message.state, message.sessions)
         header = self.query_one(OrcaHeader)
@@ -132,11 +136,41 @@ class OrcaApp(App[None]):
         log_path_str = self._session_log_paths.get(message.session_id)
         log_path = Path(log_path_str) if log_path_str else None
 
+        # Look up result data from event log
+        result_data: dict[str, object] | None = None
+        state_name = ""
+        duration = ""
+        if self._state and message.issue_id:
+            issue = self._state.issues.get(message.issue_id)
+            if issue and not message.active:
+                for entry in reversed(issue.event_log):
+                    if entry.type == "worker_result":
+                        result_data = entry.data
+                        break
+
+        # Find session info for state_name and duration
+        session = next(
+            (s for s in self._sessions if s.get("session_id") == message.session_id),
+            None,
+        )
+        if session:
+            state_name = str(session.get("state", ""))
+            started = str(session.get("started_at", ""))
+            completed = str(session.get("completed_at", ""))
+            if started and completed:
+                duration = _compute_duration(started, completed)
+
         detail.styles.display = "none"
         terminal.styles.display = "block"
 
         if log_path is not None:
-            terminal.show_log_file(log_path, active=message.active)
+            terminal.show_log_file(
+                log_path,
+                active=message.active,
+                result=result_data,
+                state_name=state_name,
+                duration=duration,
+            )
         else:
             terminal.show_placeholder()
 
@@ -190,6 +224,12 @@ class OrcaApp(App[None]):
         (retry_dir / issue_id).touch()
         self.notify(f"Retry requested for {issue_id[:8]}...")
 
+    def action_toggle_tab(self) -> None:
+        """Toggle between Session and Result tabs in the terminal view."""
+        terminal = self.query_one(TerminalView)
+        if str(terminal.styles.display) != "none":
+            terminal.toggle_tab()
+
     def action_scroll_detail_down(self) -> None:
         """Scroll the detail panel down."""
         terminal = self.query_one(TerminalView)
@@ -213,3 +253,20 @@ class OrcaApp(App[None]):
             if issue.decomposed_from is None:
                 return iid
         return None
+
+
+def _compute_duration(started: str, completed: str) -> str:
+    """Compute a human-readable duration string from ISO timestamps."""
+    try:
+        start_dt = datetime.fromisoformat(started)
+        end_dt = datetime.fromisoformat(completed)
+        delta = end_dt - start_dt
+        total_seconds = int(delta.total_seconds())
+        if total_seconds < 0:
+            return ""
+        minutes, seconds = divmod(total_seconds, 60)
+        if minutes > 0:
+            return f"{minutes}m {seconds}s"
+        return f"{seconds}s"
+    except (ValueError, TypeError):
+        return ""
