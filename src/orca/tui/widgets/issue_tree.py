@@ -169,7 +169,7 @@ class IssueTree(Tree[str]):
         except (json.JSONDecodeError, OSError):
             return []
 
-    def _issue_label(self, issue: Issue) -> Text:
+    def _issue_label(self, issue: Issue, failed_states: set[str] | None = None) -> Text:
         title = str(issue.fields.get("title", "untitled"))
         label = Text()
         if issue.failure_count > 0 and not issue.worker_active:
@@ -182,6 +182,12 @@ class IssueTree(Tree[str]):
             label.append("• ", style="dim")
             label.append(title)
             label.append(f" [{issue.state}]", style="dim")
+        # Inline progress bar
+        if self._config is not None:
+            bar = _progress_bar_text(self._config, issue.visit_counts, issue.state, failed_states or set())
+            if bar is not None:
+                label.append(" ")
+                label.append_text(bar)
         return label
 
     def _worker_run_label(
@@ -289,7 +295,9 @@ class IssueTree(Tree[str]):
                         break
 
     def _add_issue_node(self, parent_node: TreeNode[str], issue_id: str, issue: Issue, state: State) -> None:
-        node = parent_node.add(self._issue_label(issue), data=f"issue:{issue_id}")
+        # Compute enhanced data for this issue
+        failed_states = _compute_failed_states(issue)
+        node = parent_node.add(self._issue_label(issue, failed_states), data=f"issue:{issue_id}")
         node.expand()
 
         # Add child issues
@@ -299,16 +307,8 @@ class IssueTree(Tree[str]):
 
         # Add worker run leaves for this issue (only if no child issues — leaf issue)
         if not children:
-            # Compute enhanced data for this issue
             result_outcomes = _extract_result_outcomes(issue.event_log)
             failure_errors = _extract_failure_errors(issue.event_log)
-            failed_states = _compute_failed_states(issue)
-
-            # Progress bar
-            if self._config is not None:
-                bar = _progress_bar_text(self._config, issue.visit_counts, issue.state, failed_states)
-                if bar is not None:
-                    node.add_leaf(bar, data=f"progress:{issue_id}")
 
             # Worker session runs
             issue_sessions = [s for s in self._sessions if s.get("issue_id") == issue_id]

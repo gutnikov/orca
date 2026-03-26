@@ -378,6 +378,11 @@ def main() -> None:
     config_path = resolve_config_path(repo_root, args.workflow)
     branch_name = resolve_branch()
 
+    # Validate task file exists before starting
+    if not args.task_file.exists():
+        print(f"Error: task file not found: {args.task_file}")
+        raise SystemExit(1)
+
     if args.headless:
         asyncio.run(run(args.task_file, branch_name, config_path, insights_enabled=args.insights))
     else:
