@@ -19,6 +19,15 @@ class AbsolutePathLoader(BaseLoader):
         return source, str(path), lambda: True
 
 
+_RESULT_FILE_WARNING = """
+
+---
+
+**IMPORTANT: Writing the result file is the final action of your session. \
+The orchestrator will terminate this session shortly after detecting the result file. \
+Complete ALL other work — git commits, file writes, code changes — before writing the result file.**"""
+
+
 def render_prompt(
     template_path: Path,
     repo_root: Path,
@@ -57,4 +66,5 @@ def render_prompt(
         "result_path": str(result_path),
     }
 
-    return template.render(context)
+    rendered = template.render(context)
+    return rendered + _RESULT_FILE_WARNING

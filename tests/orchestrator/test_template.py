@@ -90,6 +90,27 @@ class TestRenderPrompt:
                 result_path,
             )
 
+    def test_result_file_warning_appended(self, tmp_path: Path) -> None:
+        """Rendered prompt includes the result-file termination warning."""
+        template_content = "Do the thing. Write result to {{ result_path }}."
+        template_file = tmp_path / "template.md"
+        template_file.write_text(template_content)
+
+        issue: dict[str, Any] = {
+            "fields": {"title": "Fix bug"},
+            "event_log": [],
+            "decomposed_from": None,
+            "depends_on": [],
+            "children": [],
+        }
+        result_format: dict[str, Any] = {}
+        result_path = Path("/tmp/result.json")
+
+        output = render_prompt(template_file, tmp_path, issue, result_format, result_path)
+
+        assert "final action" in output.lower()
+        assert "terminate this session" in output.lower()
+
     def test_subdirectory_template(self, tmp_path: Path) -> None:
         """Test loading template from subdirectory."""
         prompts_dir = tmp_path / "prompts"
