@@ -37,7 +37,6 @@ class OrcaApp(App[None]):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("r", "refresh_all", "Refresh"),
         Binding("n", "retry_failed", "Retry"),
         Binding("h,left", "focus_tree", "Tree", show=False),
         Binding("l,right", "focus_detail", "Detail", show=False),

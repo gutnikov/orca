@@ -39,14 +39,16 @@ class TerminalView(VerticalScroll):
     DEFAULT_CSS = """
     TerminalView {
         width: 1fr;
-        padding: 1;
+        padding: 0;
     }
     TerminalView Static {
         width: 1fr;
     }
     TerminalView #tab-bar {
+        dock: top;
         height: 1;
         padding: 0 1;
+        background: #1e1e30;
     }
     """
 
