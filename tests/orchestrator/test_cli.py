@@ -6,7 +6,37 @@ from unittest.mock import patch
 
 import pytest
 
-from orca.orchestrator.runner import _git_create_branch, resolve_base_ref, resolve_branch, resolve_config_path
+from orca.orchestrator.runner import (
+    _git_create_branch,
+    build_parser,
+    resolve_base_ref,
+    resolve_branch,
+    resolve_config_path,
+)
+
+
+class TestBuildParser:
+    def test_branch_flag(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["task.md", "-b", "feature-auth"])
+        assert args.branch == "feature-auth"
+
+    def test_base_flag(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["task.md", "--base", "origin/v2"])
+        assert args.base == "origin/v2"
+
+    def test_branch_and_base(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["task.md", "-b", "feature-auth", "--base", "origin/v2"])
+        assert args.branch == "feature-auth"
+        assert args.base == "origin/v2"
+
+    def test_no_branch_defaults_none(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["task.md"])
+        assert args.branch is None
+        assert args.base is None
 
 
 class TestResolveConfigPath:
