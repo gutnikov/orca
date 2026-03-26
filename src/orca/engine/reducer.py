@@ -433,9 +433,6 @@ def _apply_decompose(
 ) -> None:
     sub_issues: list[dict[str, object]] = event.result.get("sub_issues", [])
 
-    # Log decomposition blocked on parent
-    append_log(_parent_issue, ts, "decomposition_blocked", {})
-
     # Increment parent hop count
     _parent_issue.hop_count += 1
 
@@ -445,6 +442,7 @@ def _apply_decompose(
     rule = parent_state_def.on[outcome]
     assert isinstance(rule, OnDecompose)
     default_child_type = rule.child_type
+    parent_old_state = _parent_issue.state
 
     # Generate IDs and build key -> real_id mapping
     key_to_id: dict[str, str] = {}
@@ -517,6 +515,14 @@ def _apply_decompose(
             try_dispatch(config, state, real_id, effects)
             if len(effects) > prev_len:
                 append_log(child, ts, "worker_dispatched", {"state": child.state})
+
+    # If decompose rule has a `then` target, transition parent immediately (children run independently)
+    if rule.then is not None:
+        remove_from_queue(state, f"{_parent_issue.type}:{parent_old_state}", event.issue_id)
+        _apply_transition(config, state, event.issue_id, _parent_issue, parent_old_state, rule.then, effects, ts)
+    else:
+        # No `then` — parent is blocked until all children complete
+        append_log(_parent_issue, ts, "decomposition_blocked", {})
 
 
 def _find_decompose_rule(config: StateMachineConfig, type_name: str, state_name: str) -> OnDecompose | None:

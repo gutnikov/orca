@@ -281,13 +281,16 @@ def _validate(config: StateMachineConfig) -> None:
                         )
                         raise ConfigValidationError(msg)
 
-        # Rule 8: every non-initial, non-passive state must be reachable
+        # Rule 8: every non-initial, non-passive, non-terminal state must be reachable
         for name, state in type_def.states.items():
             if name in reachable:
                 continue
             # Passive states (no worker, no on, not terminal) are exempt
             is_passive = state.worker is None and not state.on and not state.terminal
             if is_passive:
+                continue
+            # Terminal states are exempt: they can be reached via cascading unblock (`then` on decompose)
+            if state.terminal:
                 continue
             msg = f"Type '{type_name}', state '{name}' is not reachable from any on rule"
             raise ConfigValidationError(msg)
