@@ -44,6 +44,8 @@ class ScriptedWorker:
         env: dict[str, str] | None = None,
         model: str | None = None,
         extra_args: list[str] | None = None,
+        session_manifest: Any = None,
+        session_id: str | None = None,
     ) -> WorkerOutcome:
         key = (effect.issue_id, effect.state)
         self.calls.append(key)

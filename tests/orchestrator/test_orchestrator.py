@@ -44,6 +44,8 @@ class MockWorker:
         env: dict[str, str] | None = None,
         model: str | None = None,
         extra_args: list[str] | None = None,
+        session_manifest: Any = None,
+        session_id: str | None = None,
     ) -> WorkerOutcome:
         self.calls.append((effect.issue_id, effect.state))
         return self.outcomes.get(effect.state, WorkerFailure(error="no mock"))
@@ -173,6 +175,8 @@ class TestOrchestrator:
                 env: dict[str, str] | None = None,
                 model: str | None = None,
                 extra_args: list[str] | None = None,
+                session_manifest: Any = None,
+                session_id: str | None = None,
             ) -> WorkerOutcome:
                 self.calls.append((effect.issue_id, effect.state))
                 count = call_count.get(effect.state, 0)
