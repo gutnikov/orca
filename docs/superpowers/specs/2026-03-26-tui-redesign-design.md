@@ -106,7 +106,9 @@ When a worker fails (retries exhausted), show the error message inline below the
     claude exited with non-zero exit code: 1
 ```
 
-The error text is shown in red (`#e06070`) at a smaller size, indented under the failed run. This uses the `failure_context` field already stored on the issue (from the recent `propagate failure error` commit).
+The error text is shown in red (`#e06070`) at a smaller size, indented under the failed run.
+
+**Data source:** Use the `worker_failed` event log entry (`entry.data["error"]`), not the conditional `failure_context` issue field. The event log always has the error. This is what `IssueDetail._last_failure_error` already does.
 
 When a retry is in progress after a failure, show it:
 
@@ -116,6 +118,8 @@ When a retry is in progress after a failure, show it:
   ⠹ planning 45s      (retry 1)
 ```
 
+**Retry count:** Derived by counting `worker_failed` event log entries for the same state that occurred before the current session's `started_at`.
+
 ### 6. Session/Result Tabs
 
 The right panel gets two tabs for completed workers: **Session** and **Result**.
@@ -124,7 +128,7 @@ The right panel gets two tabs for completed workers: **Session** and **Result**.
 
 **Behavior:**
 - **Active worker selected**: Session tab shown, Result tab grayed out (disabled). Live session polling active.
-- **Completed worker selected**: Result tab shown by default (auto-selected). User presses `Tab` to switch to Session log.
+- **Completed worker selected**: Result tab shown by default (auto-selected). User presses `t` to toggle between Session and Result tabs. (`Tab` is reserved for Textual's focus cycling.)
 - **Issue node selected**: No tabs — shows issue detail (title, description, failure info) as today.
 - **Insights selected**: No tabs — shows insights markdown as today.
 
@@ -142,33 +146,40 @@ The right panel gets two tabs for completed workers: **Session** and **Result**.
 
 Keys left-aligned in dim color, values right of them. Lists shown as multiple lines under the key.
 
-**Data source:** The `result.json` content is available from the worker's result event in the issue's event log (`WorkerResultEvent.result`). For the most recent run, the TUI reads from the state directly.
+**Data source:** The `result.json` content is available from the worker's result event in the issue's event log (`WorkerResultEvent.result`). To correlate a selected session with its event log entry, match by state name and timestamp range from the session manifest. For the most recent run of the current state, use the last `worker_result` entry.
 
 ### 7. Footer
 
 Keep existing bindings. Add contextual hint when a completed worker is selected:
 
 ```
-  q Quit  r Refresh  n Retry           Tab Session/Result  ▲▼ select  j/k scroll
+  q Quit  r Refresh  n Retry           t Session/Result  ▲▼ select  j/k scroll
 ```
 
-The `Tab Session/Result` hint only appears when a completed worker is selected.
+The `t Session/Result` hint only appears when a completed worker is selected.
 
 ## Files to Modify
 
 | File | Change |
 |------|--------|
 | `src/orca/tui/app.py` | Replace `Header` with custom `OrcaHeader` widget, update compose |
-| `src/orca/tui/widgets/issue_tree.py` | Add progress bar, pending steps, result badges, failure context, visit counts |
+| `src/orca/tui/widgets/issue_tree.py` | Add progress bar, pending steps, result badges, failure context, visit counts. Requires `StateMachineConfig` passed in (update constructor). |
 | `src/orca/tui/widgets/issue_detail.py` | Add result display capability |
 | `src/orca/tui/widgets/terminal_view.py` | Add tab bar (Session/Result), result rendering |
-| `src/orca/tui/messages.py` | No changes expected |
+| `src/orca/tui/messages.py` | Add `issue_id` to `WorkerRunSelected` so the Result tab can look up the event log |
 
 ## New Files
 
 | File | Purpose |
 |------|---------|
 | `src/orca/tui/widgets/header.py` | Custom `OrcaHeader` widget |
+
+## Edge Cases
+
+- **Before first state update:** Header shows branch name + "waiting…", no progress bar or step count.
+- **Single-state workflow:** Progress bar has one segment (full width). No pending steps shown.
+- **All issues terminal (completed run):** Header shows green checkmark + "completed". Progress bar fully green. Workers 0.
+- **Decompose workflow:** Root issue's progress bar reflects the root's own state. Child issues each get their own progress bars under their tree nodes.
 
 ## What Stays Untouched
 
