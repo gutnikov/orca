@@ -182,7 +182,10 @@ def _recover_effects(
     recovered_effects: list[DispatchWorkerEffect] = []
 
     for issue_id, issue in state.issues.items():
-        state_def = config.states.get(issue.state)
+        type_def = config.types.get(issue.type)
+        if type_def is None:
+            continue
+        state_def = type_def.states.get(issue.state)
         if state_def is None or state_def.terminal:
             continue
 
@@ -211,7 +214,7 @@ def _recover_effects(
         # doesn't exist — result.json lives in the run directory instead.
         result_path = worktree_path / ".orca" / "result.json" if worktree_path.exists() else run_dir / "result.json"
 
-        result_format = build_result_format(config, issue.state)
+        result_format = build_result_format(config, issue.type, issue.state)
         issue_context = build_issue_context(state, issue_id)
 
         # Try to read and validate the result file
@@ -236,6 +239,7 @@ def _recover_effects(
             recovered_effects.append(
                 DispatchWorkerEffect(
                     issue_id=issue_id,
+                    issue_type=issue.type,
                     state=issue.state,
                     result_format=result_format,
                     issue=issue_context,

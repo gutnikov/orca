@@ -107,7 +107,10 @@ class Orchestrator:
         issue = self.state.issues.get(issue_id)
         if issue is None:
             return False
-        state_def = self.config.states.get(issue.state)
+        type_def = self.config.types.get(issue.type)
+        if type_def is None:
+            return False
+        state_def = type_def.states.get(issue.state)
         if state_def is None:
             return False
         return state_def.terminal
@@ -169,7 +172,15 @@ class Orchestrator:
 
     def _spawn_worker(self, effect: DispatchWorkerEffect) -> None:
         """Resolve the worker for the effect and spawn an asyncio task."""
-        state_def = self.config.states.get(effect.state)
+        type_def = self.config.types.get(effect.issue_type)
+        if type_def is None:
+            logger.warning(
+                "No type definition for type %r — skipping dispatch",
+                effect.issue_type,
+                extra={"event": "no_type_definition", "issue_type": effect.issue_type},
+            )
+            return
+        state_def = type_def.states.get(effect.state)
         if state_def is None or state_def.worker is None:
             logger.warning(
                 "No worker definition for state %r — skipping dispatch",
@@ -296,12 +307,14 @@ class Orchestrator:
         base_branch = self._resolve_base_branch(effect.issue_id)
         enriched_effect = DispatchWorkerEffect(
             issue_id=effect.issue_id,
+            issue_type=effect.issue_type,
             state=effect.state,
             result_format=effect.result_format,
             issue={**effect.issue, "base_branch": base_branch},
         )
 
-        state_def = self.config.states.get(effect.state)
+        type_def = self.config.types.get(effect.issue_type)
+        state_def = type_def.states.get(effect.state) if type_def is not None else None
         inactivity_timeout = (
             state_def.worker.inactivity_timeout or state_def.worker.timeout if state_def and state_def.worker else None
         )
@@ -371,7 +384,10 @@ class Orchestrator:
             issue.failure_count = 0
             issue.worker_active = True
 
-            state_def = self.config.states.get(issue.state)
+            type_def = self.config.types.get(issue.type)
+            if type_def is None:
+                continue
+            state_def = type_def.states.get(issue.state)
             if state_def is None or state_def.worker is None:
                 continue
 
@@ -380,8 +396,9 @@ class Orchestrator:
             pending.append(
                 DispatchWorkerEffect(
                     issue_id=issue_id,
+                    issue_type=issue.type,
                     state=issue.state,
-                    result_format=build_result_format(self.config, issue.state),
+                    result_format=build_result_format(self.config, issue.type, issue.state),
                     issue=build_issue_context(self.state, issue_id),
                 )
             )

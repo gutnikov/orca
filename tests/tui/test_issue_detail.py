@@ -9,6 +9,7 @@ from orca.tui.widgets.issue_detail import IssueDetail
 
 def _make_issue(title: str = "Test", description: str = "Some description") -> Issue:
     return Issue(
+        type="default",
         fields={"title": title, "description": description},
         state="triage",
         worker_active=False,

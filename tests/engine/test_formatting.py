@@ -8,6 +8,7 @@ from orca.engine.types import (
     State,
     StateDef,
     StateMachineConfig,
+    TypeDef,
 )
 
 
@@ -15,13 +16,18 @@ def _make_config(
     states: dict[str, StateDef] | None = None,
 ) -> StateMachineConfig:
     return StateMachineConfig(
-        issue_fields={"title": FieldDef(type="string", description="t")},
-        initial="todo",
-        states=states
-        or {
-            "todo": StateDef(),
-            "work": StateDef(),
-            "done": StateDef(terminal=True),
+        root_type="default",
+        types={
+            "default": TypeDef(
+                fields={"title": FieldDef(type="string", description="t")},
+                initial="todo",
+                states=states
+                or {
+                    "todo": StateDef(),
+                    "work": StateDef(),
+                    "done": StateDef(terminal=True),
+                },
+            )
         },
     )
 
@@ -36,6 +42,7 @@ def _make_issue(
     if created_ts is not None:
         event_log.append(EventLogEntry(timestamp=created_ts, type="created", data={}))
     return Issue(
+        type="default",
         fields={"title": "Test"},
         state=state,
         worker_active=False,
@@ -128,10 +135,10 @@ class TestFormatIssues:
                 "I-1": _make_issue(state="work"),
                 "I-2": _make_issue(state="work"),
             },
-            worker_queues={"work": ["I-3", "I-4"]},
+            worker_queues={"default:work": ["I-3", "I-4"]},
         )
         result = format_issues(state, _make_config(), now="2026-01-01T00:00:00Z")
-        assert "Queued in 'work': I-3, I-4" in result
+        assert "Queued in 'default:work': I-3, I-4" in result
 
     def test_no_created_event_shows_question_mark(self) -> None:
         state = State(

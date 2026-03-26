@@ -21,6 +21,7 @@ from orca.engine.types import (
     StateDef,
     StateMachineConfig,
     StringFieldDef,
+    TypeDef,
     WorkerDef,
 )
 
@@ -65,9 +66,14 @@ def _make_config(
             "done": StateDef(terminal=True),
         }
     return StateMachineConfig(
-        issue_fields={"title": FieldDef(type="string", description="Title")},
-        initial=initial,
-        states=states,
+        root_type="default",
+        types={
+            "default": TypeDef(
+                fields={"title": FieldDef(type="string", description="Title")},
+                initial=initial,
+                states=states,
+            )
+        },
     )
 
 
@@ -82,6 +88,7 @@ def _make_issue(
     hop_count: int = 0,
 ) -> Issue:
     return Issue(
+        type="default",
         fields=fields or {"title": "Test"},
         state=state,
         worker_active=worker_active,
@@ -201,7 +208,7 @@ class TestBuildIssueContext:
 class TestBuildResultFormat:
     def test_enum_field(self) -> None:
         config = _make_config()
-        result = build_result_format(config, "todo")
+        result = build_result_format(config, "default", "todo")
         assert result["outcome"] == {
             "type": "enum",
             "values": ["start"],
@@ -225,7 +232,7 @@ class TestBuildResultFormat:
             "done": StateDef(terminal=True),
         }
         config = _make_config(states=states, initial="review")
-        result = build_result_format(config, "review")
+        result = build_result_format(config, "default", "review")
         assert result["reason"] == {
             "type": "string",
             "description": "Explanation",
@@ -250,7 +257,7 @@ class TestBuildResultFormat:
             "done": StateDef(terminal=True),
         }
         config = _make_config(states=states, initial="scoping")
-        result = build_result_format(config, "scoping")
+        result = build_result_format(config, "default", "scoping")
         assert result["sub_issues"] == {
             "type": "list",
             "description": "Sub-issues",
@@ -297,7 +304,7 @@ class TestTryDispatch:
         try_dispatch(config, state, "B", effects)
         assert len(effects) == 0
         assert state.issues["B"].worker_active is False
-        assert state.worker_queues["apply"] == ["B"]
+        assert state.worker_queues["default:apply"] == ["B"]
 
     def test_blocked_issue_not_dispatched(self) -> None:
         config = _make_config()
@@ -329,15 +336,15 @@ class TestBackfillQueue:
                 "A": _make_issue(state="apply"),
                 "B": _make_issue(state="apply"),
             },
-            worker_queues={"apply": ["A", "B"]},
+            worker_queues={"default:apply": ["A", "B"]},
         )
         effects: list[Effect] = []
-        backfill_queue(config, state, "apply", effects)
+        backfill_queue(config, state, "default:apply", effects)
         assert len(effects) == 1
         assert isinstance(effects[0], DispatchWorkerEffect)
         assert effects[0].issue_id == "A"
         assert state.issues["A"].worker_active is True
-        assert state.worker_queues["apply"] == ["B"]
+        assert state.worker_queues["default:apply"] == ["B"]
 
     def test_backfill_skips_blocked_decomposition(self) -> None:
         config = _make_config()
@@ -347,14 +354,14 @@ class TestBackfillQueue:
                 "B": _make_issue(state="apply"),
                 "C": _make_issue(state="implementing", decomposed_from="A"),
             },
-            worker_queues={"apply": ["A", "B"]},
+            worker_queues={"default:apply": ["A", "B"]},
         )
         effects: list[Effect] = []
-        backfill_queue(config, state, "apply", effects)
+        backfill_queue(config, state, "default:apply", effects)
         assert len(effects) == 1
         assert isinstance(effects[0], DispatchWorkerEffect)
         assert effects[0].issue_id == "B"
-        assert state.worker_queues["apply"] == ["A"]
+        assert state.worker_queues["default:apply"] == ["A"]
 
     def test_backfill_skips_blocked_dependency(self) -> None:
         config = _make_config()
@@ -364,27 +371,27 @@ class TestBackfillQueue:
                 "B": _make_issue(state="apply"),
                 "C": _make_issue(state="implementing"),
             },
-            worker_queues={"apply": ["A", "B"]},
+            worker_queues={"default:apply": ["A", "B"]},
         )
         effects: list[Effect] = []
-        backfill_queue(config, state, "apply", effects)
+        backfill_queue(config, state, "default:apply", effects)
         assert len(effects) == 1
         assert isinstance(effects[0], DispatchWorkerEffect)
         assert effects[0].issue_id == "B"
-        assert state.worker_queues["apply"] == ["A"]
+        assert state.worker_queues["default:apply"] == ["A"]
 
 
 class TestRemoveFromQueue:
     def test_remove_existing(self) -> None:
-        state = State(issues={}, worker_queues={"apply": ["A", "B", "C"]})
-        remove_from_queue(state, "apply", "B")
-        assert state.worker_queues["apply"] == ["A", "C"]
+        state = State(issues={}, worker_queues={"default:apply": ["A", "B", "C"]})
+        remove_from_queue(state, "default:apply", "B")
+        assert state.worker_queues["default:apply"] == ["A", "C"]
 
     def test_remove_nonexistent_no_error(self) -> None:
-        state = State(issues={}, worker_queues={"apply": ["A"]})
-        remove_from_queue(state, "apply", "Z")
-        assert state.worker_queues["apply"] == ["A"]
+        state = State(issues={}, worker_queues={"default:apply": ["A"]})
+        remove_from_queue(state, "default:apply", "Z")
+        assert state.worker_queues["default:apply"] == ["A"]
 
     def test_remove_from_missing_queue_no_error(self) -> None:
         state = State(issues={}, worker_queues={})
-        remove_from_queue(state, "apply", "A")  # should not raise
+        remove_from_queue(state, "default:apply", "A")  # should not raise

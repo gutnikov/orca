@@ -15,21 +15,21 @@ from orca.engine.types import (
 class TestParseSimpleConfig:
     def test_states_exist(self, simple_config_yaml: str) -> None:
         cfg = parse_config(simple_config_yaml)
-        assert set(cfg.states.keys()) == {"todo", "implementing", "done"}
+        assert set(cfg.types["default"].states.keys()) == {"todo", "implementing", "done"}
 
     def test_initial_state(self, simple_config_yaml: str) -> None:
         cfg = parse_config(simple_config_yaml)
-        assert cfg.initial == "todo"
+        assert cfg.types["default"].initial == "todo"
 
     def test_terminal_state(self, simple_config_yaml: str) -> None:
         cfg = parse_config(simple_config_yaml)
-        assert cfg.states["done"].terminal is True
-        assert cfg.states["done"].worker is None
-        assert cfg.states["done"].on == {}
+        assert cfg.types["default"].states["done"].terminal is True
+        assert cfg.types["default"].states["done"].worker is None
+        assert cfg.types["default"].states["done"].on == {}
 
     def test_active_state_worker(self, simple_config_yaml: str) -> None:
         cfg = parse_config(simple_config_yaml)
-        state = cfg.states["todo"]
+        state = cfg.types["default"].states["todo"]
         assert state.worker is not None
         assert "outcome" in state.worker.result_format
         outcome = state.worker.result_format["outcome"]
@@ -38,15 +38,15 @@ class TestParseSimpleConfig:
 
     def test_on_rules(self, simple_config_yaml: str) -> None:
         cfg = parse_config(simple_config_yaml)
-        assert cfg.states["todo"].on == {"start": OnTransition(target="implementing")}
-        assert cfg.states["implementing"].on == {
+        assert cfg.types["default"].states["todo"].on == {"start": OnTransition(target="implementing")}
+        assert cfg.types["default"].states["implementing"].on == {
             "complete": OnTransition(target="done"),
             "reject": OnTransition(target="todo"),
         }
 
     def test_string_result_format_field(self, simple_config_yaml: str) -> None:
         cfg = parse_config(simple_config_yaml)
-        rf = cfg.states["implementing"].worker
+        rf = cfg.types["default"].states["implementing"].worker
         assert rf is not None
         reason = rf.result_format["reason"]
         assert isinstance(reason, StringFieldDef)
@@ -54,25 +54,29 @@ class TestParseSimpleConfig:
 
     def test_required_when_normalization(self, simple_config_yaml: str) -> None:
         cfg = parse_config(simple_config_yaml)
-        rf = cfg.states["implementing"].worker
+        rf = cfg.types["default"].states["implementing"].worker
         assert rf is not None
         reason = rf.result_format["reason"]
         assert isinstance(reason, StringFieldDef)
         assert reason.required_when == ["reject"]
 
+    def test_root_type_is_default(self, simple_config_yaml: str) -> None:
+        cfg = parse_config(simple_config_yaml)
+        assert cfg.root_type == "default"
+
 
 class TestParseDecomposeConfig:
     def test_on_decompose_rule(self, decompose_config_yaml: str) -> None:
         cfg = parse_config(decompose_config_yaml)
-        assert isinstance(cfg.states["scoping"].on["decompose"], OnDecompose)
+        assert isinstance(cfg.types["default"].states["scoping"].on["decompose"], OnDecompose)
 
     def test_on_transition_rule(self, decompose_config_yaml: str) -> None:
         cfg = parse_config(decompose_config_yaml)
-        assert cfg.states["scoping"].on["implement"] == OnTransition(target="implementing")
+        assert cfg.types["default"].states["scoping"].on["implement"] == OnTransition(target="implementing")
 
     def test_list_field_def_with_issue_items(self, decompose_config_yaml: str) -> None:
         cfg = parse_config(decompose_config_yaml)
-        worker = cfg.states["scoping"].worker
+        worker = cfg.types["default"].states["scoping"].worker
         assert worker is not None
         sub = worker.result_format["sub_issues"]
         assert isinstance(sub, ListFieldDef)
@@ -83,21 +87,22 @@ class TestParseDecomposeConfig:
 class TestParseMaxWorkersConfig:
     def test_max_workers(self, max_workers_config_yaml: str) -> None:
         cfg = parse_config(max_workers_config_yaml)
-        assert cfg.states["apply"].max_workers == 1
+        assert cfg.types["default"].states["apply"].max_workers == 1
 
     def test_no_max_workers_default(self, max_workers_config_yaml: str) -> None:
         cfg = parse_config(max_workers_config_yaml)
-        assert cfg.states["todo"].max_workers is None
+        assert cfg.types["default"].states["todo"].max_workers is None
 
 
 class TestParseIssueFields:
     def test_issue_fields(self, simple_config_yaml: str) -> None:
         cfg = parse_config(simple_config_yaml)
-        assert "title" in cfg.issue_fields
-        assert cfg.issue_fields["title"].type == "string"
-        assert cfg.issue_fields["title"].description == "Issue title"
-        assert "priority" in cfg.issue_fields
-        assert cfg.issue_fields["priority"].type == "enum"
+        fields = cfg.types["default"].fields
+        assert "title" in fields
+        assert fields["title"].type == "string"
+        assert fields["title"].description == "Issue title"
+        assert "priority" in fields
+        assert fields["priority"].type == "enum"
 
 
 class TestValidationErrors:
@@ -461,7 +466,7 @@ states:
 initial: todo
 """
         cfg = parse_config(yaml_str)
-        assert cfg.states["todo"].max_visits == 5
+        assert cfg.types["default"].states["todo"].max_visits == 5
 
 
 class TestWorkerDefFields:
@@ -486,7 +491,7 @@ states:
 initial: todo
 """
         cfg = parse_config(yaml_str)
-        worker = cfg.states["todo"].worker
+        worker = cfg.types["default"].states["todo"].worker
         assert worker is not None
         assert worker.kind == "claude-code"
         assert worker.prompt == "prompts/work.md"
@@ -514,7 +519,7 @@ states:
 initial: todo
 """
         cfg = parse_config(yaml_str)
-        worker = cfg.states["todo"].worker
+        worker = cfg.types["default"].states["todo"].worker
         assert worker is not None
         assert worker.timeout == 300
 
@@ -609,7 +614,7 @@ states:
 initial: todo
 """
         cfg = parse_config(yaml_str)
-        worker = cfg.states["todo"].worker
+        worker = cfg.types["default"].states["todo"].worker
         assert worker is not None
         assert worker.model == "anthropic/claude-sonnet-4-5"
 
@@ -635,7 +640,7 @@ states:
 initial: todo
 """
         cfg = parse_config(yaml_str)
-        worker = cfg.states["todo"].worker
+        worker = cfg.types["default"].states["todo"].worker
         assert worker is not None
         assert worker.args == ("--max-turns", "100")
 
@@ -660,7 +665,7 @@ states:
 initial: todo
 """
         cfg = parse_config(yaml_str)
-        worker = cfg.states["todo"].worker
+        worker = cfg.types["default"].states["todo"].worker
         assert worker is not None
         assert worker.model is None
         assert worker.args is None
@@ -687,6 +692,160 @@ states:
 initial: todo
 """
         cfg = parse_config(yaml_str)
-        worker = cfg.states["todo"].worker
+        worker = cfg.types["default"].states["todo"].worker
         assert worker is not None
         assert worker.kind == "opencode"
+
+
+class TestParseTypedConfig:
+    TYPED_YAML = """\
+root_type: epic
+max_hops: 15
+types:
+  epic:
+    fields:
+      title: {type: string, description: "Title"}
+      scope: {type: string, description: "Scope"}
+    initial: scoping
+    states:
+      scoping:
+        worker:
+          kind: claude-code
+          prompt: prompts/scope.md
+          result_format:
+            outcome:
+              type: enum
+              values: [ready, decompose]
+              description: d
+            sub_issues:
+              type: list
+              items: "$issue"
+              required_when: [decompose]
+              description: s
+        on:
+          ready: done
+          decompose:
+            action: decompose
+            child_type: task
+            then: done
+      done:
+        terminal: true
+  task:
+    fields:
+      title: {type: string, description: "Title"}
+    initial: implementing
+    states:
+      implementing:
+        worker:
+          kind: claude-code
+          prompt: prompts/impl.md
+          result_format:
+            outcome:
+              type: enum
+              values: [done]
+              description: d
+        on:
+          done: done
+      done:
+        terminal: true
+"""
+
+    def test_root_type(self) -> None:
+        cfg = parse_config(self.TYPED_YAML)
+        assert cfg.root_type == "epic"
+
+    def test_types_parsed(self) -> None:
+        cfg = parse_config(self.TYPED_YAML)
+        assert set(cfg.types.keys()) == {"epic", "task"}
+
+    def test_epic_fields(self) -> None:
+        cfg = parse_config(self.TYPED_YAML)
+        assert "title" in cfg.types["epic"].fields
+        assert "scope" in cfg.types["epic"].fields
+
+    def test_task_initial(self) -> None:
+        cfg = parse_config(self.TYPED_YAML)
+        assert cfg.types["task"].initial == "implementing"
+
+    def test_decompose_child_type(self) -> None:
+        cfg = parse_config(self.TYPED_YAML)
+        rule = cfg.types["epic"].states["scoping"].on["decompose"]
+        assert isinstance(rule, OnDecompose)
+        assert rule.child_type == "task"
+
+    def test_max_hops(self) -> None:
+        cfg = parse_config(self.TYPED_YAML)
+        assert cfg.max_hops == 15
+
+
+class TestTypedConfigValidation:
+    def test_root_type_must_exist(self) -> None:
+        yaml_str = """\
+root_type: ghost
+types:
+  epic:
+    fields: {}
+    initial: done
+    states:
+      done: {terminal: true}
+"""
+        with pytest.raises(ConfigValidationError, match="root_type.*ghost"):
+            parse_config(yaml_str)
+
+    def test_child_type_must_exist(self) -> None:
+        yaml_str = """\
+root_type: epic
+types:
+  epic:
+    fields: {}
+    initial: scoping
+    states:
+      scoping:
+        worker:
+          kind: claude-code
+          prompt: p.md
+          result_format:
+            outcome: {type: enum, values: [decompose], description: d}
+            sub_issues: {type: list, items: "$issue", required_when: [decompose], description: s}
+        on:
+          decompose:
+            action: decompose
+            child_type: ghost
+      done: {terminal: true}
+"""
+        with pytest.raises(ConfigValidationError, match="child_type.*ghost"):
+            parse_config(yaml_str)
+
+    def test_cross_type_transition_rejected(self) -> None:
+        yaml_str = """\
+root_type: epic
+types:
+  epic:
+    fields: {}
+    initial: todo
+    states:
+      todo:
+        worker:
+          kind: claude-code
+          prompt: p.md
+          result_format:
+            outcome: {type: enum, values: [go], description: d}
+        on:
+          go: implementing
+      done: {terminal: true}
+  task:
+    fields: {}
+    initial: implementing
+    states:
+      implementing:
+        worker:
+          kind: claude-code
+          prompt: p.md
+          result_format:
+            outcome: {type: enum, values: [done], description: d}
+        on:
+          done: done
+      done: {terminal: true}
+"""
+        with pytest.raises(ConfigValidationError, match="implementing.*does not exist"):
+            parse_config(yaml_str)

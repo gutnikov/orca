@@ -53,6 +53,7 @@ class OnTransition:
 
 @dataclass(frozen=True)
 class OnDecompose:
+    child_type: str | None = None
     then: str | None = None
 
 
@@ -69,12 +70,28 @@ class StateDef:
 
 
 @dataclass(frozen=True)
-class StateMachineConfig:
-    issue_fields: dict[str, FieldDef]
+class TypeDef:
+    fields: dict[str, FieldDef]
     initial: str
     states: dict[str, StateDef]
+
+
+@dataclass(frozen=True)
+class StateMachineConfig:
+    root_type: str
+    types: dict[str, TypeDef]
     max_hops: int | None = None
     max_worker_retries: int = 5
+
+    def get_type(self, type_name: str) -> TypeDef:
+        return self.types[type_name]
+
+    def get_state(self, type_name: str, state_name: str) -> StateDef:
+        return self.types[type_name].states[state_name]
+
+    @property
+    def root_type_def(self) -> TypeDef:
+        return self.types[self.root_type]
 
 
 # --- Runtime state types (mutable, with serialization) ---
@@ -96,6 +113,7 @@ class EventLogEntry:
 
 @dataclass
 class Issue:
+    type: str
     fields: dict[str, Any]
     state: str
     worker_active: bool
@@ -108,6 +126,7 @@ class Issue:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "type": self.type,
             "fields": self.fields,
             "state": self.state,
             "worker_active": self.worker_active,
@@ -122,6 +141,7 @@ class Issue:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> Issue:
         return cls(
+            type=data["type"],
             fields=data["fields"],
             state=data["state"],
             worker_active=data["worker_active"],
@@ -193,6 +213,7 @@ Event = CreateEvent | AdvanceEvent | WorkerResultEvent | WorkerFailedEvent
 @dataclass(frozen=True)
 class DispatchWorkerEffect:
     issue_id: str
+    issue_type: str
     state: str
     result_format: dict[str, Any]
     issue: dict[str, Any]

@@ -65,23 +65,25 @@ def _handle_create(
         effects.append(ErrorEffect(issue_id=event.issue_id, message=f"Issue '{event.issue_id}' already exists"))
         return
 
+    root_td = config.root_type_def
     issue = Issue(
+        type=config.root_type,
         fields=event.fields,
-        state=config.initial,
+        state=root_td.initial,
         worker_active=False,
         decomposed_from=None,
         depends_on=[],
         event_log=[],
-        visit_counts={config.initial: 1},
+        visit_counts={root_td.initial: 1},
         hop_count=0,
     )
     state.issues[event.issue_id] = issue
 
     # Log the creation
-    append_log(issue, event.timestamp, "created", {"state": config.initial})
+    append_log(issue, event.timestamp, "created", {"state": root_td.initial})
 
     # If initial state is active (has a worker), dispatch
-    state_def = config.states[config.initial]
+    state_def = config.get_state(config.root_type, root_td.initial)
     if state_def.worker is not None:
         prev_len = len(effects)
         try_dispatch(config, state, event.issue_id, effects)
@@ -102,7 +104,7 @@ def _handle_advance(
         return
 
     issue = state.issues[event.issue_id]
-    current_state_def = config.states[issue.state]
+    current_state_def = config.get_state(issue.type, issue.state)
 
     # Must be in a passive state (no worker and not terminal)
     if current_state_def.worker is not None or current_state_def.terminal:
@@ -124,8 +126,9 @@ def _handle_advance(
         )
         return
 
-    # Target state must exist
-    if event.target_state not in config.states:
+    # Target state must exist in the issue's type
+    type_def = config.get_type(issue.type)
+    if event.target_state not in type_def.states:
         effects.append(
             ErrorEffect(
                 issue_id=event.issue_id,
@@ -137,7 +140,7 @@ def _handle_advance(
     old_state = issue.state
 
     # Hop limit checks before moving
-    target_state_def = config.states[event.target_state]
+    target_state_def = config.get_state(issue.type, event.target_state)
     if target_state_def.max_visits is not None:
         current_visits = issue.visit_counts.get(event.target_state, 0)
         if current_visits + 1 > target_state_def.max_visits:
@@ -196,7 +199,7 @@ def _handle_worker_result(
         return
 
     issue = state.issues[event.issue_id]
-    state_def = config.states[issue.state]
+    state_def = config.get_state(issue.type, issue.state)
 
     # Issue must not be in terminal state
     if state_def.terminal:
@@ -257,19 +260,20 @@ def _handle_worker_result(
     append_log(issue, event.timestamp, "worker_result", event.result)
 
     # 3. Merge result fields (except outcome) back into issue fields
+    issue_fields = config.get_type(issue.type).fields
     for key, value in event.result.items():
-        if key != "outcome" and key in config.issue_fields:
+        if key != "outcome" and key in issue_fields:
             issue.fields[key] = value
 
     # Slot backfill: if old state has max_workers, backfill
     dispatch_effects: list[Effect] = []
     if state_def.max_workers is not None:
-        backfill_queue(config, state, old_state_name, dispatch_effects)
+        backfill_queue(config, state, f"{issue.type}:{old_state_name}", dispatch_effects)
 
     # 3. Hop limit checks before transition/decompose
     if isinstance(rule, OnTransition):
         target = rule.target
-        target_def = config.states[target]
+        target_def = config.get_state(issue.type, target)
         if target_def.max_visits is not None:
             current_visits = issue.visit_counts.get(target, 0)
             if current_visits + 1 > target_def.max_visits:
@@ -328,7 +332,7 @@ def _handle_worker_failed(
         return
 
     issue = state.issues[event.issue_id]
-    state_def = config.states[issue.state]
+    state_def = config.get_state(issue.type, issue.state)
 
     # Issue must have worker_active == True
     if not issue.worker_active:
@@ -347,7 +351,8 @@ def _handle_worker_failed(
     append_log(issue, event.timestamp, "worker_failed", {"state": issue.state, "error": event.error})
 
     # Store the failure error in issue fields so retry prompts can reference it
-    if "failure_context" in config.issue_fields:
+    issue_fields = config.get_type(issue.type).fields
+    if "failure_context" in issue_fields:
         issue.fields["failure_context"] = event.error
 
     # Check retry limit
@@ -374,8 +379,9 @@ def _handle_worker_failed(
     effects.append(
         DispatchWorkerEffect(
             issue_id=event.issue_id,
+            issue_type=issue.type,
             state=issue.state,
-            result_format=build_result_format(config, issue.state),
+            result_format=build_result_format(config, issue.type, issue.state),
             issue=build_issue_context(state, event.issue_id),
         )
     )
@@ -392,11 +398,11 @@ def _apply_transition(
     ts: str,
 ) -> None:
     # Remove issue from old state's worker queue
-    remove_from_queue(state, old_state_name, issue_id)
+    remove_from_queue(state, f"{issue.type}:{old_state_name}", issue_id)
 
     # Move issue to target state
     issue.state = target_state
-    target_def = config.states[target_state]
+    target_def = config.get_state(issue.type, target_state)
 
     # Log the transition
     append_log(issue, ts, "transitioned", {"from": old_state_name, "to": target_state})
@@ -427,11 +433,16 @@ def _apply_decompose(
 ) -> None:
     sub_issues: list[dict[str, object]] = event.result.get("sub_issues", [])
 
-    # Log decomposition blocked on parent
-    append_log(_parent_issue, ts, "decomposition_blocked", {})
-
     # Increment parent hop count
     _parent_issue.hop_count += 1
+
+    # Get default child_type from decompose rule
+    parent_state_def = config.get_state(_parent_issue.type, _parent_issue.state)
+    outcome: str = event.result["outcome"]
+    rule = parent_state_def.on[outcome]
+    assert isinstance(rule, OnDecompose)
+    default_child_type = rule.child_type
+    parent_old_state = _parent_issue.state
 
     # Generate IDs and build key -> real_id mapping
     key_to_id: dict[str, str] = {}
@@ -446,50 +457,80 @@ def _apply_decompose(
         real_id = key_to_id[key]
         fields: dict[str, object] = sub.get("fields", {})  # type: ignore[assignment]
 
+        # Resolve child type: worker override > rule default
+        child_type_name = str(sub.get("type", "")) if "type" in sub else None
+        if not child_type_name:
+            child_type_name = default_child_type
+        if not child_type_name:
+            effects.append(
+                ErrorEffect(
+                    issue_id=event.issue_id,
+                    message=f"No type for child '{key}': decompose rule has no child_type "
+                    "and worker didn't specify one",
+                )
+            )
+            return
+        if child_type_name not in config.types:
+            effects.append(
+                ErrorEffect(
+                    issue_id=event.issue_id,
+                    message=f"Unknown type '{child_type_name}' for child '{key}'",
+                )
+            )
+            return
+
+        child_type_def = config.get_type(child_type_name)
+
         # Resolve depends_on keys to real IDs
         raw_depends: list[str] = sub.get("depends_on", [])  # type: ignore[assignment]
-        resolved_depends: list[str] = []
-        for dep_key in raw_depends:
-            if dep_key not in key_to_id:
-                # This shouldn't happen if spec is followed, but handle it
-                pass
-            else:
-                resolved_depends.append(key_to_id[dep_key])
+        resolved_depends: list[str] = [key_to_id[dk] for dk in raw_depends if dk in key_to_id]
 
         child = Issue(
+            type=child_type_name,
             fields=dict(fields),
-            state=config.initial,
+            state=child_type_def.initial,
             worker_active=False,
             decomposed_from=event.issue_id,
             depends_on=resolved_depends,
             event_log=[],
-            visit_counts={config.initial: 1},
+            visit_counts={child_type_def.initial: 1},
             hop_count=0,
         )
         state.issues[real_id] = child
 
         # Log creation on child
-        append_log(child, ts, "created", {"state": config.initial})
+        append_log(child, ts, "created", {"state": child_type_def.initial})
 
         # If child has dependencies, log dependency_blocked
         if resolved_depends:
             append_log(child, ts, "dependency_blocked", {"depends_on": resolved_depends})
 
-    # Dispatch each child that is not blocked and whose initial state is active
-    initial_def = config.states[config.initial]
-    if initial_def.worker is not None:
-        for _key, real_id in key_to_id.items():
-            if not is_blocked(state, config, real_id):
-                prev_len = len(effects)
-                try_dispatch(config, state, real_id, effects)
-                if len(effects) > prev_len:
-                    child_issue = state.issues[real_id]
-                    append_log(child_issue, ts, "worker_dispatched", {"state": child_issue.state})
+    # Dispatch non-blocked children
+    for _key, real_id in key_to_id.items():
+        child = state.issues[real_id]
+        child_type_def = config.get_type(child.type)
+        initial_def = child_type_def.states[child_type_def.initial]
+        if initial_def.worker is not None and not is_blocked(state, config, real_id):
+            prev_len = len(effects)
+            try_dispatch(config, state, real_id, effects)
+            if len(effects) > prev_len:
+                append_log(child, ts, "worker_dispatched", {"state": child.state})
+
+    # If decompose rule has a `then` target, transition parent immediately (children run independently)
+    if rule.then is not None:
+        remove_from_queue(state, f"{_parent_issue.type}:{parent_old_state}", event.issue_id)
+        _apply_transition(config, state, event.issue_id, _parent_issue, parent_old_state, rule.then, effects, ts)
+    else:
+        # No `then` — parent is blocked until all children complete
+        append_log(_parent_issue, ts, "decomposition_blocked", {})
 
 
-def _find_decompose_rule(config: StateMachineConfig, state_name: str) -> OnDecompose | None:
+def _find_decompose_rule(config: StateMachineConfig, type_name: str, state_name: str) -> OnDecompose | None:
     """Find the OnDecompose rule in the given state's on-rules, if any."""
-    state_def = config.states.get(state_name)
+    type_def = config.types.get(type_name)
+    if type_def is None:
+        return None
+    state_def = type_def.states.get(state_name)
     if state_def is None:
         return None
     for rule in state_def.on.values():
@@ -512,13 +553,15 @@ def _cascading_unblock(
         parent_id = terminal_issue.decomposed_from
         parent = state.issues[parent_id]
         children = get_children(state, parent_id)
-        all_terminal = all(config.states[state.issues[cid].state].terminal for cid in children)
+        all_terminal = all(
+            config.get_state(state.issues[cid].type, state.issues[cid].state).terminal for cid in children
+        )
         if all_terminal and not parent.worker_active:
             # Log unblocked on parent
             append_log(parent, ts, "unblocked", {"reason": "decomposition"})
 
             # Find the decompose rule that created these children to check for `then`
-            decompose_rule = _find_decompose_rule(config, parent.state)
+            decompose_rule = _find_decompose_rule(config, parent.type, parent.state)
             if decompose_rule is not None and decompose_rule.then is not None:
                 # Transition parent to the `then` target
                 old_state = parent.state
@@ -534,12 +577,15 @@ def _cascading_unblock(
     for iid, iss in state.issues.items():
         if terminal_issue_id in iss.depends_on:
             # Check if all depends_on are now terminal
-            all_deps_terminal = all(config.states[state.issues[dep_id].state].terminal for dep_id in iss.depends_on)
+            all_deps_terminal = all(
+                config.get_state(state.issues[dep_id].type, state.issues[dep_id].state).terminal
+                for dep_id in iss.depends_on
+            )
             if (
                 all_deps_terminal
                 and not is_blocked(state, config, iid)
                 and not iss.worker_active
-                and config.states[iss.state].worker is not None
+                and config.get_state(iss.type, iss.state).worker is not None
             ):
                 # Log unblocked on the dependent issue
                 append_log(iss, ts, "unblocked", {"reason": "dependency"})

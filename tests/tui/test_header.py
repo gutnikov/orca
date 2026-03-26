@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 
-from orca.engine.types import Issue, State, StateDef, StateMachineConfig, WorkerDef
+from orca.engine.types import Issue, State, StateDef, StateMachineConfig, TypeDef, WorkerDef
 from orca.tui.widgets.header import OrcaHeader, _format_elapsed
 
 
@@ -14,7 +14,10 @@ def _make_config(states: dict[str, StateDef] | None = None) -> StateMachineConfi
             "review": StateDef(worker=WorkerDef(kind="claude-code", prompt="r.j2", result_format={})),
             "done": StateDef(terminal=True),
         }
-    return StateMachineConfig(issue_fields={}, initial="triage", states=states)
+    return StateMachineConfig(
+        root_type="default",
+        types={"default": TypeDef(fields={}, initial="triage", states=states)},
+    )
 
 
 def _make_issue(
@@ -25,6 +28,7 @@ def _make_issue(
     failure_count: int = 0,
 ) -> Issue:
     return Issue(
+        type="default",
         fields={},
         state=state,
         worker_active=worker_active,

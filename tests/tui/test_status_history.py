@@ -9,6 +9,7 @@ from orca.tui.widgets.status_history import StatusHistory, build_timeline
 
 def _make_issue_with_log(entries: list[EventLogEntry], current_state: str = "review") -> Issue:
     return Issue(
+        type="default",
         fields={"title": "Test", "description": "desc"},
         state=current_state,
         worker_active=False,

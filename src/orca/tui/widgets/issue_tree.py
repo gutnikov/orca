@@ -61,7 +61,7 @@ def _progress_bar_text(
     failed_states: set[str],
 ) -> Text | None:
     """Return a Rich Text with colored block segments for each non-terminal state."""
-    non_terminal = [name for name, sdef in config.states.items() if not sdef.terminal]
+    non_terminal = [name for name, sdef in config.root_type_def.states.items() if not sdef.terminal]
     if not non_terminal:
         return None
     bar = Text()
@@ -79,7 +79,9 @@ def _progress_bar_text(
 
 def _pending_steps(config: StateMachineConfig, visit_counts: dict[str, int]) -> list[str]:
     """Return non-terminal states not yet visited."""
-    return [name for name, sdef in config.states.items() if not sdef.terminal and name not in visit_counts]
+    return [
+        name for name, sdef in config.root_type_def.states.items() if not sdef.terminal and name not in visit_counts
+    ]
 
 
 def _extract_result_outcomes(event_log: list[EventLogEntry]) -> dict[str, str]:
@@ -357,7 +359,7 @@ class IssueTree(Tree[str]):
 
             # Active current state (shown when no session exists for it yet)
             if self._config is not None:
-                current_state_def = self._config.states.get(issue.state)
+                current_state_def = self._config.root_type_def.states.get(issue.state)
                 has_session_for_current = any(str(s.get("state", "")) == issue.state for s in issue_sessions)
                 if (
                     current_state_def is not None

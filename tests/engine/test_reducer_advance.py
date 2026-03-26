@@ -13,6 +13,7 @@ from orca.engine.types import (
     State,
     StateDef,
     StateMachineConfig,
+    TypeDef,
     WorkerDef,
 )
 
@@ -39,6 +40,7 @@ def _make_issue(
     depends_on: list[str] | None = None,
 ) -> Issue:
     return Issue(
+        type="default",
         fields={"title": "Test"},
         state=state,
         worker_active=worker_active,
@@ -53,32 +55,37 @@ def _make_issue(
 def _config() -> StateMachineConfig:
     """Config with passive 'backlog', active 'todo' and 'implementing', terminal 'done'."""
     return StateMachineConfig(
-        issue_fields={"title": FieldDef(type="string", description="Title")},
-        initial="backlog",
-        states={
-            "backlog": StateDef(),
-            "review": StateDef(),
-            "todo": StateDef(
-                worker=WorkerDef(
-                    kind="claude-code",
-                    prompt="prompts/default.md",
-                    result_format={
-                        "outcome": EnumFieldDef(values=["start"], description="Decision"),
-                    },
-                ),
-                on={},
-            ),
-            "implementing": StateDef(
-                worker=WorkerDef(
-                    kind="claude-code",
-                    prompt="prompts/default.md",
-                    result_format={
-                        "outcome": EnumFieldDef(values=["complete"], description="Outcome"),
-                    },
-                ),
-                on={},
-            ),
-            "done": StateDef(terminal=True),
+        root_type="default",
+        types={
+            "default": TypeDef(
+                fields={"title": FieldDef(type="string", description="Title")},
+                initial="backlog",
+                states={
+                    "backlog": StateDef(),
+                    "review": StateDef(),
+                    "todo": StateDef(
+                        worker=WorkerDef(
+                            kind="claude-code",
+                            prompt="prompts/default.md",
+                            result_format={
+                                "outcome": EnumFieldDef(values=["start"], description="Decision"),
+                            },
+                        ),
+                        on={},
+                    ),
+                    "implementing": StateDef(
+                        worker=WorkerDef(
+                            kind="claude-code",
+                            prompt="prompts/default.md",
+                            result_format={
+                                "outcome": EnumFieldDef(values=["complete"], description="Outcome"),
+                            },
+                        ),
+                        on={},
+                    ),
+                    "done": StateDef(terminal=True),
+                },
+            )
         },
     )
 

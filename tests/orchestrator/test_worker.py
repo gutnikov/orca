@@ -14,6 +14,7 @@ from orca.orchestrator.worker import KIND_REGISTRY, CliAgentWorker, KindConfig, 
 def _make_effect(state: str = "implementing") -> DispatchWorkerEffect:
     return DispatchWorkerEffect(
         issue_id="issue-1",
+        issue_type="default",
         state=state,
         result_format={
             "outcome": {"type": "enum", "values": ["done"], "description": "Outcome"},

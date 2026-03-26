@@ -54,7 +54,7 @@ def _render_issue(
 ) -> list[str]:
     """Render a single issue and its children recursively."""
     issue = state.issues[issue_id]
-    state_def = config.states[issue.state]
+    state_def = config.get_state(issue.type, issue.state)
     is_terminal = state_def.terminal
 
     # Elapsed time
@@ -64,7 +64,9 @@ def _render_issue(
     # State marker
     marker = "" if is_terminal else " ..."
 
-    line = f"{prefix}{connector}{issue_id} [{issue.state}]{marker} {elapsed}"
+    state_label = f"[{issue.state}]" if issue.type == "default" else f"[{issue.type}:{issue.state}]"
+
+    line = f"{prefix}{connector}{issue_id} {state_label}{marker} {elapsed}"
     lines: list[str] = [line]
 
     # Determine the continuation prefix for children/annotations
@@ -109,12 +111,13 @@ def format_issues(state: State, config: StateMachineConfig, now: str) -> str:
         else:
             # Root with children: render root, then children with tree connectors
             issue = state.issues[root_id]
-            state_def = config.states[issue.state]
+            state_def = config.get_state(issue.type, issue.state)
             is_terminal = state_def.terminal
             created_ts = _get_created_timestamp(issue)
             elapsed = _format_elapsed(created_ts, now) if created_ts is not None else "?"
             marker = "" if is_terminal else " ..."
-            lines.append(f"{root_id} [{issue.state}]{marker} {elapsed}")
+            state_label = f"[{issue.state}]" if issue.type == "default" else f"[{issue.type}:{issue.state}]"
+            lines.append(f"{root_id} {state_label}{marker} {elapsed}")
 
             # depends_on for root
             if issue.depends_on:

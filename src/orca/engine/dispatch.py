@@ -30,14 +30,14 @@ def is_blocked(state: State, config: StateMachineConfig, issue_id: str) -> bool:
     if children:
         for child_id in children:
             child = state.issues[child_id]
-            child_state_def = config.states[child.state]
+            child_state_def = config.get_state(child.type, child.state)
             if not child_state_def.terminal:
                 return True
 
     # Dependency-blocked: has depends_on entries not all in terminal states
     for dep_id in issue.depends_on:
         dep = state.issues[dep_id]
-        dep_state_def = config.states[dep.state]
+        dep_state_def = config.get_state(dep.type, dep.state)
         if not dep_state_def.terminal:
             return True
 
@@ -68,9 +68,9 @@ def build_issue_context(state: State, issue_id: str) -> dict[str, Any]:
     }
 
 
-def build_result_format(config: StateMachineConfig, state_name: str) -> dict[str, Any]:
+def build_result_format(config: StateMachineConfig, type_name: str, state_name: str) -> dict[str, Any]:
     """Serializes the result_format from config into a plain dict."""
-    state_def = config.states[state_name]
+    state_def = config.get_state(type_name, state_name)
     if state_def.worker is None:
         return {}
     result: dict[str, Any] = {}
@@ -112,7 +112,7 @@ def try_dispatch(
     """Core dispatch protocol."""
     issue = state.issues[issue_id]
     state_name = issue.state
-    state_def = config.states[state_name]
+    state_def = config.get_state(issue.type, state_name)
 
     # 1. If issue is blocked, don't dispatch
     if is_blocked(state, config, issue_id):
@@ -124,9 +124,15 @@ def try_dispatch(
 
     # 3. If state has max_workers and active count >= limit, queue the issue
     if state_def.max_workers is not None:
-        active_count = sum(1 for iss in state.issues.values() if iss.state == state_name and iss.worker_active)
+        # Count active workers matching BOTH type and state
+        active_count = sum(
+            1
+            for iss in state.issues.values()
+            if iss.type == issue.type and iss.state == state_name and iss.worker_active
+        )
         if active_count >= state_def.max_workers:
-            queue = state.worker_queues.setdefault(state_name, [])
+            queue_key = f"{issue.type}:{state_name}"
+            queue = state.worker_queues.setdefault(queue_key, [])
             queue.append(issue_id)
             return
 
@@ -135,8 +141,9 @@ def try_dispatch(
     effects.append(
         DispatchWorkerEffect(
             issue_id=issue_id,
+            issue_type=issue.type,
             state=state_name,
-            result_format=build_result_format(config, state_name),
+            result_format=build_result_format(config, issue.type, state_name),
             issue=build_issue_context(state, issue_id),
         )
     )
@@ -145,11 +152,11 @@ def try_dispatch(
 def backfill_queue(
     config: StateMachineConfig,
     state: State,
-    state_name: str,
+    queue_key: str,
     effects: list[Effect],
 ) -> None:
     """When a slot frees up in a capped state, pop next non-blocked issue from queue and dispatch."""
-    queue = state.worker_queues.get(state_name)
+    queue = state.worker_queues.get(queue_key)
     if not queue:
         return
 
@@ -161,9 +168,9 @@ def backfill_queue(
             return
 
 
-def remove_from_queue(state: State, state_name: str, issue_id: str) -> None:
+def remove_from_queue(state: State, queue_key: str, issue_id: str) -> None:
     """Remove an issue from a state's queue."""
-    queue = state.worker_queues.get(state_name)
+    queue = state.worker_queues.get(queue_key)
     if queue is None:
         return
     with contextlib.suppress(ValueError):

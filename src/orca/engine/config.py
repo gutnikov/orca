@@ -15,6 +15,7 @@ from orca.engine.types import (
     StateDef,
     StateMachineConfig,
     StringFieldDef,
+    TypeDef,
     WorkerDef,
 )
 
@@ -69,7 +70,8 @@ def _parse_on_rule(key: str, value: Any) -> OnRule:
         action = value.get("action")
         if action == "decompose":
             then = value.get("then")
-            return OnDecompose(then=then)
+            child_type = value.get("child_type")
+            return OnDecompose(child_type=child_type, then=then)
         msg = f"Unknown action '{action}' in on.{key}"
         raise ConfigValidationError(msg)
     msg = f"Invalid on rule for key '{key}': expected string or dict"
@@ -140,129 +142,183 @@ def _parse_issue_fields(data: dict[str, Any] | None) -> dict[str, FieldDef]:
     return result
 
 
-def _validate(config: StateMachineConfig) -> None:
-    state_names = set(config.states.keys())
+def _parse_type(name: str, raw: dict[str, Any]) -> TypeDef:
+    fields_data = raw.get("fields")
+    fields = _parse_issue_fields(fields_data)
+    initial = raw.get("initial", "")
+    states_data: dict[str, Any] = raw.get("states", {})
+    states: dict[str, StateDef] = {}
+    for state_name, state_data in states_data.items():
+        states[state_name] = _parse_state(state_name, state_data)
+    return TypeDef(fields=fields, initial=initial, states=states)
 
+
+def _validate(config: StateMachineConfig) -> None:
     # Validate max_hops if present
     if config.max_hops is not None and (not isinstance(config.max_hops, int) or config.max_hops < 1):
         msg = f"max_hops must be a positive integer, got {config.max_hops}"
         raise ConfigValidationError(msg)
 
-    # Rule 1: initial references an existing state
-    if config.initial not in state_names:
-        msg = f"initial state '{config.initial}' does not reference an existing state"
+    # Validate root_type exists in types
+    if config.root_type not in config.types:
+        msg = f"root_type '{config.root_type}' does not exist in types"
         raise ConfigValidationError(msg)
 
-    # Rule 6: at least one terminal state
-    terminal_states = {name for name, s in config.states.items() if s.terminal}
-    if not terminal_states:
-        msg = "At least one terminal state is required"
-        raise ConfigValidationError(msg)
+    all_type_names = set(config.types.keys())
 
-    # Collect reachable targets for rule 8
-    reachable: set[str] = {config.initial}
+    for type_name, type_def in config.types.items():
+        state_names = set(type_def.states.keys())
 
-    for name, state in config.states.items():
-        # Validate worker fields
-        if state.worker is not None:
-            if state.worker.kind not in _ALLOWED_WORKER_KINDS:
-                allowed_kinds = sorted(_ALLOWED_WORKER_KINDS)
-                msg = f"Worker for state '{name}': kind must be one of {allowed_kinds}, got '{state.worker.kind}'"
-                raise ConfigValidationError(msg)
-            if not state.worker.prompt:
-                msg = f"Worker prompt for state '{name}' must be a non-empty string"
-                raise ConfigValidationError(msg)
-            if state.worker.timeout is not None and (
-                not isinstance(state.worker.timeout, int) or state.worker.timeout < 1
-            ):
-                msg = f"Worker timeout for state '{name}' must be a positive integer, got {state.worker.timeout}"
-                raise ConfigValidationError(msg)
-
-        # Rule 9: max_workers must be positive integer
-        if state.max_workers is not None and (not isinstance(state.max_workers, int) or state.max_workers < 1):
-            msg = f"max_workers for state '{name}' must be a positive integer, got {state.max_workers}"
+        # Rule 1: initial references an existing state
+        if type_def.initial not in state_names:
+            msg = f"Type '{type_name}', initial state '{type_def.initial}' does not exist in states"
             raise ConfigValidationError(msg)
 
-        # max_visits must be positive integer
-        if state.max_visits is not None and (not isinstance(state.max_visits, int) or state.max_visits < 1):
-            msg = f"max_visits for state '{name}' must be a positive integer, got {state.max_visits}"
+        # Rule 6: at least one terminal state
+        terminal_states = {name for name, s in type_def.states.items() if s.terminal}
+        if not terminal_states:
+            msg = f"Type '{type_name}': at least one terminal state is required"
             raise ConfigValidationError(msg)
 
-        # Rule 5: terminal states have no worker or on
-        if state.terminal:
-            if state.worker is not None or state.on:
-                msg = f"Terminal state '{name}' must not have worker or on rules"
-                raise ConfigValidationError(msg)
-            continue
+        # Collect reachable targets for rule 8
+        reachable: set[str] = {type_def.initial}
 
-        # Rule 4: active states (with worker+on) must have outcome enum in result_format
-        if state.worker is not None and state.on:
-            outcome = state.worker.result_format.get("outcome")
-            if not isinstance(outcome, EnumFieldDef):
-                msg = f"Active state '{name}' must have 'outcome' of type enum in result_format"
-                raise ConfigValidationError(msg)
-
-            # Rule 3: every on key matches a value in outcome.values
-            for key in state.on:
-                if key not in outcome.values:
-                    msg = f"on key '{key}' in state '{name}' does not match any outcome value ({outcome.values})"
-                    raise ConfigValidationError(msg)
-
-        # Rule 2: every on target references an existing state
-        for key, rule in state.on.items():
-            if isinstance(rule, OnTransition):
-                if rule.target not in state_names:
-                    msg = f"on.{key} target '{rule.target}' in state '{name}' does not reference an existing state"
-                    raise ConfigValidationError(msg)
-                reachable.add(rule.target)
-            elif isinstance(rule, OnDecompose) and rule.then is not None:
-                if rule.then not in state_names:
+        for name, state in type_def.states.items():
+            # Validate worker fields
+            if state.worker is not None:
+                if state.worker.kind not in _ALLOWED_WORKER_KINDS:
+                    allowed_kinds = sorted(_ALLOWED_WORKER_KINDS)
                     msg = (
-                        f"on.{key} decompose 'then' target '{rule.then}' in state '{name}' "
-                        f"does not reference an existing state"
+                        f"Type '{type_name}', worker for state '{name}': "
+                        f"kind must be one of {allowed_kinds}, got '{state.worker.kind}'"
                     )
                     raise ConfigValidationError(msg)
-                reachable.add(rule.then)
-
-        # Rule 7: action decompose requires sub_issues with items=$issue
-        for _key, rule in state.on.items():
-            if isinstance(rule, OnDecompose):
-                if state.worker is None:
-                    msg = f"State '{name}' has decompose action but no worker"
+                if not state.worker.prompt:
+                    msg = f"Type '{type_name}', worker prompt for state '{name}' must be a non-empty string"
                     raise ConfigValidationError(msg)
-                sub = state.worker.result_format.get("sub_issues")
-                if not isinstance(sub, ListFieldDef) or sub.items != "$issue":
+                if state.worker.timeout is not None and (
+                    not isinstance(state.worker.timeout, int) or state.worker.timeout < 1
+                ):
                     msg = (
-                        f"State '{name}' has action: decompose but result_format is missing "
-                        f"'sub_issues' field with items: $issue"
+                        f"Type '{type_name}', worker timeout for state '{name}' "
+                        f"must be a positive integer, got {state.worker.timeout}"
                     )
                     raise ConfigValidationError(msg)
 
-    # Rule 8: every non-initial, non-passive state must be reachable
-    for name, state in config.states.items():
-        if name in reachable:
-            continue
-        # Passive states (no worker, no on, not terminal) are exempt
-        is_passive = state.worker is None and not state.on and not state.terminal
-        if is_passive:
-            continue
-        msg = f"State '{name}' is not reachable from any on rule"
-        raise ConfigValidationError(msg)
+            # Rule 9: max_workers must be positive integer
+            if state.max_workers is not None and (not isinstance(state.max_workers, int) or state.max_workers < 1):
+                msg = (
+                    f"Type '{type_name}', max_workers for state '{name}' "
+                    f"must be a positive integer, got {state.max_workers}"
+                )
+                raise ConfigValidationError(msg)
+
+            # max_visits must be positive integer
+            if state.max_visits is not None and (not isinstance(state.max_visits, int) or state.max_visits < 1):
+                msg = (
+                    f"Type '{type_name}', max_visits for state '{name}' "
+                    f"must be a positive integer, got {state.max_visits}"
+                )
+                raise ConfigValidationError(msg)
+
+            # Rule 5: terminal states have no worker or on
+            if state.terminal:
+                if state.worker is not None or state.on:
+                    msg = f"Type '{type_name}', terminal state '{name}' must not have worker or on rules"
+                    raise ConfigValidationError(msg)
+                continue
+
+            # Rule 4: active states (with worker+on) must have outcome enum in result_format
+            if state.worker is not None and state.on:
+                outcome = state.worker.result_format.get("outcome")
+                if not isinstance(outcome, EnumFieldDef):
+                    msg = f"Type '{type_name}', active state '{name}' must have 'outcome' of type enum in result_format"
+                    raise ConfigValidationError(msg)
+
+                # Rule 3: every on key matches a value in outcome.values
+                for key in state.on:
+                    if key not in outcome.values:
+                        msg = (
+                            f"Type '{type_name}', on key '{key}' in state '{name}' "
+                            f"does not match any outcome value ({outcome.values})"
+                        )
+                        raise ConfigValidationError(msg)
+
+            # Rule 2: every on target references an existing state within same type
+            for key, rule in state.on.items():
+                if isinstance(rule, OnTransition):
+                    if rule.target not in state_names:
+                        msg = (
+                            f"Type '{type_name}', on.{key} target '{rule.target}' in state '{name}' "
+                            f"does not exist in states"
+                        )
+                        raise ConfigValidationError(msg)
+                    reachable.add(rule.target)
+                elif isinstance(rule, OnDecompose):
+                    if rule.child_type is not None and rule.child_type not in all_type_names:
+                        msg = f"Type '{type_name}', on.{key} child_type '{rule.child_type}' does not exist in types"
+                        raise ConfigValidationError(msg)
+                    if rule.then is not None:
+                        if rule.then not in state_names:
+                            msg = (
+                                f"Type '{type_name}', on.{key} decompose 'then' target '{rule.then}' "
+                                f"in state '{name}' does not exist in states"
+                            )
+                            raise ConfigValidationError(msg)
+                        reachable.add(rule.then)
+
+            # Rule 7: action decompose requires sub_issues with items=$issue
+            for _key, rule in state.on.items():
+                if isinstance(rule, OnDecompose):
+                    if state.worker is None:
+                        msg = f"Type '{type_name}', state '{name}' has decompose action but no worker"
+                        raise ConfigValidationError(msg)
+                    sub = state.worker.result_format.get("sub_issues")
+                    if not isinstance(sub, ListFieldDef) or sub.items != "$issue":
+                        msg = (
+                            f"Type '{type_name}', state '{name}' has action: decompose but result_format "
+                            f"is missing 'sub_issues' field with items: $issue"
+                        )
+                        raise ConfigValidationError(msg)
+
+        # Rule 8: every non-initial, non-passive, non-terminal state must be reachable
+        for name, state in type_def.states.items():
+            if name in reachable:
+                continue
+            # Passive states (no worker, no on, not terminal) are exempt
+            is_passive = state.worker is None and not state.on and not state.terminal
+            if is_passive:
+                continue
+            # Terminal states are exempt: they can be reached via cascading unblock (`then` on decompose)
+            if state.terminal:
+                continue
+            msg = f"Type '{type_name}', state '{name}' is not reachable from any on rule"
+            raise ConfigValidationError(msg)
 
 
-def parse_config(yaml_str: str) -> StateMachineConfig:
-    """Parse a YAML string into a StateMachineConfig."""
-    raw: Any = yaml.safe_load(yaml_str)
-    if not isinstance(raw, dict):
-        msg = "Config must be a YAML mapping"
-        raise ConfigValidationError(msg)
+def _parse_typed_config(raw: dict[str, Any]) -> StateMachineConfig:
+    root_type = raw.get("root_type", "")
+    max_hops = raw.get("max_hops")
+    max_worker_retries = raw.get("max_worker_retries", 5)
+    types_data: dict[str, Any] = raw.get("types", {})
+    types: dict[str, TypeDef] = {}
+    for name, type_data in types_data.items():
+        types[name] = _parse_type(name, type_data)
+    config = StateMachineConfig(
+        root_type=root_type,
+        types=types,
+        max_hops=max_hops,
+        max_worker_retries=max_worker_retries,
+    )
+    _validate(config)
+    return config
 
-    # Parse issue fields
+
+def _parse_legacy_config(raw: dict[str, Any]) -> StateMachineConfig:
     issue_data = raw.get("issue", {})
     fields_data = issue_data.get("fields") if isinstance(issue_data, dict) else None
     issue_fields = _parse_issue_fields(fields_data)
 
-    # Parse states
     states_data: dict[str, Any] = raw.get("states", {})
     states: dict[str, StateDef] = {}
     for name, state_data in states_data.items():
@@ -272,14 +328,29 @@ def parse_config(yaml_str: str) -> StateMachineConfig:
     max_hops = raw.get("max_hops")
     max_worker_retries = raw.get("max_worker_retries", 5)
 
+    # For legacy single-type configs, default decompose child_type to "default"
+    for state_def in states.values():
+        for key, rule in state_def.on.items():
+            if isinstance(rule, OnDecompose) and rule.child_type is None:
+                state_def.on[key] = OnDecompose(child_type="default", then=rule.then)
+
+    type_def = TypeDef(fields=issue_fields, initial=initial, states=states)
     config = StateMachineConfig(
-        issue_fields=issue_fields,
-        initial=initial,
-        states=states,
+        root_type="default",
+        types={"default": type_def},
         max_hops=max_hops,
         max_worker_retries=max_worker_retries,
     )
-
     _validate(config)
-
     return config
+
+
+def parse_config(yaml_str: str) -> StateMachineConfig:
+    """Parse a YAML string into a StateMachineConfig."""
+    raw: Any = yaml.safe_load(yaml_str)
+    if not isinstance(raw, dict):
+        msg = "Config must be a YAML mapping"
+        raise ConfigValidationError(msg)
+    if "types" in raw:
+        return _parse_typed_config(raw)
+    return _parse_legacy_config(raw)
