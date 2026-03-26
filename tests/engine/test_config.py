@@ -538,7 +538,7 @@ states:
     terminal: true
 initial: todo
 """
-        with pytest.raises(ConfigValidationError, match="kind must be 'claude-code'"):
+        with pytest.raises(ConfigValidationError, match="kind must be one of"):
             parse_config(yaml_str)
 
     def test_missing_prompt_rejected(self) -> None:
@@ -664,3 +664,29 @@ initial: todo
         assert worker is not None
         assert worker.model is None
         assert worker.args is None
+
+    def test_opencode_kind_accepted(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      kind: opencode
+      prompt: prompts/work.md
+      model: anthropic/claude-sonnet-4-5
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+  done:
+    terminal: true
+initial: todo
+"""
+        cfg = parse_config(yaml_str)
+        worker = cfg.states["todo"].worker
+        assert worker is not None
+        assert worker.kind == "opencode"

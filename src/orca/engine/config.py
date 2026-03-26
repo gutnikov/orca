@@ -18,6 +18,8 @@ from orca.engine.types import (
     WorkerDef,
 )
 
+_ALLOWED_WORKER_KINDS = {"claude-code", "opencode"}
+
 
 class ConfigValidationError(Exception):
     pass
@@ -163,8 +165,9 @@ def _validate(config: StateMachineConfig) -> None:
     for name, state in config.states.items():
         # Validate worker fields
         if state.worker is not None:
-            if state.worker.kind != "claude-code":
-                msg = f"Worker for state '{name}': kind must be 'claude-code', got '{state.worker.kind}'"
+            if state.worker.kind not in _ALLOWED_WORKER_KINDS:
+                allowed_kinds = sorted(_ALLOWED_WORKER_KINDS)
+                msg = f"Worker for state '{name}': kind must be one of {allowed_kinds}, got '{state.worker.kind}'"
                 raise ConfigValidationError(msg)
             if not state.worker.prompt:
                 msg = f"Worker prompt for state '{name}' must be a non-empty string"
