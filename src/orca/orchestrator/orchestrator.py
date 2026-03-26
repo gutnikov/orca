@@ -211,7 +211,15 @@ class Orchestrator:
         backoff = 5.0 * (2**failures) if failures > 0 else 0.0
 
         task: asyncio.Task[WorkerOutcome] = asyncio.create_task(
-            self._run_worker_with_backoff(effect, worker, state_def.worker.prompt, backoff, tracking_id)
+            self._run_worker_with_backoff(
+                effect,
+                worker,
+                state_def.worker.prompt,
+                backoff,
+                tracking_id,
+                model=state_def.worker.model,
+                extra_args=state_def.worker.args,
+            )
         )
         self._in_flight[task] = (effect.issue_id, tracking_id)
         logger.info(
@@ -242,6 +250,8 @@ class Orchestrator:
         prompt_template: str,
         backoff: float,
         tracking_id: str,
+        model: str | None = None,
+        extra_args: tuple[str, ...] | None = None,
     ) -> WorkerOutcome:
         """Wait for backoff delay, then run the worker."""
         if backoff > 0:
@@ -252,10 +262,16 @@ class Orchestrator:
                 extra={"event": "worker_backoff", "issue_id": effect.issue_id, "backoff_seconds": backoff},
             )
             await asyncio.sleep(backoff)
-        return await self._run_worker(effect, worker, prompt_template, tracking_id)
+        return await self._run_worker(effect, worker, prompt_template, tracking_id, model=model, extra_args=extra_args)
 
     async def _run_worker(
-        self, effect: DispatchWorkerEffect, worker: Worker, prompt_template: str, tracking_id: str
+        self,
+        effect: DispatchWorkerEffect,
+        worker: Worker,
+        prompt_template: str,
+        tracking_id: str,
+        model: str | None = None,
+        extra_args: tuple[str, ...] | None = None,
     ) -> WorkerOutcome:
         """Create worktree if needed, then execute the worker."""
         workdir = await self._ensure_worktree(effect.issue_id)
@@ -313,6 +329,8 @@ class Orchestrator:
                 inactivity_timeout,
                 pty_session=tmux_session,
                 env=worker_env,
+                model=model,
+                extra_args=list(extra_args) if extra_args else None,
             )
         finally:
             # Final scrollback save before killing the session
