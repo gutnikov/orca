@@ -68,6 +68,27 @@ def _make_polling_pty(
     return pty
 
 
+def _make_mock_pty(
+    *,
+    exit_code: int = 0,
+    write_result: dict[str, Any] | None = None,
+    result_path: Path | None = None,
+) -> MagicMock:
+    """Create a simple mock PtySession that writes result on spawn and exits immediately."""
+    pty = MagicMock()
+    pty.session_name = "mock-session"
+
+    async def _spawn(*args: Any, **kwargs: Any) -> None:
+        if write_result is not None and result_path is not None:
+            result_path.write_text(json.dumps(write_result))
+
+    pty.spawn = AsyncMock(side_effect=_spawn)
+    type(pty).alive = property(lambda self: False)
+    pty.kill = MagicMock()
+    pty.close = MagicMock()
+    return pty
+
+
 @pytest.mark.asyncio()
 class TestClaudeCodeWorker:
     async def test_result_detected_while_alive(self, tmp_path: Path) -> None:
@@ -179,3 +200,22 @@ class TestClaudeCodeWorker:
         assert isinstance(outcome, WorkerSuccess)
         assert outcome.result == valid_result
         pty.kill.assert_not_called()
+
+    async def test_env_passed_to_pty_session(self, tmp_path: Path) -> None:
+        """Verify env dict is forwarded to pty_session.spawn."""
+        effect = _make_effect()
+        result_path = tmp_path / "result.json"
+        prompt_path = tmp_path / "prompt.md"
+        prompt_path.write_text("Do the thing")
+
+        valid_result: dict[str, Any] = {"outcome": "done", "summary": "All done"}
+        pty = _make_mock_pty(exit_code=0, write_result=valid_result, result_path=result_path)
+
+        env = {"SLACK_HITL_MCP_URL": "http://127.0.0.1:9999/sse"}
+        worker = ClaudeCodeWorker(repo_root=tmp_path)
+        await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty, env=env)
+
+        # Verify env was passed to spawn
+        pty.spawn.assert_called_once()
+        spawn_kwargs = pty.spawn.call_args.kwargs
+        assert spawn_kwargs.get("env") == env

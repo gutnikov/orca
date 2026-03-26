@@ -47,6 +47,7 @@ class Worker(Protocol):
         prompt_path: Path | None = None,
         inactivity_timeout: int | None = None,
         pty_session: PtySession | None = None,
+        env: dict[str, str] | None = None,
     ) -> WorkerOutcome: ...
 
 
@@ -64,6 +65,7 @@ class ClaudeCodeWorker:
         prompt_path: Path | None = None,
         inactivity_timeout: int | None = None,
         pty_session: PtySession | None = None,
+        env: dict[str, str] | None = None,
     ) -> WorkerOutcome:
         assert pty_session is not None, "pty_session is required"
 
@@ -82,6 +84,7 @@ class ClaudeCodeWorker:
             ["--dangerously-skip-permissions", "--max-turns", "50"],
             cwd=workdir,
             stdin_data=prompt.encode(),
+            env=env,
         )
 
         logger.debug(
