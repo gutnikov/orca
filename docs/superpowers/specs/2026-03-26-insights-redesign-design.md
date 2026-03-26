@@ -77,6 +77,8 @@ Located at `.orca/runs/{branch}/insights.json`. The agent creates and appends to
 ]
 ```
 
+**Formatting:** The `detail` and `remediation` fields support markdown. The TUI renders them using Textual's `Markdown` widget when an insight entry is selected.
+
 **Severity levels:**
 - `error` — failures, blocked pipeline, deadlocks
 - `warning` — bouncebacks, long-running workers, retries
@@ -111,6 +113,34 @@ The agent's prompt instructs it to check for these on each wake-up:
 - Recommendations for next run
 
 The agent reads raw files for evidence. If it can't determine a root cause, it says so explicitly.
+
+### 3b. Workflow Optimization
+
+Beyond diagnosing runtime problems, the insights agent evaluates whether the workflow design itself is serving the task well. It reads worker session logs (`.orca/sessions/*.log`) to understand what workers actually spend time doing, then proposes concrete changes.
+
+The agent has full latitude to suggest any workflow improvement, including but not limited to:
+
+- **Merging states** — two consecutive states where the second re-reads the first's output
+- **Splitting states** — a single state doing too much (>20min, multi-task session logs)
+- **Adding states** — missing steps the workers keep doing ad-hoc (e.g., always starts by reading docs)
+- **Removing states** — unnecessary steps that add overhead without value
+- **Changing transitions** — different outcome routing, better loopback conditions
+- **Adjusting parallelism** — decompose differently, change `max_workers`
+- **Improving prompts** — session logs reveal workers misunderstanding instructions
+- **Tuning settings** — retry counts, timeouts, `max_visits`
+
+**Evidence-based:** The agent forms hypotheses from session log content — what workers spent time on, where they got stuck, what they repeated. It correlates timing data from `sessions.json` with qualitative observations from the logs.
+
+**Output:** Workflow suggestions are `insights.json` entries (typically `warning` or `info` severity). The `remediation` field contains concrete proposed `orca.yml` changes as markdown yaml code blocks:
+
+```json
+{
+  "severity": "warning",
+  "title": "Consider merging requirements and write_tests states",
+  "detail": "The write_tests worker spends its first 2 minutes re-reading the requirements output. Session log shows:\n\n> Reading 4 files... tests/e2e/ai-team/e2e-requirements.md\n\nThis is redundant — the requirements worker already produced this content.",
+  "remediation": "Merge into a single `plan_and_write_tests` state:\n\n```yaml\nstates:\n  plan_and_write_tests:\n    worker:\n      kind: claude-code\n      prompt: prompts/plan-and-write-tests.md\n    on:\n      tests_written: build\n```\n\nThis eliminates redundant context loading and saves ~2 minutes per run."
+}
+```
 
 ### 4. Prompt Design
 
