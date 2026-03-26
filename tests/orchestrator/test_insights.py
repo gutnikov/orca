@@ -58,72 +58,6 @@ class TestSerializeStateForInsights:
         assert result["issues"]["i2"]["decomposed_from"] == "i1"
 
 
-class TestGatherTranscripts:
-    def test_reads_existing_transcripts(self, tmp_path: Path) -> None:
-        from orca.orchestrator.insights import gather_transcripts
-
-        transcripts_dir = tmp_path / "transcripts"
-        transcripts_dir.mkdir()
-        (transcripts_dir / "sess-1.md").write_text("# Transcript 1\nSome content here\n" * 20)
-        (transcripts_dir / "sess-2.md").write_text("# Transcript 2\nMore content\n" * 10)
-
-        sessions: list[dict[str, Any]] = [
-            {"session_id": "sess-1", "issue_id": "i1", "completed_at": "2026-01-01"},
-            {"session_id": "sess-2", "issue_id": "i2", "completed_at": None},
-        ]
-
-        result = gather_transcripts(transcripts_dir, sessions, max_lines_per_transcript=200)
-
-        assert "sess-1" in result
-        assert "sess-2" in result
-        assert "Transcript 1" in result["sess-1"]
-
-    def test_skips_insights_sessions(self, tmp_path: Path) -> None:
-        from orca.orchestrator.insights import gather_transcripts
-
-        transcripts_dir = tmp_path / "transcripts"
-        transcripts_dir.mkdir()
-        (transcripts_dir / "sess-insights.md").write_text("insights transcript")
-
-        sessions = [
-            {"session_id": "sess-insights", "issue_id": "__insights__", "completed_at": None},
-        ]
-
-        result = gather_transcripts(transcripts_dir, sessions, max_lines_per_transcript=200)
-        assert len(result) == 0
-
-    def test_truncates_long_transcripts(self, tmp_path: Path) -> None:
-        from orca.orchestrator.insights import gather_transcripts
-
-        transcripts_dir = tmp_path / "transcripts"
-        transcripts_dir.mkdir()
-        long_content = "\n".join(f"line {i}" for i in range(500))
-        (transcripts_dir / "sess-1.md").write_text(long_content)
-
-        sessions = [{"session_id": "sess-1", "issue_id": "i1", "completed_at": None}]
-
-        result = gather_transcripts(transcripts_dir, sessions, max_lines_per_transcript=50)
-        lines = result["sess-1"].split("\n")
-        assert len(lines) <= 50
-
-    def test_global_budget_cap(self, tmp_path: Path) -> None:
-        from orca.orchestrator.insights import gather_transcripts
-
-        transcripts_dir = tmp_path / "transcripts"
-        transcripts_dir.mkdir()
-        for i in range(10):
-            content = "\n".join(f"line {j}" for j in range(200))
-            (transcripts_dir / f"sess-{i}.md").write_text(content)
-
-        sessions: list[dict[str, Any]] = [
-            {"session_id": f"sess-{i}", "issue_id": f"i{i}", "completed_at": None} for i in range(10)
-        ]
-
-        result = gather_transcripts(transcripts_dir, sessions, max_lines_per_transcript=200, global_budget=500)
-        total_lines = sum(len(v.split("\n")) for v in result.values())
-        assert total_lines <= 500
-
-
 class TestTruncateInsightsSoFar:
     def test_truncates_to_max_lines(self) -> None:
         from orca.orchestrator.insights import truncate_insights_so_far
@@ -182,7 +116,6 @@ class _MockWorker:
         prompt_path: Path | None = None,
         inactivity_timeout: int | None = None,
         pty_session: Any = None,
-        log_path: Path | None = None,
     ) -> WorkerOutcome:
         return WorkerSuccess(result={"outcome": "done"})
 

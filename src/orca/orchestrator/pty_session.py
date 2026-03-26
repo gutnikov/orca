@@ -6,8 +6,6 @@ import shlex
 import subprocess
 from pathlib import Path
 
-from rich.text import Text
-
 logger = logging.getLogger(__name__)
 
 # Unique prefix for orca-managed tmux sessions
@@ -88,17 +86,6 @@ class TmuxSession:
         self._alive = True
         logger.debug("Tmux session %s started", self._session_name)
 
-    def capture_pane(self) -> str:
-        """Capture the current visible pane content with ANSI escape sequences."""
-        result = subprocess.run(
-            ["tmux", "capture-pane", "-t", self._session_name, "-p", "-e"],
-            capture_output=True,
-            text=True,
-        )
-        if result.returncode != 0:
-            return ""
-        return result.stdout
-
     def capture_scrollback(self) -> str:
         """Capture full scrollback history with ANSI escape sequences."""
         result = subprocess.run(
@@ -109,25 +96,6 @@ class TmuxSession:
         if result.returncode != 0:
             return ""
         return result.stdout
-
-    def capture_rich(self) -> Text:
-        """Capture pane content as a Rich Text object."""
-        raw = self.capture_pane()
-        return Text.from_ansi(raw) if raw else Text("")
-
-    def snapshot(self) -> Text:
-        """Capture full scrollback as a Rich Text object."""
-        raw = self.capture_scrollback()
-        return Text.from_ansi(raw) if raw else Text("")
-
-    def resize(self, cols: int, rows: int) -> None:
-        """Resize the tmux window."""
-        self._cols = cols
-        self._rows = rows
-        subprocess.run(
-            ["tmux", "resize-window", "-t", self._session_name, "-x", str(cols), "-y", str(rows)],
-            capture_output=True,
-        )
 
     async def wait(self, timeout: float | None = None) -> int:
         """Wait for the tmux session to end. Returns 0 on normal exit."""

@@ -394,13 +394,12 @@ class Orchestrator:
         mode = "final" if is_final else "incremental"
 
         state_data = serialize_state_for_insights(self.state)
-        transcripts: dict[str, str] = {}
         insights_so_far = truncate_insights_so_far(insights_path.read_text()) if insights_path.exists() else ""
 
         prompt = render_insights_prompt(
             template_path=template_path,
             state=state_data,
-            transcripts=transcripts,
+            transcripts={},
             mode=mode,
             insights_so_far=insights_so_far,
             output_path=str(insights_path),

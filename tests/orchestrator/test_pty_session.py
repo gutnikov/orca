@@ -25,7 +25,7 @@ async def test_spawn_and_capture() -> None:
     try:
         await session.spawn("bash", ["-c", 'echo "hello tmux"; sleep 5'], cwd=".")
         await asyncio.sleep(1.0)
-        output = session.capture_pane()
+        output = session.capture_scrollback()
         assert "hello tmux" in output
     finally:
         session.close()
@@ -40,36 +40,6 @@ async def test_alive_property() -> None:
     finally:
         session.close()
     assert not session.alive
-
-
-@pytest.mark.asyncio()
-async def test_capture_rich_returns_text() -> None:
-    from rich.text import Text
-
-    session = TmuxSession(session_name="test-rich", cols=80, rows=24)
-    try:
-        await session.spawn("bash", ["-c", 'echo "rich test"; sleep 5'], cwd=".")
-        await asyncio.sleep(1.0)
-        result = session.capture_rich()
-        assert isinstance(result, Text)
-        assert "rich test" in str(result)
-    finally:
-        session.close()
-
-
-@pytest.mark.asyncio()
-async def test_snapshot_returns_text() -> None:
-    from rich.text import Text
-
-    session = TmuxSession(session_name="test-snap", cols=80, rows=24)
-    try:
-        await session.spawn("bash", ["-c", 'echo "snapshot test"; sleep 5'], cwd=".")
-        await asyncio.sleep(1.0)
-        result = session.snapshot()
-        assert isinstance(result, Text)
-        assert "snapshot test" in str(result)
-    finally:
-        session.close()
 
 
 @pytest.mark.asyncio()

@@ -57,58 +57,67 @@ def _make_mock_proc(returncode: int, stdout_lines: list[bytes] | None = None) ->
     return proc
 
 
+def _make_mock_pty(
+    exit_code: int = 0, write_result: dict[str, Any] | None = None, result_path: Path | None = None
+) -> MagicMock:
+    """Create a mock PtySession that optionally writes a result file on spawn."""
+    pty = MagicMock()
+    pty.session_name = "mock-session"
+
+    async def _spawn(*args: Any, **kwargs: Any) -> None:
+        if write_result is not None and result_path is not None:
+            result_path.write_text(json.dumps(write_result))
+
+    pty.spawn = AsyncMock(side_effect=_spawn)
+    pty.wait = AsyncMock(return_value=exit_code)
+    pty.close = MagicMock()
+    return pty
+
+
 @pytest.mark.asyncio()
 class TestClaudeCodeWorker:
     async def test_successful_execution(self, tmp_path: Path) -> None:
-        """Mock subprocess exits 0, writes valid result file, assert WorkerSuccess."""
+        """Pty session exits 0, writes valid result file, assert WorkerSuccess."""
         effect = _make_effect()
         result_path = tmp_path / "result.json"
         prompt_path = tmp_path / "prompt.md"
         prompt_path.write_text("Do the thing")
 
         valid_result: dict[str, Any] = {"outcome": "done", "summary": "All done"}
+        pty = _make_mock_pty(exit_code=0, write_result=valid_result, result_path=result_path)
 
-        proc = _make_mock_proc(0)
-
-        async def fake_create(*args: Any, **kwargs: Any) -> MagicMock:
-            result_path.write_text(json.dumps(valid_result))
-            return proc
-
-        with patch("orca.orchestrator.worker.asyncio.create_subprocess_exec", side_effect=fake_create):
-            worker = ClaudeCodeWorker(repo_root=tmp_path)
-            outcome = await worker.execute(effect, tmp_path, result_path, prompt_path)
+        worker = ClaudeCodeWorker(repo_root=tmp_path)
+        outcome = await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty)
 
         assert isinstance(outcome, WorkerSuccess)
         assert outcome.result == valid_result
 
     async def test_nonzero_exit_code(self, tmp_path: Path) -> None:
-        """Mock subprocess exits 1, assert WorkerFailure with 'exit code' in error."""
+        """Pty session exits -1 (timeout), assert WorkerFailure with 'inactivity' in error."""
         effect = _make_effect()
         result_path = tmp_path / "result.json"
         prompt_path = tmp_path / "prompt.md"
         prompt_path.write_text("Do the thing")
 
-        proc = _make_mock_proc(1)
+        pty = _make_mock_pty(exit_code=-1)
 
-        with patch("orca.orchestrator.worker.asyncio.create_subprocess_exec", return_value=proc):
-            worker = ClaudeCodeWorker(repo_root=tmp_path)
-            outcome = await worker.execute(effect, tmp_path, result_path, prompt_path)
+        worker = ClaudeCodeWorker(repo_root=tmp_path)
+        outcome = await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty)
 
         assert isinstance(outcome, WorkerFailure)
-        assert "exit code" in outcome.error
+        assert "inactivity" in outcome.error
 
     async def test_missing_result_file(self, tmp_path: Path) -> None:
-        """Subprocess succeeds but no result file written, assert WorkerFailure with 'result file'."""
+        """Pty session succeeds but no result file written, assert WorkerFailure with 'result file'."""
         effect = _make_effect()
         result_path = tmp_path / "result.json"
         prompt_path = tmp_path / "prompt.md"
         prompt_path.write_text("Do the thing")
 
-        proc = _make_mock_proc(0)
+        pty = _make_mock_pty(exit_code=0)
 
-        with patch("orca.orchestrator.worker.asyncio.create_subprocess_exec", return_value=proc):
-            worker = ClaudeCodeWorker(repo_root=tmp_path)
-            outcome = await worker.execute(effect, tmp_path, result_path, prompt_path)
+        worker = ClaudeCodeWorker(repo_root=tmp_path)
+        outcome = await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty)
 
         assert isinstance(outcome, WorkerFailure)
         assert "result file" in outcome.error
@@ -121,22 +130,16 @@ class TestClaudeCodeWorker:
         prompt_path.write_text("Do the thing")
 
         invalid_result: dict[str, Any] = {"outcome": "done"}  # missing required summary
+        pty = _make_mock_pty(exit_code=0, write_result=invalid_result, result_path=result_path)
 
-        proc = _make_mock_proc(0)
-
-        async def fake_create(*args: Any, **kwargs: Any) -> MagicMock:
-            result_path.write_text(json.dumps(invalid_result))
-            return proc
-
-        with patch("orca.orchestrator.worker.asyncio.create_subprocess_exec", side_effect=fake_create):
-            worker = ClaudeCodeWorker(repo_root=tmp_path)
-            outcome = await worker.execute(effect, tmp_path, result_path, prompt_path)
+        worker = ClaudeCodeWorker(repo_root=tmp_path)
+        outcome = await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty)
 
         assert isinstance(outcome, WorkerFailure)
         assert "summary" in outcome.error
 
     async def test_previous_result_file_deleted(self, tmp_path: Path) -> None:
-        """Pre-existing stale result file: subprocess exits 0 but writes nothing → WorkerFailure."""
+        """Pre-existing stale result file: pty session exits 0 but writes nothing -> WorkerFailure."""
         effect = _make_effect()
         result_path = tmp_path / "result.json"
         prompt_path = tmp_path / "prompt.md"
@@ -146,12 +149,11 @@ class TestClaudeCodeWorker:
         stale_result: dict[str, Any] = {"outcome": "done", "summary": "Stale"}
         result_path.write_text(json.dumps(stale_result))
 
-        proc = _make_mock_proc(0)
-        # subprocess exits 0 but writes nothing new — stale file was deleted
+        pty = _make_mock_pty(exit_code=0)
+        # pty session exits 0 but writes nothing new -- stale file was deleted
 
-        with patch("orca.orchestrator.worker.asyncio.create_subprocess_exec", return_value=proc):
-            worker = ClaudeCodeWorker(repo_root=tmp_path)
-            outcome = await worker.execute(effect, tmp_path, result_path, prompt_path)
+        worker = ClaudeCodeWorker(repo_root=tmp_path)
+        outcome = await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty)
 
         assert isinstance(outcome, WorkerFailure)
         assert "result file" in outcome.error
