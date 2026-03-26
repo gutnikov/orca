@@ -5,13 +5,10 @@ import asyncio
 import contextlib
 import json
 import logging
-import threading
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
-
-from rich.text import Text
 
 from orca.engine.config import parse_config
 from orca.engine.dispatch import build_issue_context, build_result_format
@@ -27,7 +24,6 @@ from orca.engine.types import (
 from orca.orchestrator.branches import BranchMap
 from orca.orchestrator.log import setup_logging
 from orca.orchestrator.persistence import Persistence
-from orca.orchestrator.pty_session import PtySession
 from orca.orchestrator.validation import validate_result
 from orca.orchestrator.worker import ClaudeCodeWorker
 from orca.orchestrator.worktree import WorktreeManager
@@ -222,9 +218,8 @@ async def run(
     branch_name: str,
     config_path: Path,
     insights_enabled: bool = False,
-    pty_registry: dict[str, PtySession] | None = None,
-    frozen_registry: dict[str, list[Text]] | None = None,
-    pty_lock: threading.Lock | None = None,
+    hot_sessions: set[str] | None = None,
+    session_log_paths: dict[str, str] | None = None,
 ) -> None:
     """Main entry point: read task file, set up state, run orchestrator."""
     repo_root = Path.cwd()
@@ -346,9 +341,8 @@ async def run(
         repo_root=repo_root,
         session_sync=session_sync,
         insights_worker=insights_worker,
-        pty_registry=pty_registry,
-        frozen_registry=frozen_registry,
-        pty_lock=pty_lock,
+        hot_sessions=hot_sessions,
+        session_log_paths=session_log_paths,
     )
 
     try:
@@ -386,11 +380,11 @@ def main() -> None:
     if args.headless:
         asyncio.run(run(args.task_file, branch_name, config_path, insights_enabled=args.insights))
     else:
-        # Create shared registries for cross-thread access between
-        # the orchestrator (daemon thread) and TUI (main thread).
-        pty_lock = threading.Lock()
-        pty_registry: dict[str, PtySession] = {}
-        frozen_registry: dict[str, list[Text]] = {}
+        # Shared state between orchestrator (daemon thread) and TUI (main thread).
+        # hot_sessions: TUI writes which session to capture frequently
+        # session_log_paths: orchestrator writes log file paths for each worker
+        hot_sessions: set[str] = set()
+        session_log_paths: dict[str, str] = {}
 
         run_error: BaseException | None = None
 
@@ -403,13 +397,14 @@ def main() -> None:
                         branch_name,
                         config_path,
                         insights_enabled=args.insights,
-                        pty_registry=pty_registry,
-                        frozen_registry=frozen_registry,
-                        pty_lock=pty_lock,
+                        hot_sessions=hot_sessions,
+                        session_log_paths=session_log_paths,
                     )
                 )
             except BaseException as e:
                 run_error = e
+
+        import threading
 
         thread = threading.Thread(target=run_orchestrator, daemon=True)
         thread.start()
@@ -428,9 +423,8 @@ def main() -> None:
             branch_name=branch_name,
             config=config,
             insights_enabled=args.insights,
-            pty_registry=pty_registry,
-            frozen_registry=frozen_registry,
-            pty_lock=pty_lock,
+            hot_sessions=hot_sessions,
+            session_log_paths=session_log_paths,
         )
         app.run()
 

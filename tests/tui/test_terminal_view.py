@@ -1,21 +1,21 @@
 from __future__ import annotations
 
-from rich.text import Text
+from pathlib import Path
 
-from orca.tui.widgets.terminal_view import FrozenTerminal, TerminalView
-
-
-def test_frozen_terminal_stores_lines() -> None:
-    """FrozenTerminal is a simple container of Rich Text lines."""
-    lines = [Text("line 1"), Text("line 2"), Text("line 3")]
-    frozen = FrozenTerminal(lines=lines)
-    assert len(frozen.lines) == 3
-    assert str(frozen.lines[0]) == "line 1"
+from orca.tui.widgets.terminal_view import TerminalView
 
 
 def test_terminal_view_initial_state() -> None:
-    """TerminalView starts in placeholder state with no session or frozen data."""
+    """TerminalView starts in placeholder state with no log path."""
     view = TerminalView()
-    assert view._frozen is None
-    assert view._tmux_session is None
+    assert view._log_path is None
     assert view._timer_handle is None
+
+
+def test_terminal_view_show_log_file_sets_path(tmp_path: Path) -> None:
+    """show_log_file sets the log path."""
+    log = tmp_path / "test.log"
+    log.write_text("hello")
+    view = TerminalView()
+    view.show_log_file(log, active=False)
+    assert view._log_path == log

@@ -1,22 +1,19 @@
 from __future__ import annotations
 
-import threading
 import time
 from pathlib import Path
 
-from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.widgets import Footer, Header
 
 from orca.engine.types import State, StateMachineConfig
-from orca.orchestrator.pty_session import PtySession
 from orca.tui.messages import InsightsSelected, IssueSelected, StateUpdated, WorkerRunSelected
 from orca.tui.state_reader import StateReader
 from orca.tui.widgets.issue_detail import IssueDetail
 from orca.tui.widgets.issue_tree import IssueTree
-from orca.tui.widgets.terminal_view import FrozenTerminal, TerminalView
+from orca.tui.widgets.terminal_view import TerminalView
 
 _STALE_THRESHOLD = 10.0
 _DEADLOCK_THRESHOLD = 30.0
@@ -52,9 +49,8 @@ class OrcaApp(App[None]):
         branch_name: str,
         config: StateMachineConfig | None = None,
         insights_enabled: bool = False,
-        pty_registry: dict[str, PtySession] | None = None,
-        frozen_registry: dict[str, list[Text]] | None = None,
-        pty_lock: threading.Lock | None = None,
+        hot_sessions: set[str] | None = None,
+        session_log_paths: dict[str, str] | None = None,
     ) -> None:
         super().__init__()
         self._reader = StateReader(run_dir)
@@ -63,9 +59,10 @@ class OrcaApp(App[None]):
         self._config = config
         self._insights_enabled = insights_enabled
         self._state: State | None = None
-        self._pty_registry: dict[str, PtySession] = pty_registry if pty_registry is not None else {}
-        self._frozen_registry: dict[str, list[Text]] = frozen_registry if frozen_registry is not None else {}
-        self._pty_lock = pty_lock or threading.Lock()
+        # Shared with orchestrator thread
+        self._hot_sessions: set[str] = hot_sessions if hot_sessions is not None else set()
+        self._session_log_paths: dict[str, str] = session_log_paths if session_log_paths is not None else {}
+        self._selected_session_id: str | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -93,7 +90,7 @@ class OrcaApp(App[None]):
         tree.refresh_tick()
 
     def action_refresh_all(self) -> None:
-        """Refresh the content pane (transcript or insights)."""
+        """Refresh the content pane."""
         detail = self.query_one(IssueDetail)
         detail.refresh_transcript()
 
@@ -114,6 +111,7 @@ class OrcaApp(App[None]):
 
     def on_issue_selected(self, message: IssueSelected) -> None:
         if self._state:
+            self._deselect_session()
             self.query_one(TerminalView).styles.display = "none"
             detail = self.query_one(IssueDetail)
             detail.styles.display = "block"
@@ -123,30 +121,35 @@ class OrcaApp(App[None]):
         detail = self.query_one(IssueDetail)
         terminal = self.query_one(TerminalView)
 
-        with self._pty_lock:
-            live_session = self._pty_registry.get(message.session_id)
-            frozen_lines = self._frozen_registry.get(message.session_id)
+        # Mark this session as hot (frequent capture) and deselect previous
+        self._deselect_session()
+        self._selected_session_id = message.session_id
+        self._hot_sessions.add(message.session_id)
 
-        if live_session is not None:
-            detail.styles.display = "none"
-            terminal.styles.display = "block"
-            terminal.show_live(live_session)
-        elif frozen_lines is not None:
-            detail.styles.display = "none"
-            terminal.styles.display = "block"
-            terminal.show_frozen(FrozenTerminal(lines=frozen_lines))
+        # Find the log file path
+        log_path_str = self._session_log_paths.get(message.session_id)
+        log_path = Path(log_path_str) if log_path_str else None
+
+        detail.styles.display = "none"
+        terminal.styles.display = "block"
+
+        if log_path is not None:
+            terminal.show_log_file(log_path, active=message.active)
         else:
-            # No pty data available — show placeholder
-            detail.styles.display = "none"
-            terminal.styles.display = "block"
-            placeholder = Text(f"No terminal output for session {message.session_id[:8]}...")
-            terminal.show_frozen(FrozenTerminal(lines=[placeholder]))
+            terminal.show_placeholder()
 
     def on_insights_selected(self, message: InsightsSelected) -> None:
+        self._deselect_session()
         self.query_one(TerminalView).styles.display = "none"
         detail = self.query_one(IssueDetail)
         detail.styles.display = "block"
         detail.show_insights(self._run_dir / "insights.md")
+
+    def _deselect_session(self) -> None:
+        """Remove the previous session from hot set."""
+        if self._selected_session_id is not None:
+            self._hot_sessions.discard(self._selected_session_id)
+            self._selected_session_id = None
 
     def _update_status(self) -> None:
         if self._state is None:

@@ -4,13 +4,10 @@ import asyncio
 import contextlib
 import logging
 import re
-import threading
 from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
-
-from rich.text import Text
 
 from orca.engine.reducer import reduce
 from orca.engine.types import (
@@ -64,9 +61,8 @@ class Orchestrator:
         insights_worker: ClaudeCodeWorker | None = None,
         insights_interval: float = 300.0,
         insights_timeout: float = 120.0,
-        pty_registry: dict[str, PtySession] | None = None,
-        frozen_registry: dict[str, list[Text]] | None = None,
-        pty_lock: threading.Lock | None = None,
+        hot_sessions: set[str] | None = None,
+        session_log_paths: dict[str, str] | None = None,
     ) -> None:
         self.config = config
         self.state = state
@@ -83,10 +79,13 @@ class Orchestrator:
         self._insights_interval = insights_interval
         self._insights_timeout = insights_timeout
         self._insights_in_flight = False
-        # Pty registries for TUI terminal rendering (thread-safe via _pty_lock)
-        self._pty_lock = pty_lock or threading.Lock()
-        self._pty_registry: dict[str, PtySession] = pty_registry if pty_registry is not None else {}
-        self._frozen_registry: dict[str, list[Text]] = frozen_registry if frozen_registry is not None else {}
+        # Shared with TUI: which sessions should be captured frequently
+        self._hot_sessions: set[str] = hot_sessions if hot_sessions is not None else set()
+        # Shared with TUI: maps tracking_id -> log file path
+        self._session_log_paths: dict[str, str] = session_log_paths if session_log_paths is not None else {}
+        # Internal: maps tracking_id -> TmuxSession (orchestrator only)
+        self._tmux_sessions: dict[str, PtySession] = {}
+        self._last_save: dict[str, float] = {}
         # Maps asyncio.Task -> (issue_id, tracking_id)
         self._in_flight: dict[asyncio.Task[WorkerOutcome], tuple[str, str]] = {}
         # Track used branch slugs to avoid collisions
@@ -95,19 +94,14 @@ class Orchestrator:
             self._used_slugs.add(branch)
 
     @property
-    def pty_lock(self) -> threading.Lock:
-        """Lock for thread-safe access to pty and frozen registries."""
-        return self._pty_lock
+    def hot_sessions(self) -> set[str]:
+        """Sessions the TUI wants captured frequently."""
+        return self._hot_sessions
 
     @property
-    def pty_registry(self) -> dict[str, PtySession]:
-        """Map of session_id -> live PtySession."""
-        return self._pty_registry
-
-    @property
-    def frozen_registry(self) -> dict[str, list[Text]]:
-        """Map of session_id -> frozen terminal lines (list of Rich Text)."""
-        return self._frozen_registry
+    def session_log_paths(self) -> dict[str, str]:
+        """Map of tracking_id -> log file path (shared with TUI)."""
+        return self._session_log_paths
 
     def _is_terminal(self, issue_id: str) -> bool:
         """Return True if the issue's current state is terminal in config."""
@@ -295,30 +289,15 @@ class Orchestrator:
         state_def = self.config.states.get(effect.state)
         inactivity_timeout = state_def.worker.inactivity_timeout if state_def and state_def.worker else None
 
-        # Create TmuxSession and register it for TUI terminal rendering
+        # Create TmuxSession and register log path for TUI
         tmux_session = PtySession(session_name=tracking_id, cols=120, rows=40)
-
-        # Set up session log path for periodic + final persistence
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
         log_dir = workdir / ".orca" / "sessions"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"{enriched_effect.state}-{timestamp}.log"
 
-        with self._pty_lock:
-            self._pty_registry[tracking_id] = tmux_session
-
-        # Periodically save scrollback every 30s so it survives crashes
-        async def _persist_scrollback() -> None:
-            while True:
-                await asyncio.sleep(30)
-                try:
-                    raw = tmux_session.capture_scrollback()
-                    if raw:
-                        log_path.write_text(raw)
-                except Exception:
-                    pass
-
-        persist_task = asyncio.create_task(_persist_scrollback())
+        self._tmux_sessions[tracking_id] = tmux_session
+        self._session_log_paths[tracking_id] = str(log_path)
 
         try:
             outcome = await worker.execute(
@@ -330,16 +309,6 @@ class Orchestrator:
                 pty_session=tmux_session,
             )
         finally:
-            persist_task.cancel()
-
-            with self._pty_lock:
-                self._pty_registry.pop(tracking_id, None)
-                try:
-                    frozen_snapshot = tmux_session.snapshot()
-                    self._frozen_registry[tracking_id] = [frozen_snapshot]
-                except Exception:
-                    self._frozen_registry[tracking_id] = []
-
             # Final scrollback save before killing the session
             try:
                 raw = tmux_session.capture_scrollback()
@@ -348,6 +317,7 @@ class Orchestrator:
             except Exception:
                 pass
 
+            self._tmux_sessions.pop(tracking_id, None)
             tmux_session.close()
 
         return outcome
@@ -483,11 +453,40 @@ class Orchestrator:
             if self._is_terminal(root_issue_id):
                 break
 
+    async def _session_capture_loop(self) -> None:
+        """Periodically capture tmux scrollback to log files.
+
+        Hot sessions (selected in TUI) are captured every 1s.
+        Cold sessions are captured every 10s.
+        """
+        import time
+
+        while True:
+            await asyncio.sleep(1.0)
+            now = time.monotonic()
+            for tid, tmux in list(self._tmux_sessions.items()):
+                is_hot = tid in self._hot_sessions
+                interval = 1.0 if is_hot else 10.0
+                last = self._last_save.get(tid, 0.0)
+                if now - last < interval:
+                    continue
+                try:
+                    log_path_str = self._session_log_paths.get(tid)
+                    if log_path_str and tmux.alive:
+                        raw = tmux.capture_scrollback()
+                        if raw:
+                            Path(log_path_str).write_text(raw)
+                        self._last_save[tid] = now
+                except Exception:
+                    pass
+
     async def run(self, root_issue_id: str, initial_effects: list[Effect]) -> None:
         """Drive the orchestrator event loop until the root issue is terminal."""
         insights_task: asyncio.Task[None] | None = None
         if self._insights_worker is not None:
             insights_task = asyncio.create_task(self._insights_loop(root_issue_id))
+
+        capture_task = asyncio.create_task(self._session_capture_loop())
 
         pending: list[DispatchWorkerEffect] = []
         self._route_effects(initial_effects, pending)
@@ -621,6 +620,10 @@ class Orchestrator:
         if self._in_flight:
             await asyncio.gather(*self._in_flight.keys(), return_exceptions=True)
         self._in_flight.clear()
+
+        capture_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await capture_task
 
         if insights_task is not None:
             insights_task.cancel()
