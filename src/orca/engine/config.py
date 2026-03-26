@@ -96,12 +96,17 @@ def _parse_state(name: str, raw_data: dict[str, Any] | None) -> StateDef:
         result_format: dict[str, ResultFormatField] = {}
         for field_name, field_data in rf_data.items():
             result_format[field_name] = _parse_result_format_field(field_name, field_data)
+        model: str | None = worker_data.get("model")
+        raw_args = worker_data.get("args")
+        args: tuple[str, ...] | None = tuple(str(a) for a in raw_args) if raw_args is not None else None
         worker = WorkerDef(
             kind=kind,
             prompt=prompt,
             result_format=result_format,
             timeout=timeout,
             inactivity_timeout=inactivity_timeout,
+            model=model,
+            args=args,
         )
 
     on: dict[str, OnRule] = {}
