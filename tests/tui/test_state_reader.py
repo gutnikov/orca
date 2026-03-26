@@ -12,6 +12,7 @@ def _make_state(title: str = "Test Issue") -> State:
     return State(
         issues={
             "issue-1": Issue(
+                type="default",
                 fields={"title": title, "description": "A test issue"},
                 state="triage",
                 worker_active=False,

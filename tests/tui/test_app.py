@@ -15,6 +15,7 @@ def _make_state(title: str = "Root Task", state_name: str = "triage") -> State:
     return State(
         issues={
             "root-1": Issue(
+                type="default",
                 fields={"title": title, "description": "Root description"},
                 state=state_name,
                 worker_active=False,

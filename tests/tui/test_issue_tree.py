@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 from textual.app import App, ComposeResult
 
-from orca.engine.types import EventLogEntry, Issue, State, StateDef, StateMachineConfig
+from orca.engine.types import EventLogEntry, Issue, State, StateDef, StateMachineConfig, TypeDef
 from orca.tui.widgets.issue_tree import (
     IssueTree,
     _compute_failed_states,
@@ -27,6 +27,7 @@ def _make_issue(
     event_log: list[EventLogEntry] | None = None,
 ) -> Issue:
     return Issue(
+        type="default",
         fields={"title": title, "description": "desc"},
         state=state,
         worker_active=worker_active,
@@ -50,9 +51,8 @@ def _make_config(
             "done": StateDef(terminal=True),
         }
     return StateMachineConfig(
-        issue_fields={},
-        initial=initial,
-        states=states,
+        root_type="default",
+        types={"default": TypeDef(fields={}, initial=initial, states=states)},
     )
 
 
