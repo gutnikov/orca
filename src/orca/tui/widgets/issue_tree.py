@@ -79,7 +79,9 @@ def _progress_bar_text(
 
 def _pending_steps(config: StateMachineConfig, visit_counts: dict[str, int]) -> list[str]:
     """Return non-terminal states not yet visited."""
-    return [name for name, sdef in config.root_type_def.states.items() if not sdef.terminal and name not in visit_counts]
+    return [
+        name for name, sdef in config.root_type_def.states.items() if not sdef.terminal and name not in visit_counts
+    ]
 
 
 def _extract_result_outcomes(event_log: list[EventLogEntry]) -> dict[str, str]:

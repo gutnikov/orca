@@ -1,4 +1,5 @@
 """Typed decomposition scenario: epic -> task with different flows."""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -76,10 +77,12 @@ def _clock(value: str = TS) -> Callable[[], str]:
 
 def _counter() -> Callable[[], str]:
     n = 0
+
     def gen() -> str:
         nonlocal n
         n += 1
         return f"GEN-{n}"
+
     return gen
 
 
@@ -91,9 +94,11 @@ class TestTypedDecomposition:
 
         # Create epic — starts in scoping
         state, effects = reduce(
-            config, state,
+            config,
+            state,
             CreateEvent(issue_id="EPIC-1", fields={"title": "Big feature", "scope": "all"}, timestamp=TS),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
         assert state.issues["EPIC-1"].type == "epic"
         assert state.issues["EPIC-1"].state == "scoping"
@@ -103,7 +108,8 @@ class TestTypedDecomposition:
 
         # Epic decomposes into 2 tasks
         state, effects = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(
                 issue_id="EPIC-1",
                 result={
@@ -115,7 +121,8 @@ class TestTypedDecomposition:
                 },
                 timestamp=TS,
             ),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         # Epic transitions to done via `then: done`
@@ -137,9 +144,11 @@ class TestTypedDecomposition:
         # Complete both tasks
         for cid in child_ids:
             state, _ = reduce(
-                config, state,
+                config,
+                state,
                 WorkerResultEvent(issue_id=cid, result={"outcome": "done"}, timestamp=TS),
-                gen, _clock(),
+                gen,
+                _clock(),
             )
             assert state.issues[cid].state == "done"
 
@@ -149,14 +158,17 @@ class TestTypedDecomposition:
         state = State(issues={}, worker_queues={})
 
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             CreateEvent(issue_id="EPIC-1", fields={"title": "Feature", "scope": "all"}, timestamp=TS),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         # Worker overrides one child to be an epic (recursive decomposition)
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(
                 issue_id="EPIC-1",
                 result={
@@ -168,7 +180,8 @@ class TestTypedDecomposition:
                 },
                 timestamp=TS,
             ),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         children = {
@@ -218,19 +231,23 @@ types:
         state = State(issues={}, worker_queues={})
 
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             CreateEvent(issue_id="E1", fields={"title": "X"}, timestamp=TS),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         state, effects = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(
                 issue_id="E1",
                 result={"outcome": "decompose", "sub_issues": [{"key": "a", "fields": {"title": "A"}}]},
                 timestamp=TS,
             ),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         error_effects = [e for e in effects if isinstance(e, ErrorEffect)]
@@ -244,13 +261,16 @@ types:
         state = State(issues={}, worker_queues={})
 
         state, _ = reduce(
-            config, state,
+            config,
+            state,
             CreateEvent(issue_id="E1", fields={"title": "X", "scope": "all"}, timestamp=TS),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         state, effects = reduce(
-            config, state,
+            config,
+            state,
             WorkerResultEvent(
                 issue_id="E1",
                 result={
@@ -259,7 +279,8 @@ types:
                 },
                 timestamp=TS,
             ),
-            gen, _clock(),
+            gen,
+            _clock(),
         )
 
         error_effects = [e for e in effects if isinstance(e, ErrorEffect)]

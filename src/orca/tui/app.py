@@ -221,9 +221,11 @@ class OrcaApp(App[None]):
         root_id = self._find_root_issue()
         if root_id and root_id in self._state.issues:
             root = self._state.issues[root_id]
-            if self._config and root.state in self._config.root_type_def.states and self._config.root_type_def.states[root.state].terminal:
-                self.sub_title = "completed"
-                return
+            if self._config:
+                type_states = self._config.root_type_def.states
+                if root.state in type_states and type_states[root.state].terminal:
+                    self.sub_title = "completed"
+                    return
         elapsed = time.time() - self._reader.last_mtime if self._reader.last_mtime > 0 else 0
         if elapsed < _STALE_THRESHOLD:
             self.sub_title = "running"
