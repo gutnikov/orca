@@ -5,10 +5,14 @@ import asyncio
 import contextlib
 import json
 import logging
+import sys
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
+
+import yaml
 
 from orca.engine.config import parse_config
 from orca.engine.dispatch import build_issue_context, build_result_format
@@ -22,6 +26,7 @@ from orca.engine.types import (
     WorkerResultEvent,
 )
 from orca.orchestrator.branches import BranchMap
+from orca.orchestrator.config_types import SlackConfig, parse_integrations
 from orca.orchestrator.log import setup_logging
 from orca.orchestrator.persistence import Persistence
 from orca.orchestrator.validation import validate_result
@@ -213,6 +218,27 @@ def _recover_effects(
     return recovered_events, recovered_effects
 
 
+async def _start_slack_mcp_server(slack_config: SlackConfig) -> tuple[asyncio.subprocess.Process, str]:
+    """Start the slack-hitl MCP server subprocess, return (process, sse_url)."""
+    proc = await asyncio.create_subprocess_exec(
+        sys.executable,
+        "-m",
+        "orca.mcp_servers.slack_hitl.server",
+        "--bot-token",
+        slack_config.bot_token,
+        "--app-token",
+        slack_config.app_token,
+        "--port",
+        "0",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    assert proc.stdout is not None
+    line = await asyncio.wait_for(proc.stdout.readline(), timeout=30)
+    port = int(line.decode().strip())
+    return proc, f"http://127.0.0.1:{port}/sse"
+
+
 async def run(
     task_file: Path,
     branch_name: str,
@@ -230,6 +256,8 @@ async def run(
 
     # Load config
     config = parse_config(config_path.read_text())
+    raw_config: dict[str, Any] = yaml.safe_load(config_path.read_text())
+    integrations = parse_integrations(raw_config.get("integrations"))
 
     # Set up Persistence and BranchMap
     persistence = Persistence(repo_root, branch_name)
@@ -319,6 +347,13 @@ async def run(
     # Find root issue ID
     root_issue_id = _find_root_issue(state)
 
+    # Start Slack HITL MCP server if configured
+    slack_mcp_proc: asyncio.subprocess.Process | None = None
+    slack_mcp_url: str | None = None
+    if integrations.slack is not None:
+        slack_mcp_proc, slack_mcp_url = await _start_slack_mcp_server(integrations.slack)
+        logger.info("Slack HITL MCP server started", extra={"event": "slack_mcp_started", "url": slack_mcp_url})
+
     # Set up worker, session sync, and orchestrator
     worker = ClaudeCodeWorker(repo_root)
 
@@ -344,6 +379,7 @@ async def run(
         hot_sessions=hot_sessions,
         session_log_paths=session_log_paths,
         insights_state=insights_state,
+        slack_mcp_url=slack_mcp_url,
     )
 
     try:
@@ -355,6 +391,10 @@ async def run(
             exc_info=True,
         )
         raise
+    finally:
+        if slack_mcp_proc is not None:
+            slack_mcp_proc.terminate()
+            await slack_mcp_proc.wait()
 
     logger.info(
         "Run completed",
