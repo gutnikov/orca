@@ -467,6 +467,10 @@ def main() -> None:
     raw_config: dict[str, Any] = yaml.safe_load(config_path.read_text())
     orch_config = parse_orchestrator_config(raw_config)
 
+    if args.base is not None and args.branch is None:
+        print("Error: --base requires -b/--branch", file=sys.stderr)
+        raise SystemExit(1)
+
     if args.branch is not None:
         branch_name = args.branch
         base_ref: str | None = resolve_base_ref(args.base, orch_config.base_branch)
@@ -536,7 +540,6 @@ def main() -> None:
 
         # Surface orchestrator errors before exiting
         if run_error is not None:
-            import sys
             import traceback
 
             print("\nOrchestrator error:", file=sys.stderr)

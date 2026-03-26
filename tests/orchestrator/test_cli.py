@@ -38,6 +38,26 @@ class TestBuildParser:
         assert args.branch is None
         assert args.base is None
 
+    def test_base_without_branch_errors(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+        """--base without -b should error, not silently ignore."""
+        # We need to test main() directly since build_parser allows the combo;
+        # the validation is in main(). Instead, test via runner module.
+        from unittest.mock import patch as mock_patch
+
+        from orca.orchestrator.runner import main
+
+        (tmp_path / "orca.yml").write_text("initial: todo")
+        (tmp_path / "task.md").write_text("title\ndesc")
+        with (
+            mock_patch("orca.orchestrator.runner.Path.cwd", return_value=tmp_path),
+            mock_patch("sys.argv", ["orca", "task.md", "--base", "origin/v2"]),
+            pytest.raises(SystemExit) as exc_info,
+        ):
+            main()
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "--base requires -b" in captured.err
+
 
 class TestResolveConfigPath:
     def test_default_returns_orca_yml(self, tmp_path: Path) -> None:
