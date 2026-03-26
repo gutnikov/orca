@@ -8,8 +8,21 @@ from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import Static
 
-# Strip background colors and reverse video from ANSI output
-_BG_RE = re.compile(r"\x1b\[(?:48;[25];\d+(?:;\d+)*|(?:27|7))m")
+# Strip all background colors, reverse video, and near-white foregrounds
+# that clash with the TUI's dark theme.
+_STRIP_RE = re.compile(
+    r"\x1b\["
+    r"(?:"
+    r"4[0-7]"  # basic bg (40-47)
+    r"|48;[25];\d+(?:;\d+)*"  # 256-color/truecolor bg
+    r"|49"  # default bg reset
+    r"|10[0-7]"  # bright bg (100-107)
+    r"|7|27"  # reverse video on/off
+    r"|38;5;231"  # bright white fg (clashes on dark theme)
+    r"|38;2;248;248;242"  # near-white fg from code blocks
+    r"|38;2;255;255;255"  # pure white fg
+    r")m"
+)
 
 _PLACEHOLDER = "*Select a worker run to view its terminal output*"
 
@@ -67,8 +80,8 @@ class TerminalView(VerticalScroll):
             raw = self._log_path.read_text(errors="replace")
             if not raw:
                 return
-            # Strip background colors and reverse video
-            raw = _BG_RE.sub("", raw)
+            # Strip backgrounds, reverse video, and white foregrounds
+            raw = _STRIP_RE.sub("", raw)
             content = Text.from_ansi(raw)
             self._static.update(content)
             if self.max_scroll_y - self.scroll_y < 5:

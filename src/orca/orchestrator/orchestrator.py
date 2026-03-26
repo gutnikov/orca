@@ -466,7 +466,7 @@ class Orchestrator:
             now = time.monotonic()
             for tid, tmux in list(self._tmux_sessions.items()):
                 is_hot = tid in self._hot_sessions
-                interval = 1.0 if is_hot else 10.0
+                interval = 0.5 if is_hot else 10.0
                 last = self._last_save.get(tid, 0.0)
                 if now - last < interval:
                     continue

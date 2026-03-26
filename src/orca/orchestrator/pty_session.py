@@ -2,16 +2,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 import shlex
 import subprocess
 from pathlib import Path
 
 from rich.text import Text
-
-# Strip background colors and reverse video so Textual's theme background shows through.
-# Matches: 48;5;N (256-color bg), 48;2;R;G;B (truecolor bg), 7 (reverse video), 27 (reverse off).
-_BG_RE = re.compile(r"\x1b\[(?:48;[25];\d+(?:;\d+)*|(?:27|7))m")
 
 logger = logging.getLogger(__name__)
 
@@ -116,20 +111,14 @@ class TmuxSession:
         return result.stdout
 
     def capture_rich(self) -> Text:
-        """Capture pane content as a Rich Text object with colors."""
+        """Capture pane content as a Rich Text object."""
         raw = self.capture_pane()
-        if not raw:
-            return Text("")
-        raw = _BG_RE.sub("", raw)
-        return Text.from_ansi(raw)
+        return Text.from_ansi(raw) if raw else Text("")
 
     def snapshot(self) -> Text:
-        """Capture full scrollback as a Rich Text object (for frozen display)."""
+        """Capture full scrollback as a Rich Text object."""
         raw = self.capture_scrollback()
-        if not raw:
-            return Text("")
-        raw = _BG_RE.sub("", raw)
-        return Text.from_ansi(raw)
+        return Text.from_ansi(raw) if raw else Text("")
 
     def resize(self, cols: int, rows: int) -> None:
         """Resize the tmux window."""
