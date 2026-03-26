@@ -131,7 +131,7 @@ The agent has full latitude to suggest any workflow improvement, including but n
 
 **Evidence-based:** The agent forms hypotheses from multiple sources:
 - **Session logs** (`.orca/sessions/*.log`) — what workers actually spent time doing, where they got stuck
-- **Prompt templates** (`prompts/*.md.j2` or as referenced in `orca.yml`) — what workers were instructed to do. Comparing instructions vs actual behavior reveals prompt issues (unclear guidance, missing context, conflicting instructions)
+- **Prompt templates** (paths discovered from `orca.yml` — each state's `worker.prompt` field) — what workers were instructed to do. Comparing instructions vs actual behavior reveals prompt issues (unclear guidance, missing context, conflicting instructions)
 - **Timing data** (`sessions.json`) — how long each step took, patterns across runs
 - **State data** (`state.json`) — visit counts, failure counts, current pipeline state
 - **Orca config** (`orca.yml`) — workflow structure, transition rules, settings
