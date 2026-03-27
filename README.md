@@ -8,6 +8,17 @@ Orca orchestrates fleets of AI agents that decompose, plan, build, and merge cod
 
 ![Orca TUI](docs/screenshots/tui.png)
 
+## Features
+
+- **Multi-stage YAML workflows** — define states, transitions, decomposition, and retries
+- **Parallel agents in isolated git worktrees** — no merge conflicts between workers
+- **Multiple worker backends** — Claude Code and OpenCode, with per-worker model and args
+- **Typed issue flows** — different issue types with independent state machines
+- **Concurrent runs** — multiple orca processes in the same repo via `-b`/`--base`
+- **Human-in-the-loop** — Slack integration for agent-to-human conversations mid-workflow
+- **Live TUI** — progress tree, session terminals, result badges, insights monitoring
+- **Headless mode** — run without TUI for CI or background execution
+
 ## Install
 
 ```bash
@@ -20,13 +31,16 @@ Update to latest:
 pipx install --force "git+ssh://git@github.com/gutnikov/orca.git"
 ```
 
-## Example
+## Quick Start
 
-See [`example/`](example/) for a complete working setup — config, prompts, and a sample task file. Copy it into your repo to get started:
+Copy the example config into your repo and run:
 
 ```bash
 cp -r example/* your-repo/
+orca task.md
 ```
+
+See [`example/`](example/) for the full setup — config, prompts, and a sample task file.
 
 ## Setup
 
