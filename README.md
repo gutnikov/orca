@@ -262,6 +262,21 @@ types:
 
 The flat format (`issue:` / `states:` / `initial:` at the top level) is still supported and recommended for single-type workflows.
 
+## Integrations
+
+**Slack (Human-in-the-loop)** — Orca includes a built-in MCP server that lets workers conduct multi-turn Slack DM conversations with humans during workflow execution. Add to your `orca.yml`:
+
+```yaml
+integrations:
+  slack:
+    bot_token_env: SLACK_BOT_TOKEN
+    app_token_env: SLACK_APP_TOKEN
+```
+
+Your Slack app needs Bot Token Scopes (`chat:write`, `im:write`) and an App-Level Token with `connections:write` (Socket Mode).
+
+**Insights** — pass `--insights` to spawn a monitoring agent that watches the pipeline for errors, loops, and slow workers, surfacing findings as interactive entries in the TUI.
+
 ## TUI keyboard shortcuts
 
 | Key | Action |
