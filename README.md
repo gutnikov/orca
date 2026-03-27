@@ -163,6 +163,19 @@ states:
       implement: implementing
 ```
 
+**Worker backends** — use Claude Code or OpenCode as workers, with optional model and args overrides:
+
+```yaml
+states:
+  implementing:
+    worker:
+      kind: opencode          # or claude-code
+      prompt: prompts/implement.md
+      model: gpt-4o           # optional model override
+      args: ["--max-turns", "100"]  # additional CLI args
+      timeout: 600            # inactivity timeout in seconds
+```
+
 **Serialized execution** — limit parallel workers per state:
 
 ```yaml
@@ -181,6 +194,19 @@ states:
     worker:
       timeout: 300        # seconds per worker run
     max_visits: 2         # max times an issue can enter this state
+```
+
+**Concurrent runs** — run multiple orca processes in the same repo, each isolated in its own integration branch:
+
+```bash
+orca task-auth.md -b feature-auth
+orca task-billing.md -b feature-billing
+```
+
+Set the default base ref in config:
+
+```yaml
+base_branch: origin/main
 ```
 
 ## TUI keyboard shortcuts
