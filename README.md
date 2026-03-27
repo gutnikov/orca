@@ -209,6 +209,59 @@ Set the default base ref in config:
 base_branch: origin/main
 ```
 
+**Typed issue flows** *(advanced)* — define multiple issue types with independent fields and state machines. Decomposed children can follow a different flow than their parent:
+
+```yaml
+root_type: epic
+
+types:
+  epic:
+    fields:
+      title: {type: string, description: "Title"}
+    initial: scoping
+    states:
+      scoping:
+        worker:
+          kind: claude-code
+          prompt: prompts/scope.md
+          result_format:
+            outcome:
+              type: enum
+              values: [ready, decompose]
+            sub_issues:
+              type: list
+              items: "$issue"
+              required_when: [decompose]
+        on:
+          ready: done
+          decompose:
+            action: decompose
+            child_type: task    # children use a different type
+            then: done
+      done:
+        terminal: true
+
+  task:
+    fields:
+      title: {type: string, description: "Title"}
+    initial: implementing
+    states:
+      implementing:
+        worker:
+          kind: claude-code
+          prompt: prompts/impl.md
+          result_format:
+            outcome:
+              type: enum
+              values: [done]
+        on:
+          done: done
+      done:
+        terminal: true
+```
+
+The flat format (`issue:` / `states:` / `initial:` at the top level) is still supported and recommended for single-type workflows.
+
 ## TUI keyboard shortcuts
 
 | Key | Action |
