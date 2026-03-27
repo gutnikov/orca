@@ -108,18 +108,26 @@ Save it as `task.md` (or any filename).
 orca task.md
 ```
 
-Orca uses the current git branch as the base, then:
+Orca creates an integration branch from your current HEAD, then:
 - Spawns a worktree per agent
 - Routes each issue through the state machine
 - Shows live progress in the TUI
+
+For named runs (enables concurrent execution):
+
+```bash
+orca task.md -b feature-auth
+```
 
 ## Options
 
 | Flag | Description |
 |------|-------------|
 | `-w WORKFLOW` | Workflow shorthand. `-w develop` loads `orca.develop.yml`. Default: `orca.yml`. |
-| `--headless` | Run without TUI, log to file. |
-| `--insights` | Enable progress monitoring agent. |
+| `-b BRANCH` | Integration branch name. Enables concurrent run isolation. |
+| `--base REF` | Base git ref to branch from. Requires `-b`. Default: config's `base_branch` or `origin/main`. |
+| `--headless` | Run without TUI (headless mode). |
+| `--insights` | Enable insights agent for progress monitoring. |
 
 ## Workflow features
 
