@@ -81,7 +81,7 @@ states:
 
 ### 2. Write worker prompts
 
-Prompts are Jinja2 templates. Create `prompts/implement.md`:
+Prompts are Jinja2 templates. See the [Writing Worker Prompts](docs/writing-prompts.md) guide for principles, mechanics, and a checklist. Create `prompts/implement.md`:
 
 ```markdown
 You are working on: {{ issue.title }}
