@@ -297,6 +297,7 @@ async def run(
     hot_sessions: set[str] | None = None,
     session_log_paths: dict[str, str] | None = None,
     insights_state: dict[str, str] | None = None,
+    workflow: str = "default",
 ) -> None:
     """Main entry point: read task file, set up state, run orchestrator."""
     repo_root = Path.cwd()
@@ -309,12 +310,13 @@ async def run(
     raw_config: dict[str, Any] = yaml.safe_load(config_path.read_text())
     integrations = parse_integrations(raw_config.get("integrations"))
 
-    # Set up Persistence and BranchMap
-    persistence = Persistence(repo_root, branch_name)
-    branches = BranchMap(repo_root, branch_name)
+    # Set up run directory and persistence
+    run_dir = repo_root / ".orca" / "runs" / branch_name / workflow
+    persistence = Persistence(repo_root, branch_name, workflow)
+    branches = BranchMap(repo_root, branch_name, workflow)
     worktree_mgr = WorktreeManager(repo_root, branch_name)
 
-    log_path = repo_root / ".orca" / "runs" / branch_name / "orca.log.jsonl"
+    log_path = run_dir / "orca.log.jsonl"
     setup_logging(log_path)
 
     initial_effects: list[Effect] = []
@@ -335,7 +337,6 @@ async def run(
         # Clean up sessions from the previous (crashed) run
         from orca.orchestrator.session_sync import SessionManifest
 
-        run_dir = repo_root / ".orca" / "runs" / branch_name
         manifest = SessionManifest(run_dir)
         manifest.mark_orphans_completed(_now())
 
@@ -418,7 +419,6 @@ async def run(
     from orca.orchestrator.orchestrator import Orchestrator
     from orca.orchestrator.session_sync import SessionSync
 
-    run_dir = repo_root / ".orca" / "runs" / branch_name
     session_sync = SessionSync(run_dir=run_dir)
 
     orchestrator = Orchestrator(
@@ -499,13 +499,24 @@ def main() -> None:
         branch_name = resolve_branch()
         base_ref = None
 
+    workflow = args.workflow or "default"
+
     # Validate task file exists before starting
     if not args.task_file.exists():
         print(f"Error: task file not found: {args.task_file}")
         raise SystemExit(1)
 
     if args.headless:
-        asyncio.run(run(args.task_file, branch_name, config_path, base_ref=base_ref, insights_enabled=args.insights))
+        asyncio.run(
+            run(
+                args.task_file,
+                branch_name,
+                config_path,
+                base_ref=base_ref,
+                insights_enabled=args.insights,
+                workflow=workflow,
+            )
+        )
     else:
         # Shared state between orchestrator (daemon thread) and TUI (main thread).
         # hot_sessions: TUI writes which session to capture frequently
@@ -529,6 +540,7 @@ def main() -> None:
                         hot_sessions=hot_sessions,
                         session_log_paths=session_log_paths,
                         insights_state=insights_state,
+                        workflow=workflow,
                     )
                 )
             except BaseException as e:
@@ -545,7 +557,7 @@ def main() -> None:
             print("Error: textual is not installed. Install with: uv pip install 'orca[tui]'")
             raise SystemExit(1) from None
 
-        run_dir = repo_root / ".orca" / "runs" / branch_name
+        run_dir = repo_root / ".orca" / "runs" / branch_name / workflow
         config = parse_config(config_path.read_text())
 
         app = OrcaApp(
