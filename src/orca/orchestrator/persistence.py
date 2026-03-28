@@ -7,8 +7,8 @@ from orca.engine.types import State
 
 
 class Persistence:
-    def __init__(self, repo_root: Path, branch_name: str) -> None:
-        self.state_path = repo_root / ".orca" / "runs" / branch_name / "state.json"
+    def __init__(self, repo_root: Path, branch_name: str, workflow: str = "default") -> None:
+        self.state_path = repo_root / ".orca" / "runs" / branch_name / workflow / "state.json"
 
     def save(self, state: State) -> None:
         self.state_path.parent.mkdir(parents=True, exist_ok=True)

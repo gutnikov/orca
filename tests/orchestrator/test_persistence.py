@@ -36,10 +36,10 @@ class TestPersistence:
         assert persistence.exists()
 
     def test_state_path_uses_branch_name(self, tmp_path: Path) -> None:
-        """Assert path is {root}/.orca/runs/{branch}/state.json."""
-        persistence = Persistence(tmp_path, "feature/test")
+        """Assert path is {root}/.orca/runs/{branch}/{workflow}/state.json."""
+        persistence = Persistence(tmp_path, "feature/test", "prd")
 
-        expected_path = tmp_path / ".orca" / "runs" / "feature/test" / "state.json"
+        expected_path = tmp_path / ".orca" / "runs" / "feature/test" / "prd" / "state.json"
         assert persistence.state_path == expected_path
 
     def test_atomic_write(self, tmp_path: Path) -> None:
