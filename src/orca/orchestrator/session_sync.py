@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 
 class SessionManifest:
-    """Read/write .orca/runs/{branch}/sessions.json."""
+    """Read/write .orca/runs/{branch}/{workflow}/sessions.json."""
 
     def __init__(self, run_dir: Path) -> None:
         self.path = run_dir / "sessions.json"
