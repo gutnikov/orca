@@ -36,17 +36,35 @@ from orca.orchestrator.worktree import WorktreeManager
 logger = logging.getLogger(__name__)
 
 
-def parse_task_file(path: Path) -> tuple[str, str]:
-    """Read a task file and return (title, description).
+def parse_task_file(path: Path) -> dict[str, Any]:
+    """Read a task file and return issue fields as a dict.
 
-    The first line is the title; the remainder (stripped) is the description.
-    All values have leading/trailing whitespace removed.
+    Supports two formats:
+    - YAML: if content parses as a YAML dict, return its fields directly.
+      Optional ``---`` frontmatter delimiters are stripped before parsing.
+    - Plain text (legacy): first line is the title, remainder is the description.
     """
     text = path.read_text()
+
+    # Strip optional frontmatter delimiters
+    stripped = text.strip()
+    if stripped.startswith("---"):
+        body = stripped.split("\n", 1)[1] if "\n" in stripped else ""
+        # Remove closing delimiter if present
+        if "\n---" in body:
+            body = body[: body.index("\n---")]
+        parsed = yaml.safe_load(body)
+    else:
+        parsed = yaml.safe_load(text)
+
+    if isinstance(parsed, dict):
+        return {k: v for k, v in parsed.items() if v is not None}
+
+    # Legacy plain-text fallback: first line = title, rest = description
     lines = text.split("\n", 1)
     title = lines[0].strip()
     description = lines[1].strip() if len(lines) > 1 else ""
-    return title, description
+    return {"title": title, "description": description}
 
 
 def _generate_id() -> str:
@@ -284,7 +302,7 @@ async def run(
     repo_root = Path.cwd()
 
     # Read task file
-    title, description = parse_task_file(task_file)
+    fields = parse_task_file(task_file)
 
     # Load config
     config = parse_config(config_path.read_text())
@@ -362,7 +380,6 @@ async def run(
 
         # Create initial state and event
         state = State(issues={}, worker_queues={})
-        fields = {"title": title, "description": description}
         create_event = CreateEvent(
             issue_id=root_issue_id,
             fields=fields,
