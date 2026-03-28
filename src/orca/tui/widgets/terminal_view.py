@@ -50,6 +50,7 @@ class TerminalView(VerticalScroll):
         height: 1;
         background: #1e1e30;
         padding: 0 1;
+        margin: 0 0 1 0;
     }
     TerminalView #tab-session, TerminalView #tab-result {
         width: auto;
@@ -135,6 +136,7 @@ class TerminalView(VerticalScroll):
             self._render_result()
         else:
             self._active_tab = "session"
+            self._last_mtime = 0.0  # Force re-read after showing result
             self._render_log()
         self._render_tabs()
 
