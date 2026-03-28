@@ -6,15 +6,17 @@ from pathlib import Path
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer
 
 from orca.engine.types import State, StateMachineConfig
-from orca.tui.messages import InsightEntrySelected, InsightsSelected, IssueSelected, StateUpdated, WorkerRunSelected
+from orca.tui.messages import InsightEntrySelected, IssueSelected, PhaseSelected, StateUpdated, WorkerRunSelected
 from orca.tui.state_reader import StateReader
 from orca.tui.widgets.header import OrcaHeader
+from orca.tui.widgets.insights_modal import InsightsModal
 from orca.tui.widgets.issue_detail import IssueDetail
 from orca.tui.widgets.issue_tree import IssueTree
+from orca.tui.widgets.phases_panel import PhasesPanel
 from orca.tui.widgets.terminal_view import TerminalView
 
 _STALE_THRESHOLD = 10.0
@@ -33,6 +35,11 @@ class OrcaApp(App[None]):
     #main-panels {
         height: 1fr;
     }
+    #left-column {
+        width: 1fr;
+        min-width: 30;
+        max-width: 60;
+    }
     #terminal-view {
         display: none;
     }
@@ -46,6 +53,8 @@ class OrcaApp(App[None]):
         Binding("j", "scroll_detail_down", "Scroll ↓", show=False),
         Binding("k", "scroll_detail_up", "Scroll ↑", show=False),
         Binding("t", "toggle_tab", "Toggle Tab", show=False),
+        Binding("i", "toggle_insights", "Insights", show=False),
+        Binding("escape", "close_modal", "Close", show=False),
     ]
 
     def __init__(
@@ -79,9 +88,12 @@ class OrcaApp(App[None]):
     def compose(self) -> ComposeResult:
         yield OrcaHeader(branch_name=self._branch_name, config=self._config)
         with Horizontal(id="main-panels"):
-            yield IssueTree(config=self._config)
+            with Vertical(id="left-column"):
+                yield IssueTree(config=self._config)
+                yield PhasesPanel()
             yield IssueDetail()
             yield TerminalView()
+        yield InsightsModal()
         yield Footer()
 
     def on_mount(self) -> None:
@@ -99,6 +111,8 @@ class OrcaApp(App[None]):
     def _tick_spinners(self) -> None:
         tree = self.query_one(IssueTree)
         tree.refresh_tick()
+        phases = self.query_one(PhasesPanel)
+        phases.refresh_tick(tree._tick)
 
     def action_focus_tree(self) -> None:
         self.query_one(IssueTree).focus()
@@ -116,6 +130,10 @@ class OrcaApp(App[None]):
         tree.update_state(message.state, message.sessions)
         header = self.query_one(OrcaHeader)
         header.update_state(message.state, message.sessions)
+        # Refresh phases panel if it's showing an issue
+        phases = self.query_one(PhasesPanel)
+        if phases._issue_id:
+            phases.show_phases(phases._issue_id, message.sessions)
         self._update_status()
 
     def on_issue_selected(self, message: IssueSelected) -> None:
@@ -125,6 +143,9 @@ class OrcaApp(App[None]):
             detail = self.query_one(IssueDetail)
             detail.styles.display = "block"
             detail.show_issue(message.issue_id, self._state)
+            # Populate phases panel
+            phases = self.query_one(PhasesPanel)
+            phases.show_phases(message.issue_id, self._sessions)
 
     def on_worker_run_selected(self, message: WorkerRunSelected) -> None:
         detail = self.query_one(IssueDetail)
@@ -177,22 +198,53 @@ class OrcaApp(App[None]):
         else:
             terminal.show_placeholder()
 
-    def on_insights_selected(self, message: InsightsSelected) -> None:
-        self._deselect_session()
+    def on_phase_selected(self, message: PhaseSelected) -> None:
+        """Handle phase selection from PhasesPanel — load session in terminal."""
         detail = self.query_one(IssueDetail)
         terminal = self.query_one(TerminalView)
-        tid = self._insights_tracking_id
-        log_path_str = self._session_log_paths.get(tid, "")
-        if log_path_str:
-            detail.styles.display = "none"
-            terminal.styles.display = "block"
-            self._selected_session_id = tid
-            self._hot_sessions.add(tid)
-            terminal.show_log_file(Path(log_path_str), active=True)
+
+        self._deselect_session()
+        self._selected_session_id = message.session_id
+        self._hot_sessions.add(message.session_id)
+
+        log_path_str = self._session_log_paths.get(message.session_id)
+        log_path = Path(log_path_str) if log_path_str else None
+
+        result_data: dict[str, object] | None = None
+        state_name = ""
+        duration = ""
+        if self._state and message.issue_id:
+            issue = self._state.issues.get(message.issue_id)
+            if issue and not message.active:
+                for entry in reversed(issue.event_log):
+                    if entry.type == "worker_result":
+                        result_data = entry.data
+                        break
+
+        session = next(
+            (s for s in self._sessions if s.get("session_id") == message.session_id),
+            None,
+        )
+        if session:
+            state_name = str(session.get("state", ""))
+            started = str(session.get("started_at", ""))
+            completed = str(session.get("completed_at", ""))
+            if started and completed:
+                duration = _compute_duration(started, completed)
+
+        detail.styles.display = "none"
+        terminal.styles.display = "block"
+
+        if log_path is not None:
+            terminal.show_log_file(
+                log_path,
+                active=message.active,
+                result=result_data,
+                state_name=state_name,
+                duration=duration,
+            )
         else:
-            terminal.styles.display = "none"
-            detail.styles.display = "block"
-            detail.show_issue_text("Insights", "*Waiting for insights agent to start...*")
+            terminal.show_placeholder()
 
     def on_insight_entry_selected(self, message: InsightEntrySelected) -> None:
         self._deselect_session()
@@ -274,6 +326,33 @@ class OrcaApp(App[None]):
             terminal.scroll_up()
         else:
             self.query_one(IssueDetail).scroll_up()
+
+    def action_toggle_insights(self) -> None:
+        """Toggle the insights modal."""
+        modal = self.query_one(InsightsModal)
+        if modal.is_open:
+            modal.close()
+        else:
+            insights = self._read_insights()
+            modal.open(insights)
+
+    def _read_insights(self) -> list[dict[str, object]]:
+        import json
+
+        p = self._run_dir / "insights.json"
+        if not p.exists():
+            return []
+        try:
+            data: list[dict[str, object]] = json.loads(p.read_text())
+            return data
+        except (json.JSONDecodeError, OSError):
+            return []
+
+    def action_close_modal(self) -> None:
+        """Close the insights modal if open."""
+        modal = self.query_one(InsightsModal)
+        if modal.is_open:
+            modal.close()
 
     def _find_root_issue(self) -> str | None:
         if self._state is None:
