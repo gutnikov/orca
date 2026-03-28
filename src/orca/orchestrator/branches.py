@@ -5,8 +5,8 @@ from pathlib import Path
 
 
 class BranchMap:
-    def __init__(self, repo_root: Path, branch_name: str) -> None:
-        self.path = repo_root / ".orca" / "runs" / branch_name / "branches.json"
+    def __init__(self, repo_root: Path, branch_name: str, workflow: str = "default") -> None:
+        self.path = repo_root / ".orca" / "runs" / branch_name / workflow / "branches.json"
         self._map: dict[str, str] = {}
 
     def set(self, issue_id: str, branch: str) -> None:

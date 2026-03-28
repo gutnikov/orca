@@ -36,6 +36,6 @@ class TestBranchMap:
         assert branch_map.get("any-id") is None
 
     def test_file_path(self, tmp_path: Path) -> None:
-        branch_map = BranchMap(tmp_path, "my-branch")
-        expected_path = tmp_path / ".orca" / "runs" / "my-branch" / "branches.json"
+        branch_map = BranchMap(tmp_path, "my-branch", "prd")
+        expected_path = tmp_path / ".orca" / "runs" / "my-branch" / "prd" / "branches.json"
         assert branch_map.path == expected_path
