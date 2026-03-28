@@ -39,6 +39,21 @@ class WorkerRunSelected(Message):
         self.issue_id = issue_id
 
 
+class PhaseSelected(Message):
+    """Posted when the user selects a phase in the phases panel."""
+
+    def __init__(
+        self,
+        session_id: str,
+        active: bool = False,
+        issue_id: str = "",
+    ) -> None:
+        super().__init__()
+        self.session_id = session_id
+        self.active = active
+        self.issue_id = issue_id
+
+
 class RetryIssue(Message):
     """Posted when the user requests a retry of a failed issue."""
 
