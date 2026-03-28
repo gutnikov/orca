@@ -98,7 +98,8 @@ class TestIssueTree:
             assert "work" in label_text
 
     @pytest.mark.asyncio
-    async def test_worker_runs_shown_as_children(self) -> None:
+    async def test_no_session_children(self) -> None:
+        """Issue nodes should not have session children after simplification."""
         app = IssueTreeApp()
         async with app.run_test() as pilot:
             tree = app.query_one(IssueTree)
@@ -114,48 +115,14 @@ class TestIssueTree:
                     "started_at": "2026-01-01T00:00:00+00:00",
                     "completed_at": "2026-01-01T00:01:00+00:00",
                 },
-                {
-                    "issue_id": "id-1",
-                    "state": "planning",
-                    "session_id": "s2",
-                    "started_at": "2026-01-01T00:01:00+00:00",
-                    "completed_at": None,
-                },
-            ]
-            tree.update_state(state, sessions)
-            await pilot.pause()
-            issue_node = tree.root.children[0]
-            # At least 2 session nodes (may also have progress bar etc without config)
-            session_nodes = [c for c in issue_node.children if c.data and c.data.startswith("session:")]
-            assert len(session_nodes) == 2
-            # Active run should have a spinner character
-            active_label = str(session_nodes[1].label)
-            assert "planning" in active_label
-
-    @pytest.mark.asyncio
-    async def test_node_data_prefixed(self) -> None:
-        app = IssueTreeApp()
-        async with app.run_test() as pilot:
-            tree = app.query_one(IssueTree)
-            state = State(
-                issues={"id-1": _make_issue("My Task", "work")},
-                worker_queues={},
-            )
-            sessions = [
-                {
-                    "issue_id": "id-1",
-                    "state": "scoping",
-                    "session_id": "s1",
-                    "started_at": "2026-01-01T00:00:00+00:00",
-                    "completed_at": "2026-01-01T00:01:00+00:00",
-                },
             ]
             tree.update_state(state, sessions)
             await pilot.pause()
             issue_node = tree.root.children[0]
             assert issue_node.data == "issue:id-1"
+            # No session children should exist
             session_nodes = [c for c in issue_node.children if c.data and c.data.startswith("session:")]
-            assert session_nodes[0].data == "session:s1"
+            assert len(session_nodes) == 0
 
 
 class TestProgressBar:
