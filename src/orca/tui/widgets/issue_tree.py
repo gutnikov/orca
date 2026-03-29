@@ -8,7 +8,7 @@ from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
 
 from orca.engine.types import EventLogEntry, Issue, State, StateMachineConfig
-from orca.tui.messages import IssueSelected
+from orca.tui.messages import InsightsSelected, IssueSelected
 
 # Braille dot spinner frames
 _SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
@@ -138,17 +138,25 @@ class IssueTree(Tree[str]):
         width: 1fr;
         min-width: 40;
         max-width: 80;
-        padding: 1;
+        padding: 0 1;
+    }
+    IssueTree #issues-header {
+        height: 1;
+        color: #666666;
+        text-style: bold;
+        margin: 1 0 0 1;
     }
     """
 
     def __init__(
         self,
         config: StateMachineConfig | None = None,
+        insights_enabled: bool = False,
     ) -> None:
-        super().__init__("ISSUES", id="issue-tree")
-        self.show_root = True
+        super().__init__("", id="issue-tree")
+        self.show_root = False
         self.show_guides = False
+        self._insights_enabled = insights_enabled
         self._sessions: list[dict[str, Any]] = []
         self._state: State | None = None
         self._tick: int = 0
@@ -187,10 +195,16 @@ class IssueTree(Tree[str]):
 
         self.root.remove_children()
 
-        # Build issue tree without root "Issues" node
         roots = [(iid, issue) for iid, issue in state.issues.items() if issue.decomposed_from is None]
         for iid, issue in roots:
             self._add_issue_node(self.root, iid, issue, state)
+
+        # Add insights entry if enabled
+        if self._insights_enabled:
+            insights_label = Text()
+            insights_label.append("◆ ", style="bold cyan")
+            insights_label.append("Insights", style="bold cyan")
+            self.root.add(insights_label, data="insights")
 
         self.root.expand()
 
@@ -240,6 +254,8 @@ class IssueTree(Tree[str]):
             return
         if data.startswith("issue:"):
             self.post_message(IssueSelected(data[6:]))
+        elif data == "insights":
+            self.post_message(InsightsSelected())
 
     def refresh_tick(self) -> None:
         """Called by the app timer to advance the spinner."""

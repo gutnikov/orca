@@ -81,12 +81,17 @@ class InsightsModal(Widget):
             return
 
         lines = Text()
-        for entry in self._entries:
+        for i, entry in enumerate(self._entries):
             sev = str(entry.get("severity", "info"))
             title = str(entry.get("title", "Untitled"))
+            detail = str(entry.get("detail", ""))
             icon, style = _SEVERITY_ICONS.get(sev, ("ℹ ", "dim"))
             lines.append(icon, style=style)
-            lines.append(f"{title}\n")
+            lines.append(f"{title}\n", style="bold")
+            if detail:
+                lines.append(f"  {detail}\n", style="dim")
+            if i < len(self._entries) - 1:
+                lines.append("\n")
 
         with contextlib.suppress(Exception):
             self._static.update(lines)

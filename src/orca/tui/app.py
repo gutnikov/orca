@@ -10,7 +10,14 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer
 
 from orca.engine.types import State, StateMachineConfig
-from orca.tui.messages import InsightEntrySelected, IssueSelected, PhaseSelected, StateUpdated, WorkerRunSelected
+from orca.tui.messages import (
+    InsightEntrySelected,
+    InsightsSelected,
+    IssueSelected,
+    PhaseSelected,
+    StateUpdated,
+    WorkerRunSelected,
+)
 from orca.tui.state_reader import StateReader
 from orca.tui.widgets.header import OrcaHeader
 from orca.tui.widgets.insights_modal import InsightsModal
@@ -90,7 +97,7 @@ class OrcaApp(App[None]):
         yield OrcaHeader(branch_name=self._branch_name, config=self._config)
         with Horizontal(id="main-panels"):
             with Vertical(id="left-column"):
-                yield IssueTree(config=self._config)
+                yield IssueTree(config=self._config, insights_enabled=self._insights_enabled)
                 yield PhasesPanel()
             yield IssueDetail()
             yield TerminalView()
@@ -135,6 +142,7 @@ class OrcaApp(App[None]):
         phases = self.query_one(PhasesPanel)
         if phases._issue_id:
             phases.show_phases(phases._issue_id, message.sessions)
+            self._update_phase_outcomes(phases._issue_id, phases)
         self._update_status()
 
     def on_issue_selected(self, message: IssueSelected) -> None:
@@ -147,6 +155,7 @@ class OrcaApp(App[None]):
             # Populate phases panel
             phases = self.query_one(PhasesPanel)
             phases.show_phases(message.issue_id, self._sessions)
+            self._update_phase_outcomes(message.issue_id, phases)
 
     def on_worker_run_selected(self, message: WorkerRunSelected) -> None:
         detail = self.query_one(IssueDetail)
@@ -247,6 +256,25 @@ class OrcaApp(App[None]):
         else:
             terminal.show_placeholder()
 
+    def on_insights_selected(self, message: InsightsSelected) -> None:
+        """Handle insights node selection — show insights session log."""
+        tracking_id = self._insights_tracking_id
+        if not tracking_id:
+            return
+        detail = self.query_one(IssueDetail)
+        terminal = self.query_one(TerminalView)
+        self._deselect_session()
+        self._selected_session_id = tracking_id
+        self._hot_sessions.add(tracking_id)
+        log_path_str = self._session_log_paths.get(tracking_id)
+        log_path = Path(log_path_str) if log_path_str else None
+        detail.styles.display = "none"
+        terminal.styles.display = "block"
+        if log_path is not None:
+            terminal.show_log_file(log_path, active=True, state_name="insights")
+        else:
+            terminal.show_placeholder()
+
     def on_insight_entry_selected(self, message: InsightEntrySelected) -> None:
         self._deselect_session()
         terminal = self.query_one(TerminalView)
@@ -266,6 +294,24 @@ class OrcaApp(App[None]):
         if self._selected_session_id is not None:
             self._hot_sessions.discard(self._selected_session_id)
             self._selected_session_id = None
+
+    def _update_phase_outcomes(self, issue_id: str, phases: PhasesPanel) -> None:
+        """Extract outcome per session from event_log and pass to PhasesPanel."""
+        if not self._state:
+            return
+        issue = self._state.issues.get(issue_id)
+        if not issue:
+            return
+        # Match completed sessions to worker_result events by order
+        issue_sessions = [s for s in self._sessions if s.get("issue_id") == issue_id and s.get("completed_at")]
+        result_events = [e for e in issue.event_log if e.type == "worker_result"]
+        outcomes: dict[str, str] = {}
+        for session, event in zip(issue_sessions, result_events, strict=False):
+            sid = str(session.get("session_id", ""))
+            outcome = str(event.data.get("outcome", ""))
+            if sid and outcome:
+                outcomes[sid] = outcome
+        phases.set_outcomes(outcomes)
 
     def _update_status(self) -> None:
         if self._state is None:

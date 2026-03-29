@@ -43,12 +43,13 @@ class PhasesPanel(VerticalScroll):
 
     def __init__(self) -> None:
         super().__init__(id="phases-panel")
-        self._header = Static("PHASES", id="phases-header")
+        self._header = Static("WORKERS", id="phases-header")
         self._static = Static(_PLACEHOLDER)
         self._hint = Static("i  insights", id="phases-hint")
         self._sessions: list[dict[str, Any]] = []
         self._issue_id: str = ""
         self._tick: int = 0
+        self._entry_map: list[dict[str, Any]] = []  # reversed sessions for click mapping
 
     def compose(self) -> ComposeResult:
         yield self._header
@@ -73,21 +74,31 @@ class PhasesPanel(VerticalScroll):
             self._render_phases()
 
     def on_click(self, event: Click) -> None:
-        """Handle click on a phase entry."""
+        """Handle click on a phase entry — determine which entry by y offset."""
         widget = event.widget
-        if widget is self._static and self._sessions:
-            for session in reversed(self._sessions):
-                session_id = str(session.get("session_id", ""))
-                active = session.get("completed_at") is None
-                if session_id:
-                    self.post_message(
-                        PhaseSelected(
-                            session_id=session_id,
-                            active=active,
-                            issue_id=self._issue_id,
-                        )
+        if widget is not self._static or not self._entry_map:
+            return
+        # Each entry is 3 lines (name, duration, arrow) except the last (2 lines)
+        y = event.y
+        entry_idx = y // 3
+        if 0 <= entry_idx < len(self._entry_map):
+            session = self._entry_map[entry_idx]
+            session_id = str(session.get("session_id", ""))
+            active = session.get("completed_at") is None
+            if session_id:
+                self.post_message(
+                    PhaseSelected(
+                        session_id=session_id,
+                        active=active,
+                        issue_id=self._issue_id,
                     )
-                    break
+                )
+
+    def set_outcomes(self, outcomes: dict[str, str]) -> None:
+        """Set outcome values per session_id for display."""
+        self._outcomes = outcomes
+        if self._sessions:
+            self._render_phases()
 
     def _render_phases(self) -> None:
         if not self._sessions:
@@ -96,10 +107,14 @@ class PhasesPanel(VerticalScroll):
 
         lines = Text()
         reversed_sessions = list(reversed(self._sessions))
+        self._entry_map = reversed_sessions
+        outcomes = getattr(self, "_outcomes", {})
 
         for i, session in enumerate(reversed_sessions):
             state_name = str(session.get("state", "unknown"))
             is_active = session.get("completed_at") is None
+            session_id = str(session.get("session_id", ""))
+            outcome = outcomes.get(session_id, "")
 
             if is_active:
                 frame = _SPINNER[self._tick % len(_SPINNER)]
@@ -111,6 +126,8 @@ class PhasesPanel(VerticalScroll):
             else:
                 lines.append("✓ ", style="green")
                 lines.append(state_name, style="green")
+                if outcome:
+                    lines.append(f"  {outcome}", style="dim italic")
                 duration = _duration_str(
                     str(session.get("started_at", "")),
                     str(session.get("completed_at", "")),
