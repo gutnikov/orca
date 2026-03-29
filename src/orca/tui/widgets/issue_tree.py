@@ -175,11 +175,11 @@ class IssueTree(Tree[str]):
             label.append("• ", style="dim")
             label.append(title)
             label.append(f" [{issue.state}]", style="dim")
-        # Progress bar on second line
+        # Progress bar inline after title
         if self._config is not None:
             bar = _progress_bar_text(self._config, issue.visit_counts, issue.state, failed_states or set())
             if bar is not None:
-                label.append("\n  ")
+                label.append(" ")
                 label.append_text(bar)
         return label
 

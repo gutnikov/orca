@@ -14,7 +14,6 @@ from orca.tui.messages import PhaseSelected
 
 _SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 _PLACEHOLDER = "*Select an issue to view phases*"
-_SELECTED_STYLE = "on #2a2a3e"
 
 
 class PhasesPanel(VerticalScroll):
@@ -124,21 +123,20 @@ class PhasesPanel(VerticalScroll):
 
             if is_active:
                 frame = _SPINNER[self._tick % len(_SPINNER)]
-                prefix = "▸ " if is_selected else "  "
-                lines.append(prefix, style=_SELECTED_STYLE if is_selected else "")
+                prefix = "→ " if is_selected else "  "
+                lines.append(prefix)
                 lines.append(f"{frame} ", style="bold yellow")
                 lines.append(state_name, style="bold yellow")
                 elapsed = _elapsed_str(str(session.get("started_at", "")))
                 if elapsed:
                     lines.append(f"\n  {elapsed}", style="dim")
             else:
-                prefix = "▸ " if is_selected else "  "
-                style_bg = _SELECTED_STYLE if is_selected else ""
-                lines.append(prefix, style=style_bg)
-                lines.append("✓ ", style=f"green {style_bg}")
-                lines.append(state_name, style=f"green {style_bg}")
+                prefix = "→ " if is_selected else "  "
+                lines.append(prefix)
+                lines.append("✓ ", style="green")
+                lines.append(state_name, style="green")
                 if outcome:
-                    lines.append(f"  {outcome}", style=f"dim italic {style_bg}")
+                    lines.append(f"  {outcome}", style="dim italic")
                 duration = _duration_str(
                     str(session.get("started_at", "")),
                     str(session.get("completed_at", "")),
