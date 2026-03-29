@@ -335,6 +335,15 @@ async def run(
             raise RuntimeError(msg)
         branches.load()
 
+        # Reset hop_count and failure_count on non-terminal issues so
+        # CLI limits (--max-hops, --max-retries) apply fresh on re-run.
+        for issue in state.issues.values():
+            type_def = config.types.get(issue.type)
+            if type_def and issue.state in type_def.states and type_def.states[issue.state].terminal:
+                continue
+            issue.hop_count = 0
+            issue.failure_count = 0
+
         logger.info(
             "Run resumed",
             extra={"event": "run_resumed", "branch": branch_name},
