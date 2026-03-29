@@ -140,6 +140,7 @@ class TestWorkerFailureRetainsSlotInCappedState:
 
     def test_worker_failure_retains_slot_then_exhausts(self) -> None:
         config = parse_config(CAPPED_CONFIG_YAML)
+        object.__setattr__(config, "max_worker_retries", 5)
         gen = _counter()
         state = _empty_state()
 
@@ -153,7 +154,7 @@ class TestWorkerFailureRetainsSlotInCappedState:
         active = [iid for iid in all_ids if state.issues[iid].worker_active]
         assert len(active) == 3
 
-        # Fail Q-1 four times — slot retained, retry dispatched (default max_worker_retries=5)
+        # Fail Q-1 four times — slot retained, retry dispatched (max_worker_retries=5)
         for _ in range(4):
             state, effects = reduce(
                 config,

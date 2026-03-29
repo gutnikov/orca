@@ -141,22 +141,6 @@ def _handle_advance(
 
     # Hop limit checks before moving
     target_state_def = config.get_state(issue.type, event.target_state)
-    if target_state_def.max_visits is not None:
-        current_visits = issue.visit_counts.get(event.target_state, 0)
-        if current_visits + 1 > target_state_def.max_visits:
-            append_log(
-                issue,
-                ts,
-                "limit_reached",
-                {"limit": "max_visits", "state": event.target_state, "count": current_visits + 1},
-            )
-            effects.append(
-                ErrorEffect(
-                    issue_id=event.issue_id,
-                    message=f"max_visits ({target_state_def.max_visits}) reached for state '{event.target_state}'",
-                )
-            )
-            return
     if config.max_hops is not None and issue.hop_count + 1 > config.max_hops:
         append_log(issue, ts, "limit_reached", {"limit": "max_hops", "count": issue.hop_count + 1})
         effects.append(
@@ -271,33 +255,16 @@ def _handle_worker_result(
         backfill_queue(config, state, f"{issue.type}:{old_state_name}", dispatch_effects)
 
     # 3. Hop limit checks before transition/decompose
-    if isinstance(rule, OnTransition):
-        target = rule.target
-        target_def = config.get_state(issue.type, target)
-        if target_def.max_visits is not None:
-            current_visits = issue.visit_counts.get(target, 0)
-            if current_visits + 1 > target_def.max_visits:
-                append_log(
-                    issue, ts, "limit_reached", {"limit": "max_visits", "state": target, "count": current_visits + 1}
-                )
-                effects.append(
-                    ErrorEffect(
-                        issue_id=event.issue_id,
-                        message=f"max_visits ({target_def.max_visits}) reached for state '{target}'",
-                    )
-                )
-                effects.extend(dispatch_effects)
-                return
-        if config.max_hops is not None and issue.hop_count + 1 > config.max_hops:
-            append_log(issue, ts, "limit_reached", {"limit": "max_hops", "count": issue.hop_count + 1})
-            effects.append(
-                ErrorEffect(
-                    issue_id=event.issue_id,
-                    message=f"max_hops ({config.max_hops}) reached",
-                )
+    if isinstance(rule, OnTransition) and config.max_hops is not None and issue.hop_count + 1 > config.max_hops:
+        append_log(issue, ts, "limit_reached", {"limit": "max_hops", "count": issue.hop_count + 1})
+        effects.append(
+            ErrorEffect(
+                issue_id=event.issue_id,
+                message=f"max_hops ({config.max_hops}) reached",
             )
-            effects.extend(dispatch_effects)
-            return
+        )
+        effects.extend(dispatch_effects)
+        return
 
     if isinstance(rule, OnDecompose) and config.max_hops is not None and issue.hop_count + 1 > config.max_hops:
         append_log(issue, ts, "limit_reached", {"limit": "max_hops", "count": issue.hop_count + 1})
@@ -356,7 +323,7 @@ def _handle_worker_failed(
         issue.fields["failure_context"] = event.error
 
     # Check retry limit
-    if config.max_worker_retries > 0 and issue.failure_count >= config.max_worker_retries:
+    if config.max_worker_retries is not None and issue.failure_count >= config.max_worker_retries:
         # Give up — release the worker slot and log
         issue.worker_active = False
         append_log(

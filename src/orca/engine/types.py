@@ -66,7 +66,6 @@ class StateDef:
     on: dict[str, OnRule] = field(default_factory=dict)
     terminal: bool = False
     max_workers: int | None = None
-    max_visits: int | None = None
 
 
 @dataclass(frozen=True)
@@ -81,7 +80,7 @@ class StateMachineConfig:
     root_type: str
     types: dict[str, TypeDef]
     max_hops: int | None = None
-    max_worker_retries: int = 5
+    max_worker_retries: int | None = None
 
     def get_type(self, type_name: str) -> TypeDef:
         return self.types[type_name]

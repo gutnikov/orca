@@ -298,6 +298,8 @@ async def run(
     session_log_paths: dict[str, str] | None = None,
     insights_state: dict[str, str] | None = None,
     workflow: str = "default",
+    max_hops: int | None = None,
+    max_retries: int | None = None,
 ) -> None:
     """Main entry point: read task file, set up state, run orchestrator."""
     repo_root = Path.cwd()
@@ -307,6 +309,10 @@ async def run(
 
     # Load config
     config = parse_config(config_path.read_text())
+    if max_hops is not None:
+        object.__setattr__(config, "max_hops", max_hops)
+    if max_retries is not None:
+        object.__setattr__(config, "max_worker_retries", max_retries)
     raw_config: dict[str, Any] = yaml.safe_load(config_path.read_text())
     integrations = parse_integrations(raw_config.get("integrations"))
 
@@ -473,6 +479,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--headless", action="store_true", help="Run without TUI (headless mode)")
     parser.add_argument("--insights", action="store_true", help="Enable insights agent for progress monitoring")
+    parser.add_argument("--max-hops", type=int, default=None, help="Maximum number of hops per issue")
+    parser.add_argument("--max-retries", type=int, default=None, help="Maximum worker retries per issue")
     return parser
 
 
@@ -515,6 +523,8 @@ def main() -> None:
                 base_ref=base_ref,
                 insights_enabled=args.insights,
                 workflow=workflow,
+                max_hops=args.max_hops,
+                max_retries=args.max_retries,
             )
         )
     else:
@@ -541,6 +551,8 @@ def main() -> None:
                         session_log_paths=session_log_paths,
                         insights_state=insights_state,
                         workflow=workflow,
+                        max_hops=args.max_hops,
+                        max_retries=args.max_retries,
                     )
                 )
             except BaseException as e:

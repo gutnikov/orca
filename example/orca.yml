@@ -28,9 +28,6 @@ issue:
 # The state every new issue starts in.
 initial: scoping
 
-# Maximum decomposition depth. Prevents infinite scoping loops.
-max_hops: 15
-
 # --- States ---
 states:
 

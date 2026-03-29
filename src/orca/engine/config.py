@@ -119,14 +119,11 @@ def _parse_state(name: str, raw_data: dict[str, Any] | None) -> StateDef:
         for key, value in on_data.items():
             on[key] = _parse_on_rule(key, value)
 
-    max_visits = data.get("max_visits")
-
     return StateDef(
         worker=worker,
         on=on,
         terminal=terminal,
         max_workers=max_workers,
-        max_visits=max_visits,
     )
 
 
@@ -213,14 +210,6 @@ def _validate(config: StateMachineConfig) -> None:
                 )
                 raise ConfigValidationError(msg)
 
-            # max_visits must be positive integer
-            if state.max_visits is not None and (not isinstance(state.max_visits, int) or state.max_visits < 1):
-                msg = (
-                    f"Type '{type_name}', max_visits for state '{name}' "
-                    f"must be a positive integer, got {state.max_visits}"
-                )
-                raise ConfigValidationError(msg)
-
             # Rule 5: terminal states have no worker or on
             if state.terminal:
                 if state.worker is not None or state.on:
@@ -298,8 +287,6 @@ def _validate(config: StateMachineConfig) -> None:
 
 def _parse_typed_config(raw: dict[str, Any]) -> StateMachineConfig:
     root_type = raw.get("root_type", "")
-    max_hops = raw.get("max_hops")
-    max_worker_retries = raw.get("max_worker_retries", 5)
     types_data: dict[str, Any] = raw.get("types", {})
     types: dict[str, TypeDef] = {}
     for name, type_data in types_data.items():
@@ -307,8 +294,6 @@ def _parse_typed_config(raw: dict[str, Any]) -> StateMachineConfig:
     config = StateMachineConfig(
         root_type=root_type,
         types=types,
-        max_hops=max_hops,
-        max_worker_retries=max_worker_retries,
     )
     _validate(config)
     return config
@@ -325,8 +310,6 @@ def _parse_legacy_config(raw: dict[str, Any]) -> StateMachineConfig:
         states[name] = _parse_state(name, state_data)
 
     initial: str = raw.get("initial", "")
-    max_hops = raw.get("max_hops")
-    max_worker_retries = raw.get("max_worker_retries", 5)
 
     # For legacy single-type configs, default decompose child_type to "default"
     for state_def in states.values():
@@ -338,8 +321,6 @@ def _parse_legacy_config(raw: dict[str, Any]) -> StateMachineConfig:
     config = StateMachineConfig(
         root_type="default",
         types={"default": type_def},
-        max_hops=max_hops,
-        max_worker_retries=max_worker_retries,
     )
     _validate(config)
     return config

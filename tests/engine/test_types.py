@@ -328,7 +328,6 @@ class TestConfigTypes:
         assert s.on == {}
         assert s.terminal is False
         assert s.max_workers is None
-        assert s.max_visits is None
 
     def test_state_def_active(self) -> None:
         worker = WorkerDef(
@@ -350,10 +349,6 @@ class TestConfigTypes:
     def test_state_def_terminal(self) -> None:
         s = StateDef(terminal=True)
         assert s.terminal is True
-
-    def test_state_def_with_max_visits(self) -> None:
-        s = StateDef(max_visits=5)
-        assert s.max_visits == 5
 
     def test_state_machine_config(self) -> None:
         td = TypeDef(
@@ -424,7 +419,7 @@ class TestStateMachineConfigWithTypes:
             root_type="epic",
             types={"epic": td},
             max_hops=None,
-            max_worker_retries=5,
+            max_worker_retries=None,
         )
         assert cfg.root_type == "epic"
         assert "epic" in cfg.types

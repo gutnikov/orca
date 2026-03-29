@@ -344,7 +344,7 @@ initial: todo
         with pytest.raises(ConfigValidationError, match="max_workers"):
             parse_config(yaml_str)
 
-    def test_max_hops_zero(self) -> None:
+    def test_max_hops_ignored_from_yaml(self) -> None:
         yaml_str = """\
 issue:
   fields: {}
@@ -365,60 +365,12 @@ states:
 initial: todo
 max_hops: 0
 """
-        with pytest.raises(ConfigValidationError, match="max_hops"):
-            parse_config(yaml_str)
-
-    def test_max_hops_negative(self) -> None:
-        yaml_str = """\
-issue:
-  fields: {}
-states:
-  todo:
-    worker:
-      kind: claude-code
-      prompt: prompts/default.md
-      result_format:
-        outcome:
-          type: enum
-          values: [go]
-          description: d
-    on:
-      go: done
-  done:
-    terminal: true
-initial: todo
-max_hops: -1
-"""
-        with pytest.raises(ConfigValidationError, match="max_hops"):
-            parse_config(yaml_str)
-
-    def test_max_visits_zero(self) -> None:
-        yaml_str = """\
-issue:
-  fields: {}
-states:
-  todo:
-    max_visits: 0
-    worker:
-      kind: claude-code
-      prompt: prompts/default.md
-      result_format:
-        outcome:
-          type: enum
-          values: [go]
-          description: d
-    on:
-      go: done
-  done:
-    terminal: true
-initial: todo
-"""
-        with pytest.raises(ConfigValidationError, match="max_visits"):
-            parse_config(yaml_str)
+        cfg = parse_config(yaml_str)
+        assert cfg.max_hops is None  # max_hops from YAML is ignored
 
 
 class TestParseMaxHops:
-    def test_max_hops_parsed(self) -> None:
+    def test_max_hops_not_parsed_from_yaml(self) -> None:
         yaml_str = """\
 issue:
   fields: {}
@@ -440,33 +392,7 @@ initial: todo
 max_hops: 50
 """
         cfg = parse_config(yaml_str)
-        assert cfg.max_hops == 50
-
-
-class TestParseMaxVisits:
-    def test_max_visits_parsed(self) -> None:
-        yaml_str = """\
-issue:
-  fields: {}
-states:
-  todo:
-    max_visits: 5
-    worker:
-      kind: claude-code
-      prompt: prompts/default.md
-      result_format:
-        outcome:
-          type: enum
-          values: [go]
-          description: d
-    on:
-      go: done
-  done:
-    terminal: true
-initial: todo
-"""
-        cfg = parse_config(yaml_str)
-        assert cfg.types["default"].states["todo"].max_visits == 5
+        assert cfg.max_hops is None  # max_hops is CLI-only now
 
 
 class TestWorkerDefFields:
@@ -773,9 +699,9 @@ types:
         assert isinstance(rule, OnDecompose)
         assert rule.child_type == "task"
 
-    def test_max_hops(self) -> None:
+    def test_max_hops_not_parsed(self) -> None:
         cfg = parse_config(self.TYPED_YAML)
-        assert cfg.max_hops == 15
+        assert cfg.max_hops is None  # max_hops is CLI-only, not parsed from YAML
 
 
 class TestTypedConfigValidation:

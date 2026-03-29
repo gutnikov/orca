@@ -9,6 +9,7 @@ from orca.engine.types import (
     DispatchWorkerEffect,
     ErrorEffect,
     State,
+    StateMachineConfig,
     WorkerFailedEvent,
     WorkerResultEvent,
 )
@@ -197,12 +198,49 @@ class TestWorkerFailedNotActive:
         assert isinstance(effects[0], ErrorEffect)
 
 
+class TestWorkerFailedUnlimitedRetries:
+    """Test 5a: Without max_worker_retries, retries never exhaust."""
+
+    def test_unlimited_retries(self, simple_config_yaml: str) -> None:
+        config = parse_config(simple_config_yaml)
+        assert config.max_worker_retries is None
+        state = State(issues={}, worker_queues={})
+        gen = _counter()
+
+        state, _ = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="A", fields={"title": "T"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+
+        # Fail 20 times — all retries, no exhaustion
+        for i in range(20):
+            state, effects = reduce(
+                config,
+                state,
+                WorkerFailedEvent(issue_id="A", error=f"failure-{i}", timestamp="2026-01-01T00:00:00Z"),
+                gen,
+                _clock(),
+            )
+            assert state.issues["A"].worker_active is True
+            dispatch_effects = [e for e in effects if isinstance(e, DispatchWorkerEffect)]
+            assert len(dispatch_effects) == 1
+            assert not any(isinstance(e, ErrorEffect) for e in effects)
+
+
+def _config_with_max_retries(yaml_str: str, max_retries: int) -> StateMachineConfig:
+    config = parse_config(yaml_str)
+    object.__setattr__(config, "max_worker_retries", max_retries)
+    return config
+
+
 class TestWorkerFailedRepeated:
-    """Test 5: Worker failures retry up to max_worker_retries, then give up."""
+    """Test 5b: Worker failures retry up to max_worker_retries, then give up."""
 
     def test_retries_then_exhausted(self, simple_config_yaml: str) -> None:
-        config = parse_config(simple_config_yaml)
-        # Default max_worker_retries=5
+        config = _config_with_max_retries(simple_config_yaml, max_retries=5)
         state = State(issues={}, worker_queues={})
         gen = _counter()
 
@@ -247,7 +285,7 @@ class TestWorkerFailedRepeated:
         assert "retries exhausted" in error_effects[0].message
 
     def test_failure_count_resets_on_success(self, simple_config_yaml: str) -> None:
-        config = parse_config(simple_config_yaml)
+        config = _config_with_max_retries(simple_config_yaml, max_retries=5)
         state = State(issues={}, worker_queues={})
         gen = _counter()
 
