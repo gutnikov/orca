@@ -21,6 +21,7 @@ from orca.engine.types import (
     CreateEvent,
     DispatchWorkerEffect,
     Effect,
+    Issue,
     State,
     StateMachineConfig,
     WorkerResultEvent,
@@ -73,6 +74,15 @@ def _generate_id() -> str:
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
+
+
+def _is_terminal(issue: Issue, config: StateMachineConfig) -> bool:
+    """Check if an issue is in a terminal state."""
+    type_def = config.types.get(issue.type)
+    if type_def is None:
+        return False
+    state_def = type_def.states.get(issue.state)
+    return state_def is not None and state_def.terminal
 
 
 def resolve_base_ref(cli_base: str | None, config_base: str) -> str:
@@ -344,6 +354,16 @@ async def run(
             issue.hop_count = 0
             issue.failure_count = 0
 
+        # Restore session log paths from previous run so TUI can display them
+        if session_log_paths is not None:
+            from orca.orchestrator.session_sync import SessionManifest as _SM
+
+            for s in _SM(run_dir).read():
+                sid = s.get("session_id", "")
+                lp = s.get("log_path", "")
+                if sid and lp:
+                    session_log_paths[sid] = lp
+
         logger.info(
             "Run resumed",
             extra={"event": "run_resumed", "branch": branch_name},
@@ -524,6 +544,26 @@ def main() -> None:
     if not args.task_file.exists():
         print(f"Error: task file not found: {args.task_file}")
         raise SystemExit(1)
+
+    # Check for previous run and ask user
+    repo_root = Path.cwd()
+    run_dir = repo_root / ".orca" / "runs" / branch_name / workflow
+    state_path = run_dir / "state.json"
+    if state_path.exists():
+        import json as _json
+
+        prev_state = State.from_dict(_json.loads(state_path.read_text()))
+        total = len(prev_state.issues)
+        terminal = sum(
+            1 for iss in prev_state.issues.values() if _is_terminal(iss, parse_config(config_path.read_text()))
+        )
+        print(f"Previous run found: {terminal}/{total} issues completed.")
+        choice = input("Continue previous run or restart from scratch? [c/r] ").strip().lower()
+        if choice == "r":
+            import shutil
+
+            shutil.rmtree(run_dir)
+            print("Previous run cleared.")
 
     if args.headless:
         asyncio.run(

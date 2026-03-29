@@ -27,19 +27,30 @@ class SessionManifest:
         session_id: str,
         worktree_path: str,
         started_at: str,
+        log_path: str = "",
     ) -> None:
         entries = self.read()
-        entries.append(
-            {
-                "issue_id": issue_id,
-                "state": state,
-                "session_id": session_id,
-                "worktree_path": worktree_path,
-                "started_at": started_at,
-                "completed_at": None,
-            }
-        )
+        entry: dict[str, Any] = {
+            "issue_id": issue_id,
+            "state": state,
+            "session_id": session_id,
+            "worktree_path": worktree_path,
+            "started_at": started_at,
+            "completed_at": None,
+        }
+        if log_path:
+            entry["log_path"] = log_path
+        entries.append(entry)
         self._write(entries)
+
+    def update_log_path(self, session_id: str, log_path: str) -> None:
+        """Store the log file path for a session."""
+        entries = self.read()
+        for entry in entries:
+            if entry["session_id"] == session_id:
+                entry["log_path"] = log_path
+                self._write(entries)
+                return
 
     def update_worktree_path(self, session_id: str, worktree_path: str) -> None:
         """Update the worktree_path for a session (e.g. after worktree creation resolves the real path)."""

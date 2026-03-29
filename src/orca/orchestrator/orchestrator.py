@@ -328,6 +328,8 @@ class Orchestrator:
 
         self._tmux_sessions[tracking_id] = tmux_session
         self._session_log_paths[tracking_id] = str(log_path)
+        if self._session_sync is not None:
+            self._session_sync.manifest.update_log_path(tracking_id, str(log_path))
 
         worker_env: dict[str, str] | None = None
         if self._slack_mcp_url:
