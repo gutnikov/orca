@@ -39,6 +39,7 @@ class OrcaApp(App[None]):
         width: 1fr;
         min-width: 30;
         max-width: 60;
+        border-right: solid #333333;
     }
     #terminal-view {
         display: none;

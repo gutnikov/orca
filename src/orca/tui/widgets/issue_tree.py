@@ -64,14 +64,15 @@ def _progress_bar_text(
         return None
     bar = Text()
     for name in non_terminal:
+        segment = "▬▬▬"
         if name in failed_states:
-            bar.append("█", style=_COLOR_FAILED)
+            bar.append(segment, style=_COLOR_FAILED)
         elif name == current_state:
-            bar.append("█", style=_COLOR_ACTIVE)
+            bar.append(segment, style=_COLOR_ACTIVE)
         elif name in visit_counts:
-            bar.append("█", style=_COLOR_DONE)
+            bar.append(segment, style=_COLOR_DONE)
         else:
-            bar.append("█", style=_COLOR_PENDING)
+            bar.append(segment, style=_COLOR_PENDING)
     return bar
 
 
@@ -145,8 +146,8 @@ class IssueTree(Tree[str]):
         self,
         config: StateMachineConfig | None = None,
     ) -> None:
-        super().__init__("", id="issue-tree")
-        self.show_root = False
+        super().__init__("ISSUES", id="issue-tree")
+        self.show_root = True
         self.show_guides = False
         self._sessions: list[dict[str, Any]] = []
         self._state: State | None = None
@@ -166,11 +167,11 @@ class IssueTree(Tree[str]):
             label.append("• ", style="dim")
             label.append(title)
             label.append(f" [{issue.state}]", style="dim")
-        # Inline progress bar
+        # Progress bar on second line
         if self._config is not None:
             bar = _progress_bar_text(self._config, issue.visit_counts, issue.state, failed_states or set())
             if bar is not None:
-                label.append(" ")
+                label.append("\n  ")
                 label.append_text(bar)
         return label
 

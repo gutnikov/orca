@@ -133,8 +133,8 @@ class TestProgressBar:
         bar = _progress_bar_text(config, visit_counts, current_state="b", failed_states=set())
         assert bar is not None
         text = str(bar)
-        # 3 non-terminal states = 3 block chars
-        assert text == "███"
+        # 3 non-terminal states = 3 segments of ▬▬▬
+        assert text == "▬▬▬▬▬▬▬▬▬"
 
     def test_progress_bar_with_failure(self) -> None:
         """State b failed."""
@@ -143,7 +143,7 @@ class TestProgressBar:
         bar = _progress_bar_text(config, visit_counts, current_state="b", failed_states={"b"})
         assert bar is not None
         text = str(bar)
-        assert text == "███"
+        assert text == "▬▬▬▬▬▬▬▬▬"
 
     def test_progress_bar_no_non_terminal(self) -> None:
         """All states terminal -> None."""
