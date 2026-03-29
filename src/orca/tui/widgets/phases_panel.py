@@ -14,6 +14,7 @@ from orca.tui.messages import PhaseSelected
 
 _SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 _PLACEHOLDER = "*Select an issue to view phases*"
+_SELECTED_STYLE = "on #2a2a3e"
 
 
 class PhasesPanel(VerticalScroll):
@@ -49,7 +50,9 @@ class PhasesPanel(VerticalScroll):
         self._sessions: list[dict[str, Any]] = []
         self._issue_id: str = ""
         self._tick: int = 0
-        self._entry_map: list[dict[str, Any]] = []  # reversed sessions for click mapping
+        self._entry_map: list[dict[str, Any]] = []
+        self._selected_session_id: str = ""
+        self._outcomes: dict[str, str] = {}
 
     def compose(self) -> ComposeResult:
         yield self._header
@@ -65,6 +68,7 @@ class PhasesPanel(VerticalScroll):
     def clear(self) -> None:
         self._issue_id = ""
         self._sessions = []
+        self._selected_session_id = ""
         self._static.update(_PLACEHOLDER)
 
     def refresh_tick(self, tick: int) -> None:
@@ -86,6 +90,8 @@ class PhasesPanel(VerticalScroll):
             session_id = str(session.get("session_id", ""))
             active = session.get("completed_at") is None
             if session_id:
+                self._selected_session_id = session_id
+                self._render_phases()
                 self.post_message(
                     PhaseSelected(
                         session_id=session_id,
@@ -108,26 +114,31 @@ class PhasesPanel(VerticalScroll):
         lines = Text()
         reversed_sessions = list(reversed(self._sessions))
         self._entry_map = reversed_sessions
-        outcomes = getattr(self, "_outcomes", {})
 
         for i, session in enumerate(reversed_sessions):
             state_name = str(session.get("state", "unknown"))
             is_active = session.get("completed_at") is None
             session_id = str(session.get("session_id", ""))
-            outcome = outcomes.get(session_id, "")
+            outcome = self._outcomes.get(session_id, "")
+            is_selected = session_id == self._selected_session_id
 
             if is_active:
                 frame = _SPINNER[self._tick % len(_SPINNER)]
+                prefix = "▸ " if is_selected else "  "
+                lines.append(prefix, style=_SELECTED_STYLE if is_selected else "")
                 lines.append(f"{frame} ", style="bold yellow")
                 lines.append(state_name, style="bold yellow")
                 elapsed = _elapsed_str(str(session.get("started_at", "")))
                 if elapsed:
                     lines.append(f"\n  {elapsed}", style="dim")
             else:
-                lines.append("✓ ", style="green")
-                lines.append(state_name, style="green")
+                prefix = "▸ " if is_selected else "  "
+                style_bg = _SELECTED_STYLE if is_selected else ""
+                lines.append(prefix, style=style_bg)
+                lines.append("✓ ", style=f"green {style_bg}")
+                lines.append(state_name, style=f"green {style_bg}")
                 if outcome:
-                    lines.append(f"  {outcome}", style="dim italic")
+                    lines.append(f"  {outcome}", style=f"dim italic {style_bg}")
                 duration = _duration_str(
                     str(session.get("started_at", "")),
                     str(session.get("completed_at", "")),

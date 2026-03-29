@@ -488,8 +488,10 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--headless", action="store_true", help="Run without TUI (headless mode)")
     parser.add_argument("--insights", action="store_true", help="Enable insights agent for progress monitoring")
-    parser.add_argument("--max-hops", type=int, default=None, help="Maximum number of hops per issue")
-    parser.add_argument("--max-retries", type=int, default=None, help="Maximum worker retries per issue")
+    parser.add_argument("--max-hops", type=int, default=10, help="Maximum state transitions per issue (default: 10)")
+    parser.add_argument(
+        "--max-retries", type=int, default=3, help="Maximum worker crash retries per issue (default: 3)"
+    )
     return parser
 
 
