@@ -1,0 +1,89 @@
+"""Daemon lifecycle management: pidfile, socket paths, process detection."""
+
+from __future__ import annotations
+
+import os
+import signal
+from pathlib import Path
+
+
+class DaemonAlreadyRunningError(Exception):
+    """Raised when attempting to start a daemon that is already running."""
+
+    def __init__(self, pid: int) -> None:
+        self.pid = pid
+        super().__init__(f"Daemon already running (PID: {pid})")
+
+
+def socket_path(repo_root: Path) -> Path:
+    """Return the UDS socket path for the given repo."""
+    return repo_root / ".orca" / "daemon.sock"
+
+
+def pidfile_path(repo_root: Path) -> Path:
+    """Return the pidfile path for the given repo."""
+    return repo_root / ".orca" / "daemon.pid"
+
+
+def write_pidfile(path: Path, pid: int) -> None:
+    """Create parent dirs and write pid as text."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(str(pid) + "\n")
+
+
+def read_pidfile(path: Path) -> int | None:
+    """Return the PID from a pidfile, or None if missing/invalid."""
+    try:
+        text = path.read_text().strip()
+        return int(text)
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def remove_pidfile(path: Path) -> None:
+    """Remove the pidfile if it exists."""
+    path.unlink(missing_ok=True)
+
+
+def _is_process_alive(pid: int) -> bool:
+    """Check whether a process with the given PID is alive using os.kill(pid, 0)."""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        # Process exists but we don't have permission to signal it
+        return True
+    return True
+
+
+def check_daemon_running(repo_root: Path) -> bool:
+    """Check if the daemon is running. Cleans up stale pidfile if process is dead."""
+    pf = pidfile_path(repo_root)
+    pid = read_pidfile(pf)
+    if pid is None:
+        return False
+    if _is_process_alive(pid):
+        return True
+    # Stale pidfile -- clean it up
+    remove_pidfile(pf)
+    return False
+
+
+def cleanup_stale_socket(repo_root: Path) -> None:
+    """Remove the daemon socket file if it exists."""
+    sock = socket_path(repo_root)
+    sock.unlink(missing_ok=True)
+
+
+def send_stop_signal(repo_root: Path) -> bool:
+    """Send SIGTERM to the daemon. Return True if signal was sent, False otherwise."""
+    pf = pidfile_path(repo_root)
+    pid = read_pidfile(pf)
+    if pid is None:
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError):
+        return False
+    return True
