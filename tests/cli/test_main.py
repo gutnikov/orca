@@ -1,0 +1,101 @@
+from __future__ import annotations
+
+import pytest
+
+from orca.cli.main import build_parser
+
+
+class TestCliDispatch:
+    def test_no_subcommand_shows_help(self) -> None:
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args([])
+
+    def test_daemon_start_subcommand(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["daemon", "start"])
+        assert args.subcommand == "daemon"
+        assert args.daemon_action == "start"
+
+    def test_daemon_stop_subcommand(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["daemon", "stop"])
+        assert args.subcommand == "daemon"
+        assert args.daemon_action == "stop"
+
+    def test_daemon_status_subcommand(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["daemon", "status"])
+        assert args.subcommand == "daemon"
+        assert args.daemon_action == "status"
+
+    def test_run_subcommand(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["run", "task.md", "-w", "develop", "-b", "feat/x"])
+        assert args.subcommand == "run"
+        assert str(args.task_file) == "task.md"
+        assert args.workflow == "develop"
+        assert args.branch == "feat/x"
+
+    def test_run_subcommand_defaults(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["run", "task.md"])
+        assert args.subcommand == "run"
+        assert str(args.task_file) == "task.md"
+        assert args.workflow is None
+        assert args.branch is None
+        assert args.base is None
+        assert args.max_hops == 10
+        assert args.max_retries == 3
+
+    def test_run_subcommand_all_options(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(
+            [
+                "run",
+                "task.md",
+                "-w",
+                "ci",
+                "-b",
+                "my-branch",
+                "--base",
+                "origin/main",
+                "--max-hops",
+                "5",
+                "--max-retries",
+                "2",
+            ]
+        )
+        assert args.base == "origin/main"
+        assert args.max_hops == 5
+        assert args.max_retries == 2
+
+    def test_tui_subcommand(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["tui"])
+        assert args.subcommand == "tui"
+
+    def test_mcp_subcommand(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["mcp"])
+        assert args.subcommand == "mcp"
+
+    def test_runs_subcommand(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["runs"])
+        assert args.subcommand == "runs"
+
+    def test_logs_subcommand(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["logs", "main:default"])
+        assert args.subcommand == "logs"
+        assert args.run_id == "main:default"
+        assert args.issue_id is None
+        assert args.tail == 100
+
+    def test_logs_subcommand_with_issue_and_tail(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["logs", "main:default", "issue-123", "--tail", "50"])
+        assert args.run_id == "main:default"
+        assert args.issue_id == "issue-123"
+        assert args.tail == 50
