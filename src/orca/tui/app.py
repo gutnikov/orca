@@ -33,6 +33,9 @@ _DEADLOCK_THRESHOLD = 30.0
 class OrcaApp(App[None]):
     """Orca TUI — interactive viewer for orchestrator runs."""
 
+    _daemon_sock: Path
+    _daemon_mode: bool
+
     THEME = "flexoki"
 
     CSS = """
@@ -88,6 +91,16 @@ class OrcaApp(App[None]):
         self._insights_state: dict[str, str] = insights_state if insights_state is not None else {}
         self._selected_session_id: str | None = None
         self._sessions: list[dict[str, object]] = []
+
+    @classmethod
+    def from_daemon(cls, sock_path: Path) -> OrcaApp:
+        """Create an OrcaApp that connects to the daemon."""
+        # This is a stub for the first iteration.
+        # Full implementation (run list screen, daemon polling) comes later.
+        app = cls.__new__(cls)
+        app._daemon_sock = sock_path
+        app._daemon_mode = True
+        return app
 
     @property
     def _insights_tracking_id(self) -> str:

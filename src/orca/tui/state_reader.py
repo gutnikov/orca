@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+import aiohttp
+
 from orca.engine.types import State
 
 
@@ -49,3 +51,33 @@ class StateReader:
 
     def reset(self) -> None:
         self._last_mtime = 0.0
+
+
+class DaemonStateReader:
+    """Reads orchestrator state from the daemon HTTP API."""
+
+    def __init__(self, session: aiohttp.ClientSession, run_id: str) -> None:
+        self._session = session
+        self._run_id = run_id
+        self._last_state_dict: dict[str, Any] | None = None
+        self._sessions: list[dict[str, Any]] = []
+
+    async def read(self) -> tuple[State, list[dict[str, Any]]] | None:
+        """Fetch state from daemon. Returns None if unchanged."""
+        async with self._session.get(f"http://localhost/api/runs/{self._run_id}") as resp:
+            if resp.status != 200:
+                return None
+            data = await resp.json()
+        state_dict = data.get("state")
+        if state_dict == self._last_state_dict:
+            return None
+        self._last_state_dict = state_dict
+        state = State.from_dict(state_dict)
+        return state, self._sessions
+
+    @property
+    def sessions(self) -> list[dict[str, Any]]:
+        return self._sessions
+
+    def reset(self) -> None:
+        self._last_state_dict = None
