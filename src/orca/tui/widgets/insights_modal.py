@@ -5,6 +5,7 @@ from typing import Any
 
 from rich.text import Text
 from textual.app import ComposeResult
+from textual.containers import VerticalScroll
 from textual.widget import Widget
 from textual.widgets import Static
 
@@ -26,7 +27,7 @@ class InsightsModal(Widget):
         display: none;
         dock: bottom;
         width: 100%;
-        height: 60%;
+        height: 66%;
         background: #252540;
         border-top: solid #38b6cc;
         padding: 1 2;
@@ -35,6 +36,9 @@ class InsightsModal(Widget):
     }
     InsightsModal Static {
         width: 1fr;
+    }
+    InsightsModal #insights-scroll {
+        height: 1fr;
     }
     InsightsModal #insights-header {
         height: 1;
@@ -51,13 +55,15 @@ class InsightsModal(Widget):
     def __init__(self) -> None:
         super().__init__(id="insights-modal")
         self._header = Static("◆ Insights", id="insights-header")
+        self._scroll = VerticalScroll(id="insights-scroll")
         self._static = Static("")
         self._footer = Static("j/k navigate • Enter view detail • Esc close", id="insights-footer")
         self._entries: list[dict[str, Any]] = []
 
     def compose(self) -> ComposeResult:
         yield self._header
-        yield self._static
+        with self._scroll:
+            yield self._static
         yield self._footer
 
     def open(self, entries: list[dict[str, Any]]) -> None:

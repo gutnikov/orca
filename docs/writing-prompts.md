@@ -42,7 +42,7 @@ Include the schema directly in the prompt so the agent can self-check without gu
 
 ### 4. Fail-Safe Exits
 
-Always give the agent a way to say "I can't do this" rather than forcing it to produce bad work. If the plan is insufficient, report `blocked`. If the scope is wrong, report `needs_rescope`. If the merge fails, report `failed`.
+Always give the agent a way to say "I can't do this" rather than forcing it to produce bad work. If the plan is insufficient, report `blocked`. If the scope is wrong, report `needs_rescope`. If the merge fails, report `failed`. If the agent needs a human answer, report `needs_feedback`.
 
 Agents that have no escape hatch will hallucinate success to satisfy the prompt.
 
@@ -50,11 +50,18 @@ Agents that have no escape hatch will hallucinate success to satisfy the prompt.
 result_format:
   outcome:
     type: enum
-    values: [done, blocked]
+    values: [done, blocked, needs_feedback]
     values_description:
       done: "All tests pass, changes committed"
       blocked: "Cannot proceed — explain why in summary"
+      needs_feedback: "Blocked on a question — need user clarification"
+  feedback_questions:
+    type: string
+    required_when: [needs_feedback]
+    description: "Questions for the user"
 ```
+
+`needs_feedback` is a reserved outcome — it doesn't need an `on:` rule. The orchestrator spawns a feedback agent that talks to the user via Slack and re-dispatches the worker with answers in `{{ issue.feedback_context }}`. Requires `integrations.slack` in `orca.yml`.
 
 ### 5. Step-by-Step Instructions
 
@@ -135,7 +142,23 @@ Learn from what went wrong:
 {% endif %}
 ```
 
-### 10. Commit Message Format
+### 10. User Feedback Context
+
+When a worker is re-dispatched after a `needs_feedback` round, include the user's answers so the agent doesn't ask the same questions again:
+
+```jinja2
+{% if issue.feedback_context %}
+## User Feedback
+
+You previously asked for clarification. Here is the conversation with the user:
+
+{{ issue.feedback_context }}
+
+Use this information to proceed. Do not ask the same questions again.
+{% endif %}
+```
+
+### 11. Commit Message Format
 
 Specify the exact commit message format. Agents will invent their own conventions otherwise, making git history unreadable.
 
@@ -156,6 +179,8 @@ Orca renders prompts as Jinja2 templates. These variables are available in every
 | `issue.depends_on` | list | IDs of issues this depends on |
 | `issue.children` | list | Child issues from previous decomposition |
 | `issue.base_branch` | string | Git branch to merge into |
+| `issue.feedback_context` | string | User's answers from a previous `needs_feedback` round (empty if none) |
+| `issue.feedback_questions` | string | Questions the worker asked in the previous round (empty if none) |
 | `result_format` | dict | Output schema from `orca.yml` |
 | `result_path` | string | Absolute path where the agent must write result JSON |
 
@@ -184,7 +209,7 @@ result_format:
     description: "Brief summary of the plan or reason for rescoping"
 ```
 
-Each `outcome` value maps to a transition in `on:`, which routes the issue to the next state. Design outcomes as meaningful decisions, not just pass/fail.
+Each `outcome` value maps to a transition in `on:`, which routes the issue to the next state. Design outcomes as meaningful decisions, not just pass/fail. The exception is `needs_feedback` — a reserved outcome that the orchestrator handles automatically (no `on:` rule needed).
 
 ### Conditional Fields
 
@@ -314,13 +339,14 @@ Use this when writing or reviewing a prompt.
 - [ ] Conflict avoidance rules are included (if agents run in parallel)
 - [ ] Dependencies are shown conditionally (`{% if issue.depends_on %}`)
 - [ ] Previous failure context is included (`{% if issue.children %}`)
+- [ ] User feedback context is included (`{% if issue.feedback_context %}`)
 
 ### Output
 
 - [ ] Result format schema is embedded in the prompt via `{{ result_format | tojson(indent=2) }}`
 - [ ] Result path is specified via `{{ result_path }}`
-- [ ] Every outcome value maps to a transition in `orca.yml`
-- [ ] A fail-safe outcome exists (e.g., `blocked`, `needs_rescope`, `failed`)
+- [ ] Every non-reserved outcome value maps to a transition in `orca.yml`
+- [ ] A fail-safe outcome exists (e.g., `blocked`, `needs_rescope`, `failed`, `needs_feedback`)
 - [ ] `required_when` is used for conditional fields
 - [ ] Each outcome has a `values_description` in `orca.yml` explaining when to use it
 

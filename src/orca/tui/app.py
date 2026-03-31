@@ -170,17 +170,12 @@ class OrcaApp(App[None]):
         log_path_str = self._session_log_paths.get(message.session_id)
         log_path = Path(log_path_str) if log_path_str else None
 
-        # Look up result data from event log
+        # Look up result data for the selected session
         result_data: dict[str, object] | None = None
         state_name = ""
         duration = ""
-        if self._state and message.issue_id:
-            issue = self._state.issues.get(message.issue_id)
-            if issue and not message.active:
-                for entry in reversed(issue.event_log):
-                    if entry.type == "worker_result":
-                        result_data = entry.data
-                        break
+        if message.issue_id and not message.active:
+            result_data = self._session_result_map(message.issue_id).get(message.session_id)
 
         # Find session info for state_name and duration
         session = next(
@@ -223,13 +218,8 @@ class OrcaApp(App[None]):
         result_data: dict[str, object] | None = None
         state_name = ""
         duration = ""
-        if self._state and message.issue_id:
-            issue = self._state.issues.get(message.issue_id)
-            if issue and not message.active:
-                for entry in reversed(issue.event_log):
-                    if entry.type == "worker_result":
-                        result_data = entry.data
-                        break
+        if message.issue_id and not message.active:
+            result_data = self._session_result_map(message.issue_id).get(message.session_id)
 
         session = next(
             (s for s in self._sessions if s.get("session_id") == message.session_id),
@@ -295,21 +285,32 @@ class OrcaApp(App[None]):
             self._hot_sessions.discard(self._selected_session_id)
             self._selected_session_id = None
 
-    def _update_phase_outcomes(self, issue_id: str, phases: PhasesPanel) -> None:
-        """Extract outcome per session from event_log and pass to PhasesPanel."""
+    def _session_result_map(self, issue_id: str) -> dict[str, dict[str, object]]:
+        """Build a mapping from session_id to its worker_result event data.
+
+        Matches completed sessions to worker_result events by order (zip).
+        """
         if not self._state:
-            return
+            return {}
         issue = self._state.issues.get(issue_id)
         if not issue:
-            return
-        # Match completed sessions to worker_result events by order
+            return {}
         issue_sessions = [s for s in self._sessions if s.get("issue_id") == issue_id and s.get("completed_at")]
         result_events = [e for e in issue.event_log if e.type == "worker_result"]
-        outcomes: dict[str, str] = {}
+        result_map: dict[str, dict[str, object]] = {}
         for session, event in zip(issue_sessions, result_events, strict=False):
             sid = str(session.get("session_id", ""))
-            outcome = str(event.data.get("outcome", ""))
-            if sid and outcome:
+            if sid:
+                result_map[sid] = event.data
+        return result_map
+
+    def _update_phase_outcomes(self, issue_id: str, phases: PhasesPanel) -> None:
+        """Extract outcome per session from event_log and pass to PhasesPanel."""
+        result_map = self._session_result_map(issue_id)
+        outcomes: dict[str, str] = {}
+        for sid, data in result_map.items():
+            outcome = str(data.get("outcome", ""))
+            if outcome:
                 outcomes[sid] = outcome
         phases.set_outcomes(outcomes)
 

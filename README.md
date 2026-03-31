@@ -184,6 +184,33 @@ states:
     max_workers: 1    # one at a time
 ```
 
+**User feedback via Slack** — any worker can pause and ask the user a question. Add `needs_feedback` to a state's outcome values and the orchestrator handles the rest: it spawns a feedback agent that conducts a multi-turn Slack conversation, then re-dispatches the original worker with the answers. No `on:` rule needed — `needs_feedback` is a reserved outcome.
+
+```yaml
+states:
+  implementing:
+    worker:
+      kind: claude-code
+      prompt: prompts/implement.md
+      result_format:
+        outcome:
+          type: enum
+          values: [done, blocked, needs_feedback]
+          values_description:
+            done: "All tests pass, changes committed"
+            blocked: "Cannot proceed"
+            needs_feedback: "Need clarification from user"
+        feedback_questions:
+          type: string
+          required_when: [needs_feedback]
+    on:
+      done: applying
+      blocked: planning
+      # needs_feedback has no on: rule — handled automatically
+```
+
+Requires `integrations.slack` in `orca.yml` (see Integrations below). Each feedback round counts toward `max_worker_retries`. The re-dispatched worker sees `{{ issue.feedback_context }}` in its prompt template.
+
 **Timeouts and retries:**
 
 ```yaml
@@ -274,6 +301,10 @@ integrations:
 ```
 
 Your Slack app needs Bot Token Scopes (`chat:write`, `im:write`) and an App-Level Token with `connections:write` (Socket Mode).
+
+Slack powers two features:
+- **Direct HITL** — workers call `slack_start_conversation` / `slack_wait_for_reply` tools directly in their prompt
+- **`needs_feedback` outcome** — any worker can return `needs_feedback` to pause and trigger an automated feedback agent that talks to the user, then re-dispatches the worker with answers (see Workflow Features above)
 
 **Insights** — pass `--insights` to spawn a monitoring agent that watches the pipeline for errors, loops, and slow workers, surfacing findings as interactive entries in the TUI.
 

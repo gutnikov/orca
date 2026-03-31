@@ -4,6 +4,7 @@ import asyncio
 import logging
 import shlex
 import subprocess
+import time
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -124,6 +125,10 @@ class TmuxSession:
         )
         if result.returncode != 0:
             return False
+        # Brief pause to let the TUI process the pasted text before submitting.
+        # Without this, Claude Code's paste handler may not have finished rendering
+        # the input by the time Enter arrives, causing the message to sit unsubmitted.
+        time.sleep(0.5)
         # Send Enter to submit the message
         subprocess.run(
             ["tmux", "send-keys", "-t", self._session_name, "Enter"],

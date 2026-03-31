@@ -186,6 +186,28 @@ class CliAgentWorker:
                             extra={"event": "result_detected", "issue_id": effect.issue_id},
                         )
                     else:
+                        # Check if this is a stale result from a previous state:
+                        # the outcome value doesn't match any valid value for the
+                        # current state.  Delete the file so it doesn't block
+                        # polling for the real result.
+                        outcome_def = effect.result_format.get("outcome", {})
+                        valid_outcomes = outcome_def.get("values", [])
+                        candidate_outcome = candidate.get("outcome")
+                        if candidate_outcome is not None and candidate_outcome not in valid_outcomes:
+                            result_path.unlink(missing_ok=True)
+                            logger.info(
+                                "Deleted stale result.json for issue %s (outcome '%s' not in %s)",
+                                effect.issue_id,
+                                candidate_outcome,
+                                valid_outcomes,
+                                extra={
+                                    "event": "stale_result_deleted",
+                                    "issue_id": effect.issue_id,
+                                    "stale_outcome": candidate_outcome,
+                                },
+                            )
+                            continue
+
                         last_validation_error = error
                         logger.warning(
                             "Invalid result.json for issue %s: %s",
