@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from orca.engine import parse_config, reduce
-from orca.engine.types import CreateEvent, DispatchWorkerEffect, State
+from orca.engine.types import CreateEvent, DispatchWorkerEffect, State, StateMachineConfig
 from orca.orchestrator.branches import BranchMap
 from orca.orchestrator.orchestrator import Orchestrator
 from orca.orchestrator.persistence import Persistence
@@ -211,3 +211,69 @@ class TestOrchestrator:
         assert final_state.issues["issue-1"].state == "done"
         # Verify we had at least 2 calls on 'todo' (one failure + one success)
         assert call_count.get("todo", 0) >= 2
+
+
+class TestOrchestratorAccessors:
+    """Tests for Orchestrator public accessors and session control methods."""
+
+    def _make_orchestrator(self, tmp_path: Path) -> Orchestrator:
+        config = parse_config(SIMPLE_CONFIG)
+        state = State(issues={}, worker_queues={})
+        persistence = Persistence(tmp_path, "main")
+        branches = BranchMap(tmp_path, "main")
+        worker = MockWorker(outcomes={})
+        return Orchestrator(
+            config=config,
+            state=state,
+            root_branch="main",
+            persistence=persistence,
+            branches=branches,
+            workers={"claude-code": worker},
+            generate_id=_counter(),
+            now=_now,
+            worktree_mgr=FakeWorktreeManager(tmp_path),
+        )
+
+    def test_state_property(self, tmp_path: Path) -> None:
+        orchestrator = self._make_orchestrator(tmp_path)
+        state = orchestrator.state
+        assert isinstance(state, State)
+        assert state.issues == {}
+
+    def test_config_property(self, tmp_path: Path) -> None:
+        orchestrator = self._make_orchestrator(tmp_path)
+        config = orchestrator.config
+        assert isinstance(config, StateMachineConfig)
+        # SIMPLE_CONFIG has one unnamed type, parsed as "default"
+        assert "default" in config.types
+        assert "todo" in config.types["default"].states
+
+    def test_get_session_log_missing(self, tmp_path: Path) -> None:
+        orchestrator = self._make_orchestrator(tmp_path)
+        assert orchestrator.get_session_log("nonexistent") == ""
+
+    def test_get_session_log_reads_file(self, tmp_path: Path) -> None:
+        orchestrator = self._make_orchestrator(tmp_path)
+        # Write a fake log file
+        log_file = tmp_path / "session.log"
+        lines = [f"line {i}" for i in range(1, 11)]
+        log_file.write_text("\n".join(lines) + "\n")
+        # Register the log path
+        orchestrator.session_log_paths["tid-1"] = str(log_file)
+        # Full log
+        full = orchestrator.get_session_log("tid-1")
+        assert "line 1" in full
+        assert "line 10" in full
+        # Tail 3 lines
+        tail = orchestrator.get_session_log("tid-1", tail=3)
+        tail_lines = tail.strip().split("\n")
+        assert len(tail_lines) == 3
+        assert "line 10" in tail
+
+    def test_hot_cold_session(self, tmp_path: Path) -> None:
+        orchestrator = self._make_orchestrator(tmp_path)
+        assert "s1" not in orchestrator.hot_sessions
+        orchestrator.set_hot_session("s1")
+        assert "s1" in orchestrator.hot_sessions
+        orchestrator.set_cold_session("s1")
+        assert "s1" not in orchestrator.hot_sessions

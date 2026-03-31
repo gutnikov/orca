@@ -62,8 +62,8 @@ class Orchestrator:
         insights_state: dict[str, str] | None = None,
         slack_mcp_url: str | None = None,
     ) -> None:
-        self.config = config
-        self.state = state
+        self._config = config
+        self._state = state
         self.root_branch = root_branch
         self.persistence = persistence
         self.branches = branches
@@ -94,6 +94,16 @@ class Orchestrator:
             self._used_slugs.add(branch)
 
     @property
+    def state(self) -> State:
+        """Current state of the state machine."""
+        return self._state
+
+    @property
+    def config(self) -> StateMachineConfig:
+        """State machine configuration."""
+        return self._config
+
+    @property
     def hot_sessions(self) -> set[str]:
         """Sessions the TUI wants captured frequently."""
         return self._hot_sessions
@@ -107,12 +117,39 @@ class Orchestrator:
     def insights_tracking_id(self) -> str:
         return self._insights_tracking_id
 
+    def get_session_log(self, tracking_id: str, tail: int = 100) -> str:
+        """Read session log content for a tracking ID.
+
+        Returns empty string if the tracking ID is unknown or the log file
+        does not exist.  When *tail* is given, only the last *tail* lines
+        are returned.
+        """
+        log_path_str = self._session_log_paths.get(tracking_id)
+        if not log_path_str:
+            return ""
+        log_path = Path(log_path_str)
+        if not log_path.exists():
+            return ""
+        text = log_path.read_text()
+        lines = text.splitlines()
+        if tail and len(lines) > tail:
+            lines = lines[-tail:]
+        return "\n".join(lines) + "\n"
+
+    def set_hot_session(self, session_id: str) -> None:
+        """Mark a session as hot (high-frequency capture)."""
+        self._hot_sessions.add(session_id)
+
+    def set_cold_session(self, session_id: str) -> None:
+        """Mark a session as cold (low-frequency capture)."""
+        self._hot_sessions.discard(session_id)
+
     def _is_terminal(self, issue_id: str) -> bool:
         """Return True if the issue's current state is terminal in config."""
-        issue = self.state.issues.get(issue_id)
+        issue = self._state.issues.get(issue_id)
         if issue is None:
             return False
-        type_def = self.config.types.get(issue.type)
+        type_def = self._config.types.get(issue.type)
         if type_def is None:
             return False
         state_def = type_def.states.get(issue.state)
@@ -155,7 +192,7 @@ class Orchestrator:
             return worktree_path
 
         # Derive a human-readable branch name from the issue title
-        issue = self.state.issues[issue_id]
+        issue = self._state.issues[issue_id]
         title = str(issue.fields.get("title", "issue"))
 
         # Find parent branch to base the worktree on
@@ -177,7 +214,7 @@ class Orchestrator:
 
     def _spawn_worker(self, effect: DispatchWorkerEffect) -> None:
         """Resolve the worker for the effect and spawn an asyncio task."""
-        type_def = self.config.types.get(effect.issue_type)
+        type_def = self._config.types.get(effect.issue_type)
         if type_def is None:
             logger.warning(
                 "No type definition for type %r — skipping dispatch",
@@ -222,7 +259,7 @@ class Orchestrator:
             )
 
         # Exponential backoff for retries: 5s, 10s, 20s, 40s, ...
-        issue = self.state.issues.get(effect.issue_id)
+        issue = self._state.issues.get(effect.issue_id)
         failures = issue.failure_count if issue else 0
         backoff = 5.0 * (2**failures) if failures > 0 else 0.0
 
@@ -265,8 +302,8 @@ class Orchestrator:
                 error="needs_feedback requested but Slack HITL integration is not configured",
                 timestamp=ts,
             )
-            self.state, new_effects = reduce(self.config, self.state, failed_event, self.generate_id, self.now)
-            self.persistence.save(self.state)
+            self._state, new_effects = reduce(self._config, self._state, failed_event, self.generate_id, self.now)
+            self.persistence.save(self._state)
             pending: list[DispatchWorkerEffect] = []
             self._route_effects(new_effects, pending)
             for p in pending:
@@ -354,7 +391,7 @@ class Orchestrator:
 
     def _resolve_base_branch(self, issue_id: str) -> str:
         """Resolve the base branch for an issue (parent's branch or root_branch)."""
-        issue = self.state.issues.get(issue_id)
+        issue = self._state.issues.get(issue_id)
         if issue is not None and issue.decomposed_from is not None:
             parent_branch = self.branches.get(issue.decomposed_from)
             if parent_branch is not None:
@@ -420,7 +457,7 @@ class Orchestrator:
             issue={**effect.issue, "base_branch": base_branch},
         )
 
-        type_def = self.config.types.get(effect.issue_type)
+        type_def = self._config.types.get(effect.issue_type)
         state_def = type_def.states.get(effect.state) if type_def is not None else None
         inactivity_timeout = (
             state_def.worker.inactivity_timeout or state_def.worker.timeout if state_def and state_def.worker else None
@@ -481,7 +518,7 @@ class Orchestrator:
             issue_id = signal_file.name
             signal_file.unlink()
 
-            issue = self.state.issues.get(issue_id)
+            issue = self._state.issues.get(issue_id)
             if issue is None:
                 continue
             if issue.worker_active:
@@ -493,7 +530,7 @@ class Orchestrator:
             issue.failure_count = 0
             issue.worker_active = True
 
-            type_def = self.config.types.get(issue.type)
+            type_def = self._config.types.get(issue.type)
             if type_def is None:
                 continue
             state_def = type_def.states.get(issue.state)
@@ -507,11 +544,11 @@ class Orchestrator:
                     issue_id=issue_id,
                     issue_type=issue.type,
                     state=issue.state,
-                    result_format=build_result_format(self.config, issue.type, issue.state),
-                    issue=build_issue_context(self.state, issue_id),
+                    result_format=build_result_format(self._config, issue.type, issue.state),
+                    issue=build_issue_context(self._state, issue_id),
                 )
             )
-            self.persistence.save(self.state)
+            self.persistence.save(self._state)
             logger.info(
                 "Retry signal processed for issue %s",
                 issue_id,
@@ -687,18 +724,18 @@ class Orchestrator:
                         timestamp=ts,
                     )
 
-                old_issues = set(self.state.issues.keys())
-                old_issue_state = self.state.issues[issue_id].state if issue_id in self.state.issues else None
+                old_issues = set(self._state.issues.keys())
+                old_issue_state = self._state.issues[issue_id].state if issue_id in self._state.issues else None
 
-                self.state, new_effects = reduce(
-                    self.config,
-                    self.state,
+                self._state, new_effects = reduce(
+                    self._config,
+                    self._state,
                     event,
                     self.generate_id,
                     self.now,
                 )
 
-                self.persistence.save(self.state)
+                self.persistence.save(self._state)
 
                 # Log worker outcome
                 if isinstance(outcome, WorkerSuccess):
@@ -720,7 +757,7 @@ class Orchestrator:
                     )
 
                 # Detect state transition
-                new_issue_state = self.state.issues[issue_id].state if issue_id in self.state.issues else None
+                new_issue_state = self._state.issues[issue_id].state if issue_id in self._state.issues else None
                 if old_issue_state and new_issue_state and old_issue_state != new_issue_state:
                     logger.info(
                         "Issue %s transitioned from %s to %s",
@@ -736,9 +773,9 @@ class Orchestrator:
                     )
 
                 # Detect new issues (decomposition)
-                new_issues = set(self.state.issues.keys()) - old_issues
+                new_issues = set(self._state.issues.keys()) - old_issues
                 for new_id in new_issues:
-                    new_issue = self.state.issues[new_id]
+                    new_issue = self._state.issues[new_id]
                     logger.info(
                         "Issue %s created: %s",
                         new_id,
