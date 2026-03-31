@@ -20,6 +20,7 @@ from orca.engine.types import (
 )
 
 _ALLOWED_WORKER_KINDS = {"claude-code", "opencode"}
+_RESERVED_OUTCOMES = frozenset({"needs_feedback"})
 
 
 class ConfigValidationError(Exception):
@@ -230,6 +231,21 @@ def _validate(config: StateMachineConfig) -> None:
                         msg = (
                             f"Type '{type_name}', on key '{key}' in state '{name}' "
                             f"does not match any outcome value ({outcome.values})"
+                        )
+                        raise ConfigValidationError(msg)
+
+            # Rule 10: if a state has a worker with an outcome enum, at least one non-reserved
+            # outcome value must have a matching on: rule (reserved outcomes like needs_feedback
+            # do not need on: rules, but the state must still be able to progress)
+            if state.worker is not None:
+                outcome_field = state.worker.result_format.get("outcome")
+                if isinstance(outcome_field, EnumFieldDef):
+                    non_reserved = [v for v in outcome_field.values if v not in _RESERVED_OUTCOMES]
+                    routable = [v for v in non_reserved if v in state.on]
+                    if not routable:
+                        msg = (
+                            f"Type '{type_name}', state '{name}' has no non-reserved outcome values "
+                            f"with matching on: rules — state cannot progress"
                         )
                         raise ConfigValidationError(msg)
 

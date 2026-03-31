@@ -775,3 +775,78 @@ types:
 """
         with pytest.raises(ConfigValidationError, match="implementing.*does not exist"):
             parse_config(yaml_str)
+
+
+class TestNeedsFeedbackValidation:
+    """needs_feedback in outcome values should not require a matching on: rule."""
+
+    def test_needs_feedback_outcome_without_on_rule_is_valid(self) -> None:
+        yaml_str = """\
+issue:
+  fields:
+    title:
+      type: string
+      description: Issue title
+
+states:
+  working:
+    worker:
+      kind: claude-code
+      prompt: prompts/default.md
+      result_format:
+        outcome:
+          type: enum
+          values:
+            - done
+            - needs_feedback
+          description: Outcome
+        feedback_questions:
+          type: string
+          description: Questions for user
+          required_when: needs_feedback
+    on:
+      done: finished
+
+  finished:
+    terminal: true
+
+initial: working
+"""
+        config = parse_config(yaml_str)
+        outcome = config.types["default"].states["working"].worker
+        assert outcome is not None
+        assert "needs_feedback" in outcome.result_format["outcome"].values  # type: ignore[union-attr]
+
+    def test_needs_feedback_only_outcome_is_invalid(self) -> None:
+        """A state with ONLY needs_feedback and no real on: rules is invalid (no way to progress)."""
+        yaml_str = """\
+issue:
+  fields:
+    title:
+      type: string
+      description: Issue title
+
+states:
+  working:
+    worker:
+      kind: claude-code
+      prompt: prompts/default.md
+      result_format:
+        outcome:
+          type: enum
+          values:
+            - needs_feedback
+          description: Outcome
+        feedback_questions:
+          type: string
+          description: Questions
+          required_when: needs_feedback
+    on: {}
+
+  done:
+    terminal: true
+
+initial: working
+"""
+        with pytest.raises(ConfigValidationError):
+            parse_config(yaml_str)
