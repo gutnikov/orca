@@ -203,7 +203,14 @@ class WorkerFailedEvent:
     timestamp: str
 
 
-Event = CreateEvent | AdvanceEvent | WorkerResultEvent | WorkerFailedEvent
+@dataclass(frozen=True)
+class FeedbackReceivedEvent:
+    issue_id: str
+    feedback_context: str
+    timestamp: str
+
+
+Event = CreateEvent | AdvanceEvent | WorkerResultEvent | WorkerFailedEvent | FeedbackReceivedEvent
 
 
 # --- Effects (frozen) ---
@@ -224,4 +231,13 @@ class ErrorEffect:
     message: str
 
 
-Effect = DispatchWorkerEffect | ErrorEffect
+@dataclass(frozen=True)
+class DispatchFeedbackAgentEffect:
+    issue_id: str
+    issue_type: str
+    state: str
+    questions: str
+    issue: dict[str, Any]
+
+
+Effect = DispatchWorkerEffect | ErrorEffect | DispatchFeedbackAgentEffect
