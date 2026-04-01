@@ -224,6 +224,7 @@ class DispatchWorkerEffect:
     state: str
     result_format: dict[str, Any]
     issue: dict[str, Any]
+    progress_enabled: bool = False
 
 
 @dataclass(frozen=True)

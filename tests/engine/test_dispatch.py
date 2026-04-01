@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from orca.engine.config import parse_config
 from orca.engine.dispatch import (
     backfill_queue,
     build_issue_context,
@@ -395,3 +398,66 @@ class TestRemoveFromQueue:
     def test_remove_from_missing_queue_no_error(self) -> None:
         state = State(issues={}, worker_queues={})
         remove_from_queue(state, "default:apply", "A")  # should not raise
+
+
+@pytest.fixture
+def simple_config() -> StateMachineConfig:
+    return _make_config()
+
+
+class TestProgressEnabled:
+    def test_dispatch_effect_carries_progress_enabled(self) -> None:
+        """When worker has progress: true, DispatchWorkerEffect.progress_enabled is True."""
+        config = parse_config("""
+initial: doing
+states:
+  doing:
+    worker:
+      kind: claude-code
+      prompt: prompts/doing.md
+      progress: true
+      result_format:
+        outcome:
+          type: enum
+          values: [done]
+          description: "Done"
+    on:
+      done: done
+  done:
+    terminal: true
+""")
+        state = State(issues={}, worker_queues={})
+        issue = Issue(
+            type="default",
+            fields={"title": "Test"},
+            state="doing",
+            worker_active=False,
+            decomposed_from=None,
+            depends_on=[],
+            event_log=[],
+        )
+        state.issues["i1"] = issue
+        effects: list[Effect] = []
+        try_dispatch(config, state, "i1", effects)
+        assert len(effects) == 1
+        assert isinstance(effects[0], DispatchWorkerEffect)
+        assert effects[0].progress_enabled is True
+
+    def test_dispatch_effect_progress_disabled_by_default(self, simple_config: StateMachineConfig) -> None:
+        """Without progress: true, progress_enabled is False."""
+        state = State(issues={}, worker_queues={})
+        issue = Issue(
+            type="default",
+            fields={"title": "Test"},
+            state="todo",
+            worker_active=False,
+            decomposed_from=None,
+            depends_on=[],
+            event_log=[],
+        )
+        state.issues["i1"] = issue
+        effects: list[Effect] = []
+        try_dispatch(simple_config, state, "i1", effects)
+        assert len(effects) == 1
+        assert isinstance(effects[0], DispatchWorkerEffect)
+        assert effects[0].progress_enabled is False

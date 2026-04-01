@@ -145,6 +145,7 @@ def try_dispatch(
             state=state_name,
             result_format=build_result_format(config, issue.type, state_name),
             issue=build_issue_context(state, issue_id),
+            progress_enabled=state_def.worker.progress,
         )
     )
 
