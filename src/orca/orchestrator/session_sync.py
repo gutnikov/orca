@@ -86,6 +86,20 @@ class SessionManifest:
                 return
         logger.warning("update_result_error: session %s not found in manifest", session_id)
 
+    def update_progress(self, session_id: str, progress: int, status: str | None) -> None:
+        """Update progress and status for a session."""
+        from datetime import UTC, datetime
+
+        entries = self.read()
+        for entry in entries:
+            if entry["session_id"] == session_id:
+                entry["progress"] = progress
+                entry["status"] = status
+                entry["progress_updated_at"] = datetime.now(UTC).isoformat()
+                self._write(entries)
+                return
+        logger.warning("update_progress: session %s not found in manifest", session_id)
+
     def mark_orphans_completed(self, completed_at: str) -> int:
         """Mark all incomplete sessions as completed (orphans from a crashed run)."""
         entries = self.read()

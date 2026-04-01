@@ -102,3 +102,54 @@ class TestSessionManifest:
 
         assert manifest.path.exists()
         assert not manifest.path.with_suffix(".tmp").exists()
+
+
+class TestUpdateProgress:
+    def test_update_progress_sets_fields(self, tmp_path: Path) -> None:
+        manifest = SessionManifest(tmp_path / "runs" / "main")
+        manifest.append(
+            issue_id="issue-1",
+            state="implementing",
+            session_id="sess-aaa",
+            worktree_path="/tmp/wt/main",
+            started_at="2026-03-22T10:00:00Z",
+        )
+
+        manifest.update_progress("sess-aaa", 42, "Writing tests")
+
+        entries = manifest.read()
+        assert entries[0]["progress"] == 42
+        assert entries[0]["status"] == "Writing tests"
+        assert entries[0]["progress_updated_at"] is not None
+
+    def test_update_progress_none_status(self, tmp_path: Path) -> None:
+        manifest = SessionManifest(tmp_path / "runs" / "main")
+        manifest.append(
+            issue_id="issue-1",
+            state="implementing",
+            session_id="sess-aaa",
+            worktree_path="/tmp/wt/main",
+            started_at="2026-03-22T10:00:00Z",
+        )
+
+        manifest.update_progress("sess-aaa", 50, None)
+
+        entries = manifest.read()
+        assert entries[0]["progress"] == 50
+        assert entries[0]["status"] is None
+
+    def test_update_progress_unknown_session(self, tmp_path: Path) -> None:
+        """Updating a non-existent session is a no-op (no crash)."""
+        manifest = SessionManifest(tmp_path / "runs" / "main")
+        manifest.append(
+            issue_id="issue-1",
+            state="implementing",
+            session_id="sess-aaa",
+            worktree_path="/tmp/wt/main",
+            started_at="2026-03-22T10:00:00Z",
+        )
+
+        manifest.update_progress("sess-zzz", 10, "Ghost")
+
+        entries = manifest.read()
+        assert "progress" not in entries[0]
