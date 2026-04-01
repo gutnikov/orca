@@ -850,3 +850,35 @@ initial: working
 """
         with pytest.raises(ConfigValidationError):
             parse_config(yaml_str)
+
+
+class TestProgressConfig:
+    def test_progress_true_parsed(self) -> None:
+        yaml_str = """
+initial: doing
+states:
+  doing:
+    worker:
+      kind: claude-code
+      prompt: prompts/doing.md
+      progress: true
+      result_format:
+        outcome:
+          type: enum
+          values: [done]
+          description: "Done"
+    on:
+      done: done
+  done:
+    terminal: true
+"""
+        cfg = parse_config(yaml_str)
+        worker = cfg.types["default"].states["doing"].worker
+        assert worker is not None
+        assert worker.progress is True
+
+    def test_progress_default_false(self, simple_config_yaml: str) -> None:
+        cfg = parse_config(simple_config_yaml)
+        worker = cfg.types["default"].states["todo"].worker
+        assert worker is not None
+        assert worker.progress is False

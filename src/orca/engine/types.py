@@ -44,6 +44,7 @@ class WorkerDef:
     inactivity_timeout: int | None = None
     model: str | None = None
     args: tuple[str, ...] | None = None
+    progress: bool = False
 
 
 @dataclass(frozen=True)

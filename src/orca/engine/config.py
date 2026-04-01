@@ -104,6 +104,7 @@ def _parse_state(name: str, raw_data: dict[str, Any] | None) -> StateDef:
         model: str | None = worker_data.get("model")
         raw_args = worker_data.get("args")
         args: tuple[str, ...] | None = tuple(str(a) for a in raw_args) if raw_args is not None else None
+        progress: bool = bool(worker_data.get("progress", False))
         worker = WorkerDef(
             kind=kind,
             prompt=prompt,
@@ -112,6 +113,7 @@ def _parse_state(name: str, raw_data: dict[str, Any] | None) -> StateDef:
             inactivity_timeout=inactivity_timeout,
             model=model,
             args=args,
+            progress=progress,
         )
 
     on: dict[str, OnRule] = {}
