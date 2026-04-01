@@ -1,4 +1,4 @@
-"""orca mcp — MCP stdio bridge."""
+"""orca mcp — MCP stdio bridge to the daemon."""
 
 from __future__ import annotations
 
@@ -6,21 +6,17 @@ import sys
 
 
 def mcp_command() -> None:
-    """Create an in-process RunManager and MCP server, run on stdio transport.
-
-    NOTE: first iteration creates in-process RunManager, not UDS proxy.
-    """
+    """Create an MCP server backed by DaemonClient, run on stdio transport."""
     from orca.cli.daemon_cmd import _repo_root
-    from orca.daemon.lifecycle import check_daemon_running
+    from orca.daemon.client import DaemonClient
+    from orca.daemon.lifecycle import check_daemon_running, socket_path
+    from orca.daemon.mcp_tools import create_mcp_server
 
     repo = _repo_root()
     if not check_daemon_running(repo):
         print("Error: daemon is not running. Start it with: orca daemon start", file=sys.stderr)
         raise SystemExit(1)
 
-    from orca.daemon.manager import RunManager
-    from orca.daemon.mcp_tools import create_mcp_server
-
-    manager = RunManager(repo)
-    server = create_mcp_server(manager)
+    client = DaemonClient(socket_path(repo))
+    server = create_mcp_server(client)
     server.run(transport="stdio")

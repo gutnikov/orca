@@ -781,3 +781,146 @@ class TestDiamondDependency:
         for did in dependent_ids:
             assert did in dispatched_ids
             assert state.issues[did].worker_active is True
+
+
+class TestFailedBuiltinTarget:
+    """Tests for the built-in 'failed' transition target."""
+
+    FAILED_CONFIG = """\
+issue:
+  fields:
+    title:
+      type: string
+      description: Issue title
+    failure_context:
+      type: string
+      description: Failure reason
+
+states:
+  working:
+    worker:
+      kind: claude-code
+      prompt: prompts/default.md
+      result_format:
+        outcome:
+          type: enum
+          values:
+            - complete
+            - fail
+          description: Work outcome
+        reason:
+          type: string
+          description: Failure reason
+          required_when: fail
+    on:
+      complete: done
+      fail: failed
+
+initial: working
+
+max-retries: 3
+"""
+
+    def test_failed_target_keeps_issue_in_current_state(self) -> None:
+        config = parse_config(self.FAILED_CONFIG)
+        state = State(issues={}, worker_queues={})
+        gen = _counter()
+
+        state, _ = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="A", fields={"title": "T"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+        assert state.issues["A"].state == "working"
+        assert state.issues["A"].worker_active is True
+
+        state, effects = reduce(
+            config,
+            state,
+            WorkerResultEvent(
+                issue_id="A",
+                result={"outcome": "fail", "reason": "tests broken"},
+                timestamp="2026-01-01T00:00:00Z",
+            ),
+            gen,
+            _clock(),
+        )
+        # Issue stays in working state (not moved to "failed")
+        assert state.issues["A"].state == "working"
+        assert state.issues["A"].failure_count == 1
+        # Worker is re-dispatched (retry)
+        assert state.issues["A"].worker_active is True
+        dispatch_effects = [e for e in effects if isinstance(e, DispatchWorkerEffect)]
+        assert len(dispatch_effects) == 1
+        assert dispatch_effects[0].state == "working"
+
+    def test_failed_target_uses_reason_field(self) -> None:
+        config = parse_config(self.FAILED_CONFIG)
+        state = State(issues={}, worker_queues={})
+        gen = _counter()
+
+        state, _ = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="A", fields={"title": "T"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+
+        state, _ = reduce(
+            config,
+            state,
+            WorkerResultEvent(
+                issue_id="A",
+                result={"outcome": "fail", "reason": "lint errors"},
+                timestamp="2026-01-01T00:00:00Z",
+            ),
+            gen,
+            _clock(),
+        )
+        # failure_context stored in issue fields
+        assert state.issues["A"].fields.get("failure_context") == "lint errors"
+        # worker_failed log entry contains reason
+        failed_logs = [e for e in state.issues["A"].event_log if e.type == "worker_failed"]
+        assert len(failed_logs) == 1
+        assert failed_logs[0].data["error"] == "lint errors"
+
+    def test_failed_target_exhausts_retries(self) -> None:
+        config = parse_config(self.FAILED_CONFIG)
+        # max_worker_retries is CLI-only, set it explicitly
+        object.__setattr__(config, "max_worker_retries", 3)
+        state = State(issues={}, worker_queues={})
+        gen = _counter()
+
+        state, _ = reduce(
+            config,
+            state,
+            CreateEvent(issue_id="A", fields={"title": "T"}, timestamp="2026-01-01T00:00:00Z"),
+            gen,
+            _clock(),
+        )
+
+        # Fail 3 times (max_worker_retries: 3)
+        for i in range(3):
+            state, effects = reduce(
+                config,
+                state,
+                WorkerResultEvent(
+                    issue_id="A",
+                    result={"outcome": "fail", "reason": f"attempt {i + 1}"},
+                    timestamp="2026-01-01T00:00:00Z",
+                ),
+                gen,
+                _clock(),
+            )
+
+        # After 3 failures, retries exhausted
+        assert state.issues["A"].failure_count == 3
+        assert state.issues["A"].worker_active is False
+        assert state.issues["A"].state == "working"
+        # Last batch of effects should contain an ErrorEffect
+        error_effects = [e for e in effects if isinstance(e, ErrorEffect)]
+        assert len(error_effects) == 1
+        assert "retries exhausted" in error_effects[0].message

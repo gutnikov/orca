@@ -15,17 +15,19 @@ from orca.engine.types import (
 class TestParseSimpleConfig:
     def test_states_exist(self, simple_config_yaml: str) -> None:
         cfg = parse_config(simple_config_yaml)
-        assert set(cfg.types["default"].states.keys()) == {"todo", "implementing", "done"}
+        assert set(cfg.types["default"].states.keys()) == {"todo", "implementing"}
 
     def test_initial_state(self, simple_config_yaml: str) -> None:
         cfg = parse_config(simple_config_yaml)
         assert cfg.types["default"].initial == "todo"
 
-    def test_terminal_state(self, simple_config_yaml: str) -> None:
+    def test_done_is_builtin(self, simple_config_yaml: str) -> None:
         cfg = parse_config(simple_config_yaml)
-        assert cfg.types["default"].states["done"].terminal is True
-        assert cfg.types["default"].states["done"].worker is None
-        assert cfg.types["default"].states["done"].on == {}
+        assert "done" not in cfg.types["default"].states
+        # get_state returns synthetic sentinel for done
+        state_def = cfg.get_state("default", "done")
+        assert state_def.worker is None
+        assert state_def.on == {}
 
     def test_active_state_worker(self, simple_config_yaml: str) -> None:
         cfg = parse_config(simple_config_yaml)
@@ -111,8 +113,7 @@ class TestValidationErrors:
 issue:
   fields: {}
 states:
-  todo:
-    terminal: true
+  todo: {}
 initial: nonexistent
 """
         with pytest.raises(ConfigValidationError, match="initial.*nonexistent"):
@@ -134,8 +135,6 @@ states:
           description: d
     on:
       start: ghost
-  done:
-    terminal: true
 initial: todo
 """
         with pytest.raises(ConfigValidationError, match="ghost"):
@@ -157,8 +156,6 @@ states:
           description: d
     on:
       bogus: done
-  done:
-    terminal: true
 initial: todo
 """
         with pytest.raises(ConfigValidationError, match="bogus"):
@@ -179,14 +176,12 @@ states:
           description: d
     on:
       x: done
-  done:
-    terminal: true
 initial: todo
 """
         with pytest.raises(ConfigValidationError, match="outcome"):
             parse_config(yaml_str)
 
-    def test_terminal_state_no_worker_or_on(self) -> None:
+    def test_defining_done_as_explicit_state_raises(self) -> None:
         yaml_str = """\
 issue:
   fields: {}
@@ -202,40 +197,10 @@ states:
           description: d
     on:
       go: done
-  done:
-    terminal: true
-    worker:
-      kind: claude-code
-      prompt: prompts/default.md
-      result_format:
-        outcome:
-          type: enum
-          values: [x]
-          description: d
+  done: {}
 initial: todo
 """
-        with pytest.raises(ConfigValidationError, match="[Tt]erminal"):
-            parse_config(yaml_str)
-
-    def test_at_least_one_terminal_state(self) -> None:
-        yaml_str = """\
-issue:
-  fields: {}
-states:
-  todo:
-    worker:
-      kind: claude-code
-      prompt: prompts/default.md
-      result_format:
-        outcome:
-          type: enum
-          values: [go]
-          description: d
-    on:
-      go: todo
-initial: todo
-"""
-        with pytest.raises(ConfigValidationError, match="[Tt]erminal"):
+        with pytest.raises(ConfigValidationError, match="built-in"):
             parse_config(yaml_str)
 
     def test_decompose_requires_sub_issues_field(self) -> None:
@@ -255,8 +220,6 @@ states:
     on:
       decompose:
         action: decompose
-  done:
-    terminal: true
 initial: todo
 """
         with pytest.raises(ConfigValidationError, match="sub_issues"):
@@ -289,8 +252,6 @@ states:
           description: d
     on:
       x: done
-  done:
-    terminal: true
 initial: todo
 """
         with pytest.raises(ConfigValidationError, match="orphan"):
@@ -313,8 +274,6 @@ states:
           description: d
     on:
       go: done
-  done:
-    terminal: true
 initial: todo
 """
         with pytest.raises(ConfigValidationError, match="max_workers"):
@@ -337,8 +296,6 @@ states:
           description: d
     on:
       go: done
-  done:
-    terminal: true
 initial: todo
 """
         with pytest.raises(ConfigValidationError, match="max_workers"):
@@ -360,8 +317,6 @@ states:
           description: d
     on:
       go: done
-  done:
-    terminal: true
 initial: todo
 max_hops: 0
 """
@@ -386,8 +341,6 @@ states:
           description: d
     on:
       go: done
-  done:
-    terminal: true
 initial: todo
 max_hops: 50
 """
@@ -412,8 +365,6 @@ states:
           description: d
     on:
       go: done
-  done:
-    terminal: true
 initial: todo
 """
         cfg = parse_config(yaml_str)
@@ -440,8 +391,6 @@ states:
           description: d
     on:
       go: done
-  done:
-    terminal: true
 initial: todo
 """
         cfg = parse_config(yaml_str)
@@ -465,8 +414,6 @@ states:
           description: d
     on:
       go: done
-  done:
-    terminal: true
 initial: todo
 """
         with pytest.raises(ConfigValidationError, match="kind must be one of"):
@@ -487,8 +434,6 @@ states:
           description: d
     on:
       go: done
-  done:
-    terminal: true
 initial: todo
 """
         with pytest.raises(ConfigValidationError, match="prompt"):
@@ -511,8 +456,6 @@ states:
           description: d
     on:
       go: done
-  done:
-    terminal: true
 initial: todo
 """
         with pytest.raises(ConfigValidationError, match="timeout"):
@@ -535,8 +478,6 @@ states:
           description: d
     on:
       go: done
-  done:
-    terminal: true
 initial: todo
 """
         cfg = parse_config(yaml_str)
@@ -561,8 +502,6 @@ states:
           description: d
     on:
       go: done
-  done:
-    terminal: true
 initial: todo
 """
         cfg = parse_config(yaml_str)
@@ -586,8 +525,6 @@ states:
           description: d
     on:
       go: done
-  done:
-    terminal: true
 initial: todo
 """
         cfg = parse_config(yaml_str)
@@ -613,8 +550,6 @@ states:
           description: d
     on:
       go: done
-  done:
-    terminal: true
 initial: todo
 """
         cfg = parse_config(yaml_str)
@@ -654,8 +589,6 @@ types:
             action: decompose
             child_type: task
             then: done
-      done:
-        terminal: true
   task:
     fields:
       title: {type: string, description: "Title"}
@@ -672,8 +605,6 @@ types:
               description: d
         on:
           done: done
-      done:
-        terminal: true
 """
 
     def test_root_type(self) -> None:
@@ -711,9 +642,9 @@ root_type: ghost
 types:
   epic:
     fields: {}
-    initial: done
+    initial: idle
     states:
-      done: {terminal: true}
+      idle: {}
 """
         with pytest.raises(ConfigValidationError, match="root_type.*ghost"):
             parse_config(yaml_str)
@@ -737,7 +668,6 @@ types:
           decompose:
             action: decompose
             child_type: ghost
-      done: {terminal: true}
 """
         with pytest.raises(ConfigValidationError, match="child_type.*ghost"):
             parse_config(yaml_str)
@@ -758,7 +688,6 @@ types:
             outcome: {type: enum, values: [go], description: d}
         on:
           go: implementing
-      done: {terminal: true}
   task:
     fields: {}
     initial: implementing
@@ -771,7 +700,6 @@ types:
             outcome: {type: enum, values: [done], description: d}
         on:
           done: done
-      done: {terminal: true}
 """
         with pytest.raises(ConfigValidationError, match="implementing.*does not exist"):
             parse_config(yaml_str)
@@ -805,10 +733,7 @@ states:
           description: Questions for user
           required_when: needs_feedback
     on:
-      done: finished
-
-  finished:
-    terminal: true
+      done: done
 
 initial: working
 """
@@ -843,9 +768,6 @@ states:
           required_when: needs_feedback
     on: {}
 
-  done:
-    terminal: true
-
 initial: working
 """
         with pytest.raises(ConfigValidationError):
@@ -869,8 +791,6 @@ states:
           description: "Done"
     on:
       done: done
-  done:
-    terminal: true
 """
         cfg = parse_config(yaml_str)
         worker = cfg.types["default"].states["doing"].worker
@@ -882,3 +802,90 @@ states:
         worker = cfg.types["default"].states["todo"].worker
         assert worker is not None
         assert worker.progress is False
+
+
+class TestBuiltinStates:
+    """Tests for built-in done/failed states."""
+
+    def test_done_not_in_states_dict(self, simple_config_yaml: str) -> None:
+        cfg = parse_config(simple_config_yaml)
+        assert "done" not in cfg.types["default"].states
+
+    def test_get_state_done_returns_synthetic(self, simple_config_yaml: str) -> None:
+        cfg = parse_config(simple_config_yaml)
+        state_def = cfg.get_state("default", "done")
+        assert state_def.worker is None
+        assert state_def.on == {}
+
+    def test_get_state_failed_raises(self, simple_config_yaml: str) -> None:
+        cfg = parse_config(simple_config_yaml)
+        with pytest.raises(KeyError):
+            cfg.get_state("default", "failed")
+
+    def test_defining_done_raises(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      kind: claude-code
+      prompt: prompts/default.md
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+  done: {}
+initial: todo
+"""
+        with pytest.raises(ConfigValidationError, match="built-in"):
+            parse_config(yaml_str)
+
+    def test_defining_failed_raises(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      kind: claude-code
+      prompt: prompts/default.md
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+  failed: {}
+initial: todo
+"""
+        with pytest.raises(ConfigValidationError, match="built-in"):
+            parse_config(yaml_str)
+
+    def test_transition_to_failed_is_valid(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      kind: claude-code
+      prompt: prompts/default.md
+      result_format:
+        outcome:
+          type: enum
+          values: [go, fail]
+          description: d
+    on:
+      go: done
+      fail: failed
+initial: todo
+"""
+        cfg = parse_config(yaml_str)
+        rule = cfg.types["default"].states["todo"].on["fail"]
+        assert isinstance(rule, OnTransition)
+        assert rule.target == "failed"

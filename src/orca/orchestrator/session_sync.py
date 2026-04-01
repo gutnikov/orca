@@ -100,13 +100,17 @@ class SessionManifest:
                 return
         logger.warning("update_progress: session %s not found in manifest", session_id)
 
-    def mark_orphans_completed(self, completed_at: str) -> int:
-        """Mark all incomplete sessions as completed (orphans from a crashed run)."""
+    def mark_orphans_completed(self, completed_at: str, *, interrupted: bool = False, failed: bool = False) -> int:
+        """Mark all incomplete sessions as completed (orphans from a crashed or stopped run)."""
         entries = self.read()
         count = 0
         for entry in entries:
             if entry["completed_at"] is None:
                 entry["completed_at"] = completed_at
+                if interrupted:
+                    entry["interrupted"] = True
+                if failed:
+                    entry["failed"] = True
                 count += 1
         if count:
             self._write(entries)

@@ -5,6 +5,7 @@ import json
 import pytest
 
 from orca.engine.types import (
+    BUILTIN_STATES,
     AdvanceEvent,
     CreateEvent,
     DispatchWorkerEffect,
@@ -25,6 +26,15 @@ from orca.engine.types import (
     WorkerFailedEvent,
     WorkerResultEvent,
 )
+
+
+def test_builtin_states_contains_done_and_failed() -> None:
+    assert frozenset({"done", "failed"}) == BUILTIN_STATES
+
+
+def test_state_def_has_no_terminal_field() -> None:
+    sd = StateDef()
+    assert not hasattr(sd, "terminal")
 
 
 class TestIssueConstruction:
@@ -326,7 +336,6 @@ class TestConfigTypes:
         s = StateDef()
         assert s.worker is None
         assert s.on == {}
-        assert s.terminal is False
         assert s.max_workers is None
 
     def test_state_def_active(self) -> None:
@@ -345,10 +354,6 @@ class TestConfigTypes:
         assert s.worker is worker
         assert s.on == {"approve": OnTransition(target="done")}
         assert s.max_workers == 3
-
-    def test_state_def_terminal(self) -> None:
-        s = StateDef(terminal=True)
-        assert s.terminal is True
 
     def test_state_machine_config(self) -> None:
         td = TypeDef(
@@ -372,13 +377,12 @@ class TestConfigTypes:
                     },
                 ),
                 "in_progress": StateDef(),
-                "closed": StateDef(terminal=True),
+                "closed": StateDef(),
             },
         )
         config = StateMachineConfig(root_type="issue", types={"issue": td})
         assert config.root_type_def.initial == "triage"
         assert len(config.root_type_def.states) == 3
-        assert config.root_type_def.states["closed"].terminal is True
         assert len(config.root_type_def.fields) == 2
         assert config.max_hops is None
 
@@ -386,7 +390,7 @@ class TestConfigTypes:
         td = TypeDef(
             fields={},
             initial="todo",
-            states={"todo": StateDef(terminal=True)},
+            states={"todo": StateDef()},
         )
         config = StateMachineConfig(
             root_type="issue",
@@ -401,7 +405,7 @@ class TestTypeDef:
         td = TypeDef(
             fields={"title": FieldDef(type="string", description="t")},
             initial="todo",
-            states={"todo": StateDef(terminal=True)},
+            states={"todo": StateDef()},
         )
         assert td.initial == "todo"
         assert "title" in td.fields
@@ -412,8 +416,8 @@ class TestStateMachineConfigWithTypes:
     def test_config_has_root_type_and_types(self) -> None:
         td = TypeDef(
             fields={},
-            initial="done",
-            states={"done": StateDef(terminal=True)},
+            initial="idle",
+            states={"idle": StateDef()},
         )
         cfg = StateMachineConfig(
             root_type="epic",
@@ -437,7 +441,6 @@ class TestConfigHelpers:
             initial="todo",
             states={
                 "todo": StateDef(worker=worker, on={"done": OnTransition(target="done")}),
-                "done": StateDef(terminal=True),
             },
         )
         return StateMachineConfig(root_type="epic", types={"epic": epic})

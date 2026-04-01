@@ -35,8 +35,6 @@ states:
             done: "Complete"
     on:
       done: done
-  done:
-    terminal: true
 """
 
 PASSIVE_CHAIN_CONFIG_YAML = """\
@@ -62,8 +60,6 @@ states:
       done: done
   review: {}
   approved: {}
-  done:
-    terminal: true
 """
 
 SELF_LOOP_CONFIG_YAML = """\
@@ -87,8 +83,6 @@ states:
     on:
       again: refine
       done: done
-  done:
-    terminal: true
 """
 
 TS = "2026-01-01T00:00:00Z"

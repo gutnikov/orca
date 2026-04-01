@@ -54,8 +54,7 @@ def _render_issue(
 ) -> list[str]:
     """Render a single issue and its children recursively."""
     issue = state.issues[issue_id]
-    state_def = config.get_state(issue.type, issue.state)
-    is_terminal = state_def.terminal
+    is_terminal = issue.state == "done"
 
     # Elapsed time
     created_ts = _get_created_timestamp(issue)
@@ -111,8 +110,7 @@ def format_issues(state: State, config: StateMachineConfig, now: str) -> str:
         else:
             # Root with children: render root, then children with tree connectors
             issue = state.issues[root_id]
-            state_def = config.get_state(issue.type, issue.state)
-            is_terminal = state_def.terminal
+            is_terminal = issue.state == "done"
             created_ts = _get_created_timestamp(issue)
             elapsed = _format_elapsed(created_ts, now) if created_ts is not None else "?"
             marker = "" if is_terminal else " ..."

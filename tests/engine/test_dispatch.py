@@ -66,7 +66,6 @@ def _make_config(
                 on={},
                 max_workers=1,
             ),
-            "done": StateDef(terminal=True),
         }
     return StateMachineConfig(
         root_type="default",
@@ -232,7 +231,6 @@ class TestBuildResultFormat:
                 ),
                 on={},
             ),
-            "done": StateDef(terminal=True),
         }
         config = _make_config(states=states, initial="review")
         result = build_result_format(config, "default", "review")
@@ -257,7 +255,6 @@ class TestBuildResultFormat:
                 ),
                 on={},
             ),
-            "done": StateDef(terminal=True),
         }
         config = _make_config(states=states, initial="scoping")
         result = build_result_format(config, "default", "scoping")
@@ -423,8 +420,6 @@ states:
           description: "Done"
     on:
       done: done
-  done:
-    terminal: true
 """)
         state = State(issues={}, worker_queues={})
         issue = Issue(

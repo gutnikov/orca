@@ -68,8 +68,6 @@ states:
       complete: done
       reject: todo
 
-  done:
-    terminal: true
 
 initial: todo
 """
@@ -107,8 +105,6 @@ states:
         action: decompose
       complete: done
 
-  done:
-    terminal: true
 
 initial: scoping
 """
@@ -152,8 +148,6 @@ states:
       complete: done
       reject: todo
 
-  done:
-    terminal: true
 
 initial: todo
 """

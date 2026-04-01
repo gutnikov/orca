@@ -5,6 +5,7 @@ from typing import Any
 import yaml
 
 from orca.engine.types import (
+    BUILTIN_STATES,
     EnumFieldDef,
     FieldDef,
     ListFieldDef,
@@ -87,7 +88,6 @@ def _parse_state(name: str, raw_data: dict[str, Any] | None) -> StateDef:
     for k, v in raw_data.items():
         data[str(k)] = v
 
-    terminal = data.get("terminal", False)
     max_workers = data.get("max_workers")
 
     worker: WorkerDef | None = None
@@ -125,7 +125,6 @@ def _parse_state(name: str, raw_data: dict[str, Any] | None) -> StateDef:
     return StateDef(
         worker=worker,
         on=on,
-        terminal=terminal,
         max_workers=max_workers,
     )
 
@@ -169,15 +168,18 @@ def _validate(config: StateMachineConfig) -> None:
     for type_name, type_def in config.types.items():
         state_names = set(type_def.states.keys())
 
+        # Reserved name check: user must not define done or failed as explicit states
+        reserved_in_states = state_names & BUILTIN_STATES
+        if reserved_in_states:
+            msg = (
+                f"Type '{type_name}': states {sorted(reserved_in_states)} are built-in "
+                f"and must not be defined explicitly"
+            )
+            raise ConfigValidationError(msg)
+
         # Rule 1: initial references an existing state
         if type_def.initial not in state_names:
             msg = f"Type '{type_name}', initial state '{type_def.initial}' does not exist in states"
-            raise ConfigValidationError(msg)
-
-        # Rule 6: at least one terminal state
-        terminal_states = {name for name, s in type_def.states.items() if s.terminal}
-        if not terminal_states:
-            msg = f"Type '{type_name}': at least one terminal state is required"
             raise ConfigValidationError(msg)
 
         # Collect reachable targets for rule 8
@@ -213,13 +215,6 @@ def _validate(config: StateMachineConfig) -> None:
                 )
                 raise ConfigValidationError(msg)
 
-            # Rule 5: terminal states have no worker or on
-            if state.terminal:
-                if state.worker is not None or state.on:
-                    msg = f"Type '{type_name}', terminal state '{name}' must not have worker or on rules"
-                    raise ConfigValidationError(msg)
-                continue
-
             # Rule 4: active states (with worker+on) must have outcome enum in result_format
             if state.worker is not None and state.on:
                 outcome = state.worker.result_format.get("outcome")
@@ -252,9 +247,10 @@ def _validate(config: StateMachineConfig) -> None:
                         raise ConfigValidationError(msg)
 
             # Rule 2: every on target references an existing state within same type
+            # (done and failed are built-in and always valid targets)
             for key, rule in state.on.items():
                 if isinstance(rule, OnTransition):
-                    if rule.target not in state_names:
+                    if rule.target not in state_names and rule.target not in BUILTIN_STATES:
                         msg = (
                             f"Type '{type_name}', on.{key} target '{rule.target}' in state '{name}' "
                             f"does not exist in states"
@@ -266,7 +262,7 @@ def _validate(config: StateMachineConfig) -> None:
                         msg = f"Type '{type_name}', on.{key} child_type '{rule.child_type}' does not exist in types"
                         raise ConfigValidationError(msg)
                     if rule.then is not None:
-                        if rule.then not in state_names:
+                        if rule.then not in state_names and rule.then not in BUILTIN_STATES:
                             msg = (
                                 f"Type '{type_name}', on.{key} decompose 'then' target '{rule.then}' "
                                 f"in state '{name}' does not exist in states"
@@ -288,16 +284,13 @@ def _validate(config: StateMachineConfig) -> None:
                         )
                         raise ConfigValidationError(msg)
 
-        # Rule 8: every non-initial, non-passive, non-terminal state must be reachable
+        # Rule 8: every non-initial, non-passive state must be reachable
         for name, state in type_def.states.items():
             if name in reachable:
                 continue
-            # Passive states (no worker, no on, not terminal) are exempt
-            is_passive = state.worker is None and not state.on and not state.terminal
+            # Passive states (no worker, no on) are exempt
+            is_passive = state.worker is None and not state.on
             if is_passive:
-                continue
-            # Terminal states are exempt: they can be reached via cascading unblock (`then` on decompose)
-            if state.terminal:
                 continue
             msg = f"Type '{type_name}', state '{name}' is not reachable from any on rule"
             raise ConfigValidationError(msg)

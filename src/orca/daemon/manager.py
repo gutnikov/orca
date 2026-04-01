@@ -12,7 +12,7 @@ from uuid import uuid4
 
 from orca.engine.config import parse_config
 from orca.engine.reducer import reduce
-from orca.engine.types import CreateEvent, Effect, State, StateMachineConfig
+from orca.engine.types import CreateEvent, Effect, State, StateMachineConfig, WorkerFailedEvent
 from orca.orchestrator.branches import BranchMap
 from orca.orchestrator.log import setup_logging
 from orca.orchestrator.orchestrator import Orchestrator
@@ -58,17 +58,13 @@ class RunInfo:
     config: StateMachineConfig | None = None
     orchestrator: Orchestrator | None = None
     task: asyncio.Task[None] | None = field(default=None, repr=False)
+    insights: bool = False
 
     def to_summary(self) -> dict[str, Any]:
         """JSON-serializable summary."""
         terminal_count = 0
-        if self.orchestrator is not None and self.config is not None:
-            for issue in self.orchestrator.state.issues.values():
-                type_def = self.config.types.get(issue.type)
-                if type_def is not None:
-                    state_def = type_def.states.get(issue.state)
-                    if state_def is not None and state_def.terminal:
-                        terminal_count += 1
+        if self.orchestrator is not None:
+            terminal_count = sum(1 for issue in self.orchestrator.state.issues.values() if issue.state == "done")
         # Update issue_count from live state if available
         issue_count = self.issue_count
         if self.orchestrator is not None:
@@ -105,8 +101,11 @@ class RunManager:
         workflow: str | None = None,
         branch: str | None = None,
         base: str | None = None,
+        run_id: str | None = None,
         max_hops: int | None = None,
         max_retries: int | None = None,
+        *,
+        insights: bool = False,
     ) -> str:
         """Start a new orchestrator run. Returns run_id.
 
@@ -126,7 +125,7 @@ class RunManager:
         if branch is None:
             branch = resolve_branch()
 
-        run_id = self.make_run_id(branch, effective_workflow)
+        run_id = run_id or self.make_run_id(branch, effective_workflow)
 
         # Check for duplicate
         existing = self._runs.get(run_id)
@@ -156,13 +155,11 @@ class RunManager:
                 raise RuntimeError(msg)
             branches.load()
 
-            # Reset hop_count and failure_count on non-terminal issues
+            # Reset hop_count on non-terminal issues (failure_count is handled by _recover_effects)
             for issue in state.issues.values():
-                type_def = config.types.get(issue.type)
-                if type_def and issue.state in type_def.states and type_def.states[issue.state].terminal:
+                if issue.state == "done":
                     continue
                 issue.hop_count = 0
-                issue.failure_count = 0
 
             # Clean up sessions from previous run
             manifest = SessionManifest(run_dir)
@@ -178,7 +175,8 @@ class RunManager:
 
             initial_effects.extend(recovered_effects)
         else:
-            # Fresh start
+            # Fresh start — clear stale session manifest
+            (run_dir / "sessions.json").unlink(missing_ok=True)
             root_issue_id = _generate_id()
             state = State(issues={}, worker_queues={})
             create_event = CreateEvent(
@@ -212,6 +210,7 @@ class RunManager:
             worktree_mgr=worktree_mgr,
             repo_root=self.repo_root,
             session_sync=session_sync,
+            insights_enabled=insights,
         )
 
         # Create RunInfo and launch
@@ -225,6 +224,7 @@ class RunManager:
             created_at=now_str,
             config=config,
             orchestrator=orchestrator,
+            insights=insights,
         )
 
         async def _run_wrapper() -> None:
@@ -255,19 +255,207 @@ class RunManager:
 
         return run_id
 
+    def _restart_run(self, run_info: RunInfo) -> None:
+        """Restart the orchestrator loop for a finished run (e.g. after retry)."""
+        orchestrator = run_info.orchestrator
+        if orchestrator is None:
+            return
+        root_issue_id = _find_root_issue(orchestrator.state)
+        run_info.status = RunStatus.RUNNING
+
+        async def _run_wrapper() -> None:
+            try:
+                await orchestrator.run(root_issue_id, [])
+                run_info.status = RunStatus.COMPLETED
+            except asyncio.CancelledError:
+                run_info.status = RunStatus.STOPPED
+                raise
+            except Exception:
+                run_info.status = RunStatus.FAILED
+                logger.error(
+                    "Run %s failed (restart)",
+                    run_info.run_id,
+                    exc_info=True,
+                    extra={"event": "run_failed", "run_id": run_info.run_id},
+                )
+
+        run_info.task = asyncio.create_task(_run_wrapper())
+        logger.info(
+            "Run %s restarted via retry",
+            run_info.run_id,
+            extra={"event": "run_restarted", "run_id": run_info.run_id},
+        )
+
+    def _mark_stopped(self, run_info: RunInfo) -> None:
+        """Mark orphan sessions as failed and reduce failure events for active workers."""
+        run_dir = self.repo_root / ".orca" / "runs" / run_info.branch / run_info.workflow
+        manifest = SessionManifest(run_dir)
+        manifest.mark_orphans_completed(_now(), failed=True)
+
+        if run_info.orchestrator is not None and run_info.config is not None:
+            state = run_info.orchestrator.state
+            config = run_info.config
+            for issue_id, issue in list(state.issues.items()):
+                if issue.worker_active:
+                    event = WorkerFailedEvent(
+                        issue_id=issue_id,
+                        error="run stopped",
+                        timestamp=_now(),
+                    )
+                    state, _ = reduce(config, state, event, _generate_id, _now)
+            # Force worker_active=False — the reducer may leave it True for auto-retry,
+            # but no dispatch will happen since the run is stopped
+            for issue in state.issues.values():
+                if issue.worker_active:
+                    issue.worker_active = False
+            run_info.orchestrator._state = state
+            run_info.orchestrator.persistence.save(state)
+
     async def stop_run(self, run_id: str) -> None:
-        """Cancel the run's asyncio task, set status STOPPED."""
+        """Cancel the run's asyncio task, kill workers, set status STOPPED."""
         run_info = self._runs.get(run_id)
         if run_info is None:
             msg = f"Run '{run_id}' not found"
             raise ValueError(msg)
+
+        # Stop the orchestrator's workers/tmux sessions first
+        if run_info.orchestrator is not None:
+            await run_info.orchestrator.stop()
 
         if run_info.task is not None and not run_info.task.done():
             run_info.task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
                 await run_info.task
 
+        self._mark_stopped(run_info)
         run_info.status = RunStatus.STOPPED
+
+    async def drop_run(self, run_id: str) -> None:
+        """Stop (if running), clean up run state, and remove from tracking."""
+        run_info = self._runs.get(run_id)
+        if run_info is None:
+            msg = f"Run '{run_id}' not found"
+            raise ValueError(msg)
+
+        if run_info.orchestrator is not None:
+            await run_info.orchestrator.stop()
+
+        if run_info.task is not None and not run_info.task.done():
+            run_info.task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await run_info.task
+
+        # Clean up persisted state so a fresh run doesn't inherit old data
+        run_dir = self.repo_root / ".orca" / "runs" / run_info.branch / run_info.workflow
+        for name in ("state.json", "sessions.json", "branches.json"):
+            (run_dir / name).unlink(missing_ok=True)
+
+        del self._runs[run_id]
+
+    async def resume_run(self, run_id: str) -> None:
+        """Resume a stopped, failed, or interrupted run."""
+        run_info = self._runs.get(run_id)
+        if run_info is None:
+            msg = f"Run '{run_id}' not found"
+            raise ValueError(msg)
+        if run_info.status == RunStatus.RUNNING:
+            msg = f"Run '{run_id}' is already running"
+            raise ValueError(msg)
+
+        if run_info.orchestrator is not None:
+            self._restart_run(run_info)
+            return
+
+        # Rebuild orchestrator from persistence (e.g. interrupted runs)
+        branch = run_info.branch
+        workflow = run_info.workflow
+        config = run_info.config
+        if config is None:
+            config_path = resolve_config_path(self.repo_root, workflow if workflow != "default" else None)
+            config = parse_config(config_path.read_text())
+            run_info.config = config
+
+        persistence = Persistence(self.repo_root, branch, workflow)
+        if not persistence.exists():
+            msg = f"Run '{run_id}' has no persisted state to resume"
+            raise ValueError(msg)
+
+        state = persistence.load()
+        if state is None:
+            msg = f"Run '{run_id}': failed to load persisted state"
+            raise ValueError(msg)
+
+        branches = BranchMap(self.repo_root, branch, workflow)
+        branches.load()
+        worktree_mgr = WorktreeManager(self.repo_root, branch)
+
+        run_dir = self.repo_root / ".orca" / "runs" / branch / workflow
+        log_path = run_dir / "orca.log.jsonl"
+        setup_logging(log_path)
+
+        # Reset hop_count on non-terminal issues
+        for issue in state.issues.values():
+            if issue.state == "done":
+                continue
+            issue.hop_count = 0
+
+        # Clean up sessions from previous run
+        manifest = SessionManifest(run_dir)
+        manifest.mark_orphans_completed(_now())
+
+        recovered_events, recovered_effects = _recover_effects(
+            config, state, branches, worktree_mgr, run_dir, _generate_id, _now
+        )
+        initial_effects: list[Effect] = []
+        for event in recovered_events:
+            state, new_effects = reduce(config, state, event, _generate_id, _now)
+            initial_effects.extend(new_effects)
+        initial_effects.extend(recovered_effects)
+
+        root_issue_id = _find_root_issue(state)
+        workers = {name: CliAgentWorker(self.repo_root, kc) for name, kc in KIND_REGISTRY.items()}
+        session_sync = SessionSync(run_dir=run_dir)
+
+        orchestrator = Orchestrator(
+            config=config,
+            state=state,
+            root_branch=branch,
+            persistence=persistence,
+            branches=branches,
+            workers=workers,
+            generate_id=_generate_id,
+            now=_now,
+            worktree_mgr=worktree_mgr,
+            repo_root=self.repo_root,
+            session_sync=session_sync,
+            insights_enabled=run_info.insights,
+        )
+        run_info.orchestrator = orchestrator
+        run_info.issue_count = len(state.issues)
+        run_info.status = RunStatus.RUNNING
+
+        async def _run_wrapper() -> None:
+            try:
+                await orchestrator.run(root_issue_id, initial_effects)
+                run_info.status = RunStatus.COMPLETED
+            except asyncio.CancelledError:
+                run_info.status = RunStatus.STOPPED
+                raise
+            except Exception:
+                run_info.status = RunStatus.FAILED
+                logger.error(
+                    "Run %s failed (resume)",
+                    run_id,
+                    exc_info=True,
+                    extra={"event": "run_failed", "run_id": run_id},
+                )
+
+        run_info.task = asyncio.create_task(_run_wrapper())
+        logger.info(
+            "Run %s resumed",
+            run_id,
+            extra={"event": "run_resumed", "run_id": run_id, "branch": branch, "workflow": workflow},
+        )
 
     async def stop_all(self) -> None:
         """Stop all running orchestrators (daemon shutdown)."""
@@ -288,26 +476,50 @@ class RunManager:
     def get_run_state(self, run_id: str) -> dict[str, Any] | None:
         """Get the current state of a run as a JSON-serializable dict."""
         run_info = self._runs.get(run_id)
-        if run_info is None or run_info.orchestrator is None:
+        if run_info is None:
             return None
-        return run_info.orchestrator.state.to_dict()
+        if run_info.orchestrator is not None:
+            return run_info.orchestrator.state.to_dict()
+        # Fall back to persisted state on disk (e.g. interrupted runs)
+        persistence = Persistence(self.repo_root, run_info.branch, run_info.workflow)
+        state = persistence.load()
+        if state is not None:
+            return state.to_dict()
+        return None
+
+    def get_sessions(self, run_id: str) -> list[dict[str, Any]]:
+        """Get session manifest entries for a run."""
+        run_info = self._runs.get(run_id)
+        if run_info is None:
+            return []
+        run_dir = self.repo_root / ".orca" / "runs" / run_info.branch / run_info.workflow
+        manifest = SessionManifest(run_dir)
+        return manifest.read()
 
     def get_issue(self, run_id: str, issue_id: str) -> dict[str, Any] | None:
         """Get a specific issue from a run."""
         run_info = self._runs.get(run_id)
-        if run_info is None or run_info.orchestrator is None:
+        if run_info is None:
             return None
-        issue = run_info.orchestrator.state.issues.get(issue_id)
+        state = None
+        if run_info.orchestrator is not None:
+            state = run_info.orchestrator.state
+        else:
+            persistence = Persistence(self.repo_root, run_info.branch, run_info.workflow)
+            state = persistence.load()
+        if state is None:
+            return None
+        issue = state.issues.get(issue_id)
         if issue is None:
             return None
         return issue.to_dict()
 
-    def get_worker_log(self, run_id: str, tracking_id: str, tail: int = 100) -> str:
-        """Get worker log content for a tracking ID in the given run."""
+    def get_worker_log(self, run_id: str, issue_id: str, tail: int = 100) -> str:
+        """Get worker log content for the latest session of the given issue."""
         run_info = self._runs.get(run_id)
         if run_info is None or run_info.orchestrator is None:
             return ""
-        return run_info.orchestrator.get_session_log(tracking_id, tail)
+        return run_info.orchestrator.get_session_log_by_issue(issue_id, tail)
 
     def get_insights(self, run_id: str) -> str:
         """Get insights log content for the given run."""
@@ -320,15 +532,22 @@ class RunManager:
         return run_info.orchestrator.get_session_log(tid)
 
     def retry_issue(self, run_id: str, issue_id: str) -> None:
-        """Write retry signal file (same as TUI mechanism)."""
+        """Retry a failed issue. If the orchestrator loop has finished, restart it."""
         run_info = self._runs.get(run_id)
         if run_info is None:
             msg = f"Run '{run_id}' not found"
             raise ValueError(msg)
 
-        retry_dir = self.repo_root / ".orca" / "runs" / run_info.branch / run_info.workflow / "retry"
+        run_dir = self.repo_root / ".orca" / "runs" / run_info.branch / run_info.workflow
+
+        # Write retry signal file
+        retry_dir = run_dir / "retry"
         retry_dir.mkdir(parents=True, exist_ok=True)
         (retry_dir / issue_id).touch()
+
+        # If the run has finished (not RUNNING), restart the orchestrator loop
+        if run_info.status != RunStatus.RUNNING and run_info.orchestrator is not None:
+            self._restart_run(run_info)
 
     def scan_interrupted_runs(self) -> None:
         """Scan .orca/runs/ for non-terminal runs from previous session.
@@ -372,17 +591,29 @@ class RunManager:
 
                 # Check if the root issue is terminal
                 all_terminal = True
-                for issue in state.issues.values():
-                    type_def = config.types.get(issue.type)
-                    if type_def is None:
-                        continue
-                    state_def = type_def.states.get(issue.state)
-                    if state_def is None or not state_def.terminal:
-                        all_terminal = False
-                        break
+                all_terminal = all(issue.state == "done" for issue in state.issues.values())
 
                 if all_terminal:
                     continue  # Run was completed, skip
+
+                # Mark orphan sessions as completed+interrupted so TUI shows them distinctly
+                manifest = SessionManifest(workflow_dir)
+                manifest.mark_orphans_completed(_now(), interrupted=True)
+
+                # Treat in-flight workers as failures so retry machinery applies
+                persistence = Persistence(self.repo_root, branch, workflow_name)
+                for issue_id, issue in state.issues.items():
+                    if issue.worker_active:
+                        event = WorkerFailedEvent(
+                            issue_id=issue_id,
+                            error="daemon interrupted",
+                            timestamp=_now(),
+                        )
+                        state, _ = reduce(config, state, event, _generate_id, _now)
+                for issue in state.issues.values():
+                    if issue.worker_active:
+                        issue.worker_active = False
+                persistence.save(state)
 
                 self._runs[run_id] = RunInfo(
                     run_id=run_id,

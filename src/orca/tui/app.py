@@ -4,6 +4,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+import aiohttp
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -18,7 +19,7 @@ from orca.tui.messages import (
     StateUpdated,
     WorkerRunSelected,
 )
-from orca.tui.state_reader import StateReader
+from orca.tui.state_reader import DaemonStateReader, StateReader
 from orca.tui.widgets.header import OrcaHeader
 from orca.tui.widgets.insights_modal import InsightsModal
 from orca.tui.widgets.issue_detail import IssueDetail
@@ -33,7 +34,7 @@ _DEADLOCK_THRESHOLD = 30.0
 class OrcaApp(App[None]):
     """Orca TUI — interactive viewer for orchestrator runs."""
 
-    _daemon_sock: Path
+    _daemon_sock: Path | None
     _daemon_mode: bool
 
     THEME = "flexoki"
@@ -58,7 +59,7 @@ class OrcaApp(App[None]):
 
     BINDINGS = [
         Binding("q", "quit", "Quit"),
-        Binding("n", "retry_failed", "Retry", show=False),
+        Binding("n", "retry_failed", "Retry", show=True),
         Binding("h,left", "focus_tree", "Tree", show=False),
         Binding("l,right", "focus_detail", "Detail", show=False),
         Binding("j", "scroll_detail_down", "Scroll ↓", show=False),
@@ -79,7 +80,13 @@ class OrcaApp(App[None]):
         insights_state: dict[str, str] | None = None,
     ) -> None:
         super().__init__()
-        self._reader = StateReader(run_dir)
+        self._reader: StateReader | None = StateReader(run_dir)
+        self._daemon_reader: DaemonStateReader | None = None
+        self._daemon_sock = None
+        self._daemon_mode = False
+        self._daemon_session: aiohttp.ClientSession | None = None
+        self._daemon_run_id: str = ""
+        self._daemon_run_status: str = ""
         self._run_dir = run_dir
         self._branch_name = branch_name
         self._config = config
@@ -95,11 +102,40 @@ class OrcaApp(App[None]):
     @classmethod
     def from_daemon(cls, sock_path: Path) -> OrcaApp:
         """Create an OrcaApp that connects to the daemon."""
-        # This is a stub for the first iteration.
-        # Full implementation (run list screen, daemon polling) comes later.
-        app = cls.__new__(cls)
+        import asyncio
+        import tempfile
+
+        # Fetch run list to find active run
+        async def _fetch_runs() -> list[dict[str, object]]:
+            connector = aiohttp.UnixConnector(path=str(sock_path))
+            async with (
+                aiohttp.ClientSession(connector=connector) as session,
+                session.get("http://localhost/api/runs") as resp,
+            ):
+                if resp.status == 200:
+                    result: list[dict[str, object]] = await resp.json()
+                    return result
+            return []
+
+        runs = asyncio.run(_fetch_runs())
+        # Pick the first running run, or the most recent
+        run_id = ""
+        branch = "daemon"
+        for r in runs:
+            if r.get("status") == "running":
+                run_id = str(r.get("run_id", ""))
+                break
+        if not run_id and runs:
+            run_id = str(runs[0].get("run_id", ""))
+        if run_id and ":" in run_id:
+            branch = run_id.split(":")[0]
+
+        dummy_dir = Path(tempfile.mkdtemp(prefix="orca-daemon-"))
+        app = cls(run_dir=dummy_dir, branch_name=branch)
         app._daemon_sock = sock_path
         app._daemon_mode = True
+        app._daemon_run_id = run_id
+        app._reader = None  # Don't use file-based reader
         return app
 
     @property
@@ -117,12 +153,42 @@ class OrcaApp(App[None]):
         yield InsightsModal()
         yield Footer()
 
+    async def on_unmount(self) -> None:
+        if self._daemon_session is not None:
+            await self._daemon_session.close()
+            self._daemon_session = None
+
     def on_mount(self) -> None:
-        self._poll_state()
-        self.set_interval(1.5, self._poll_state)
+        if self._daemon_mode:
+            self._setup_daemon_polling()
+        else:
+            self._poll_state()
+            self.set_interval(1.5, self._poll_state)
         self.set_interval(0.15, self._tick_spinners)
 
+    def _setup_daemon_polling(self) -> None:
+        """Set up async polling via DaemonStateReader."""
+        assert self._daemon_sock is not None
+        connector = aiohttp.UnixConnector(path=str(self._daemon_sock))
+        self._daemon_session = aiohttp.ClientSession(connector=connector)
+        run_id = getattr(self, "_daemon_run_id", "")
+        self._daemon_reader = DaemonStateReader(self._daemon_session, run_id)
+        self.set_interval(1.5, self._poll_daemon_state)
+
+    async def _poll_daemon_state(self) -> None:
+        """Poll state from the daemon HTTP API."""
+        if self._daemon_reader is None:
+            return
+        result = await self._daemon_reader.read()
+        if result is not None:
+            state, sessions = result
+            self._state = state
+            self._daemon_run_status = self._daemon_reader.run_status
+            self.post_message(StateUpdated(state, sessions))
+
     def _poll_state(self) -> None:
+        if self._reader is None:
+            return
         result = self._reader.read()
         if result is not None:
             state, sessions = result
@@ -147,6 +213,13 @@ class OrcaApp(App[None]):
 
     def on_state_updated(self, message: StateUpdated) -> None:
         self._sessions = message.sessions
+        # In daemon mode, populate log paths from session data
+        if self._daemon_mode:
+            for s in message.sessions:
+                sid = str(s.get("session_id", ""))
+                lp = str(s.get("log_path", ""))
+                if sid and lp:
+                    self._session_log_paths[sid] = lp
         tree = self.query_one(IssueTree)
         tree.update_state(message.state, message.sessions)
         header = self.query_one(OrcaHeader)
@@ -334,12 +407,12 @@ class OrcaApp(App[None]):
         root_id = self._find_root_issue()
         if root_id and root_id in self._state.issues:
             root = self._state.issues[root_id]
-            if self._config:
-                type_states = self._config.root_type_def.states
-                if root.state in type_states and type_states[root.state].terminal:
-                    self.sub_title = "completed"
-                    return
-        elapsed = time.time() - self._reader.last_mtime if self._reader.last_mtime > 0 else 0
+            if root.state == "done":
+                self.sub_title = "completed"
+                return
+        reader = self._reader
+        last_mtime = reader.last_mtime if reader is not None else 0.0
+        elapsed = time.time() - last_mtime if last_mtime > 0 else 0
         if elapsed < _STALE_THRESHOLD:
             self.sub_title = "running"
         elif elapsed < _DEADLOCK_THRESHOLD:
@@ -359,12 +432,29 @@ class OrcaApp(App[None]):
         issue_id = node.data[6:]
         issue = self._state.issues.get(issue_id)
         if issue is None or issue.failure_count == 0 or issue.worker_active:
-            self.notify("Issue is not in a failed state", severity="warning")
+            fc = issue.failure_count if issue else "?"
+            wa = issue.worker_active if issue else "?"
+            self.notify(f"Issue is not in a failed state (failures={fc}, active={wa})", severity="warning")
             return
-        retry_dir = self._run_dir / "retry"
-        retry_dir.mkdir(parents=True, exist_ok=True)
-        (retry_dir / issue_id).touch()
-        self.notify(f"Retry requested for {issue_id[:8]}...")
+        if self._daemon_mode:
+            self.run_worker(self._daemon_retry(issue_id))
+        else:
+            retry_dir = self._run_dir / "retry"
+            retry_dir.mkdir(parents=True, exist_ok=True)
+            (retry_dir / issue_id).touch()
+            self.notify(f"Retry requested for {issue_id[:8]}...")
+
+    async def _daemon_retry(self, issue_id: str) -> None:
+        """Send retry request to the daemon API."""
+        if self._daemon_session is None:
+            return
+        run_id = getattr(self, "_daemon_run_id", "")
+        async with self._daemon_session.post(f"http://localhost/api/runs/{run_id}/retry/{issue_id}") as resp:
+            body = await resp.json()
+            if resp.status == 200:
+                self.notify(f"Retry requested for {issue_id[:8]}...")
+            else:
+                self.notify(f"Retry failed: {body.get('error', 'unknown')}", severity="error")
 
     def action_toggle_tab(self) -> None:
         """Toggle between Session and Result tabs in the terminal view."""

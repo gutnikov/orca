@@ -83,7 +83,6 @@ def _config() -> StateMachineConfig:
                         ),
                         on={},
                     ),
-                    "done": StateDef(terminal=True),
                 },
             )
         },

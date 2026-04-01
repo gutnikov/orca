@@ -61,6 +61,7 @@ class DaemonStateReader:
         self._run_id = run_id
         self._last_state_dict: dict[str, Any] | None = None
         self._sessions: list[dict[str, Any]] = []
+        self._run_status: str = ""
 
     async def read(self) -> tuple[State, list[dict[str, Any]]] | None:
         """Fetch state from daemon. Returns None if unchanged."""
@@ -69,15 +70,22 @@ class DaemonStateReader:
                 return None
             data = await resp.json()
         state_dict = data.get("state")
-        if state_dict == self._last_state_dict:
+        sessions = data.get("sessions", [])
+        self._run_status = str(data.get("status", ""))
+        if state_dict == self._last_state_dict and sessions == self._sessions:
             return None
         self._last_state_dict = state_dict
+        self._sessions = sessions
         state = State.from_dict(state_dict)
         return state, self._sessions
 
     @property
     def sessions(self) -> list[dict[str, Any]]:
         return self._sessions
+
+    @property
+    def run_status(self) -> str:
+        return self._run_status
 
     def reset(self) -> None:
         self._last_state_dict = None

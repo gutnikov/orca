@@ -48,7 +48,6 @@ def _make_config(
             "a": StateDef(),
             "b": StateDef(),
             "c": StateDef(),
-            "done": StateDef(terminal=True),
         }
     return StateMachineConfig(
         root_type="default",
@@ -146,8 +145,8 @@ class TestProgressBar:
         assert text == "▬▬▬▬▬▬▬▬▬"
 
     def test_progress_bar_no_non_terminal(self) -> None:
-        """All states terminal -> None."""
-        config = _make_config(states={"done": StateDef(terminal=True)})
+        """No states at all -> None."""
+        config = _make_config(states={})
         result = _progress_bar_text(config, {}, current_state="done", failed_states=set())
         assert result is None
 

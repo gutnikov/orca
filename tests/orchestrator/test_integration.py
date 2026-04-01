@@ -107,8 +107,6 @@ states:
           description: Outcome
     on:
       done: done
-  done:
-    terminal: true
 initial: planning
 """
 

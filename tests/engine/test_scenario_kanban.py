@@ -56,8 +56,6 @@ states:
     on:
       approved: done
       rejected: implementing
-  done:
-    terminal: true
 """
 
 TS = "2026-01-01T00:00:00Z"

@@ -12,7 +12,6 @@ def _make_config(states: dict[str, StateDef] | None = None) -> StateMachineConfi
             "triage": StateDef(worker=WorkerDef(kind="claude-code", prompt="t.j2", result_format={})),
             "implement": StateDef(worker=WorkerDef(kind="claude-code", prompt="i.j2", result_format={})),
             "review": StateDef(worker=WorkerDef(kind="claude-code", prompt="r.j2", result_format={})),
-            "done": StateDef(terminal=True),
         }
     return StateMachineConfig(
         root_type="default",

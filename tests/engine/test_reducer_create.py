@@ -52,7 +52,6 @@ def _passive_initial_config() -> StateMachineConfig:
                         ),
                         on={},
                     ),
-                    "done": StateDef(terminal=True),
                 },
             )
         },
@@ -78,7 +77,6 @@ def _active_initial_config() -> StateMachineConfig:
                         ),
                         on={},
                     ),
-                    "done": StateDef(terminal=True),
                 },
             )
         },

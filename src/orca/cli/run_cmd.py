@@ -36,6 +36,9 @@ def run_command(args: Namespace) -> None:
             "workflow": args.workflow,
             "branch": args.branch,
             "base": args.base,
+            "run_id": args.run_id,
+            "headless": args.headless,
+            "insights": args.insights,
             "max_hops": args.max_hops,
             "max_retries": args.max_retries,
         }
@@ -44,7 +47,7 @@ def run_command(args: Namespace) -> None:
             session.post("http://localhost/api/runs/start", json=payload) as resp,
         ):
             body = await resp.json()
-            if resp.status == 200:
+            if resp.status in (200, 201):
                 print(f"Run started: {body['run_id']}")
             else:
                 print(f"Error: {body.get('error', json.dumps(body))}", file=sys.stderr)

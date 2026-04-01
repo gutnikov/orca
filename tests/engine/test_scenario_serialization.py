@@ -33,8 +33,6 @@ states:
             done: "Complete"
     on:
       done: done
-  done:
-    terminal: true
 """
 
 CAPPED_CONFIG_YAML = """\
@@ -57,8 +55,6 @@ states:
             done: "Complete"
     on:
       done: done
-  done:
-    terminal: true
 """
 
 SELF_LOOP_CONFIG_YAML = """\
@@ -82,8 +78,6 @@ states:
     on:
       again: refine
       done: done
-  done:
-    terminal: true
 """
 
 DECOMPOSE_CONFIG_YAML = """\
@@ -114,8 +108,6 @@ states:
       done: done
       decompose:
         action: decompose
-  done:
-    terminal: true
 """
 
 TS = "2026-01-01T00:00:00Z"

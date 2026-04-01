@@ -78,11 +78,7 @@ def _now() -> str:
 
 def _is_terminal(issue: Issue, config: StateMachineConfig) -> bool:
     """Check if an issue is in a terminal state."""
-    type_def = config.types.get(issue.type)
-    if type_def is None:
-        return False
-    state_def = type_def.states.get(issue.state)
-    return state_def is not None and state_def.terminal
+    return issue.state == "done"
 
 
 def resolve_base_ref(cli_base: str | None, config_base: str) -> str:
@@ -210,11 +206,13 @@ def _recover_effects(
     recovered_effects: list[DispatchWorkerEffect] = []
 
     for issue_id, issue in state.issues.items():
+        if issue.state == "done":
+            continue
         type_def = config.types.get(issue.type)
         if type_def is None:
             continue
         state_def = type_def.states.get(issue.state)
-        if state_def is None or state_def.terminal:
+        if state_def is None:
             continue
 
         if issue.worker_active:
@@ -348,11 +346,9 @@ async def run(
         # Reset hop_count and failure_count on non-terminal issues so
         # CLI limits (--max-hops, --max-retries) apply fresh on re-run.
         for issue in state.issues.values():
-            type_def = config.types.get(issue.type)
-            if type_def and issue.state in type_def.states and type_def.states[issue.state].terminal:
+            if issue.state == "done":
                 continue
             issue.hop_count = 0
-            issue.failure_count = 0
 
         # Restore session log paths from previous run so TUI can display them
         if session_log_paths is not None:

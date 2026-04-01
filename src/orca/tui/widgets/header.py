@@ -104,13 +104,9 @@ class OrcaHeader(Static):
 
     def _all_terminal(self) -> bool:
         """Check if all issues are in terminal states."""
-        if self._state is None or self._config is None:
+        if self._state is None:
             return False
-        for issue in self._state.issues.values():
-            state_def = self._config.root_type_def.states.get(issue.state)
-            if state_def is None or not state_def.terminal:
-                return False
-        return True
+        return all(issue.state == "done" for issue in self._state.issues.values())
 
     def _step_text(self) -> str | None:
         """Calculate step N/M for the root issue."""
@@ -122,7 +118,7 @@ class OrcaHeader(Static):
             return None
 
         root_issue = self._state.issues[root]
-        non_terminal_states = [name for name, sdef in self._config.root_type_def.states.items() if not sdef.terminal]
+        non_terminal_states = list(self._config.root_type_def.states.keys())
         total_steps = len(non_terminal_states)
         if total_steps == 0:
             return None

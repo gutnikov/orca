@@ -22,6 +22,9 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("-w", "--workflow", type=str, default=None)
     run_parser.add_argument("-b", "--branch", type=str, default=None)
     run_parser.add_argument("--base", type=str, default=None)
+    run_parser.add_argument("--headless", action="store_true")
+    run_parser.add_argument("--insights", action="store_true")
+    run_parser.add_argument("--run-id", type=str, default=None)
     run_parser.add_argument("--max-hops", type=int, default=10)
     run_parser.add_argument("--max-retries", type=int, default=3)
 
@@ -30,6 +33,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     # orca mcp
     sub.add_parser("mcp", help="MCP stdio bridge")
+
+    # orca stop <run_id>
+    stop_parser = sub.add_parser("stop", help="Stop a running workflow")
+    stop_parser.add_argument("run_id", type=str)
+
+    # orca resume <run_id>
+    resume_parser = sub.add_parser("resume", help="Resume a stopped/failed workflow")
+    resume_parser.add_argument("run_id", type=str)
+
+    # orca drop <run_id>
+    drop_parser = sub.add_parser("drop", help="Drop a run from the daemon")
+    drop_parser.add_argument("run_id", type=str)
 
     # orca runs
     sub.add_parser("runs", help="List all runs")
@@ -67,6 +82,21 @@ def main() -> None:
         from orca.cli.mcp_cmd import mcp_command
 
         mcp_command()
+
+    elif args.subcommand == "stop":
+        from orca.cli.stop_cmd import stop_command
+
+        stop_command(args.run_id)
+
+    elif args.subcommand == "drop":
+        from orca.cli.drop_cmd import drop_command
+
+        drop_command(args.run_id)
+
+    elif args.subcommand == "resume":
+        from orca.cli.resume_cmd import resume_command
+
+        resume_command(args.run_id)
 
     elif args.subcommand == "runs":
         from orca.cli.list_cmd import runs_command

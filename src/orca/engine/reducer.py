@@ -111,7 +111,7 @@ def _handle_advance(
     current_state_def = config.get_state(issue.type, issue.state)
 
     # Must be in a passive state (no worker and not terminal)
-    if current_state_def.worker is not None or current_state_def.terminal:
+    if current_state_def.worker is not None or issue.state == "done":
         effects.append(
             ErrorEffect(
                 issue_id=event.issue_id,
@@ -130,9 +130,11 @@ def _handle_advance(
         )
         return
 
-    # Target state must exist in the issue's type
+    # Target state must exist in the issue's type (or be a builtin)
+    from orca.engine.types import BUILTIN_STATES
+
     type_def = config.get_type(issue.type)
-    if event.target_state not in type_def.states:
+    if event.target_state not in type_def.states and event.target_state not in BUILTIN_STATES:
         effects.append(
             ErrorEffect(
                 issue_id=event.issue_id,
@@ -190,7 +192,7 @@ def _handle_worker_result(
     state_def = config.get_state(issue.type, issue.state)
 
     # Issue must not be in terminal state
-    if state_def.terminal:
+    if issue.state == "done":
         effects.append(
             ErrorEffect(
                 issue_id=event.issue_id,
@@ -234,6 +236,56 @@ def _handle_worker_result(
         return
 
     rule = state_def.on[outcome]
+
+    # Handle built-in "failed" target: treat as worker failure (retry logic)
+    if isinstance(rule, OnTransition) and rule.target == "failed":
+        reason = str(event.result.get("reason", "Worker returned failure outcome"))
+        issue.worker_active = False
+        issue.failure_count += 1
+
+        append_log(issue, event.timestamp, "worker_result", event.result)
+        append_log(issue, ts, "worker_failed", {"state": issue.state, "error": reason})
+
+        # Store reason in issue fields if the type defines failure_context
+        issue_fields_def = config.get_type(issue.type).fields
+        if "failure_context" in issue_fields_def:
+            issue.fields["failure_context"] = reason
+
+        # Slot backfill
+        old_state_name = issue.state
+        if state_def.max_workers is not None:
+            backfill_queue(config, state, f"{issue.type}:{old_state_name}", effects)
+
+        # Check retry limit
+        if config.max_worker_retries is not None and issue.failure_count >= config.max_worker_retries:
+            append_log(
+                issue,
+                ts,
+                "worker_retries_exhausted",
+                {"state": issue.state, "failure_count": issue.failure_count},
+            )
+            effects.append(
+                ErrorEffect(
+                    issue_id=event.issue_id,
+                    message=f"Issue '{event.issue_id}' failed {issue.failure_count} times in state "
+                    f"'{issue.state}' — retries exhausted",
+                )
+            )
+            return
+
+        # Retry — re-dispatch
+        issue.worker_active = True
+        append_log(issue, ts, "worker_dispatched", {"state": issue.state})
+        effects.append(
+            DispatchWorkerEffect(
+                issue_id=event.issue_id,
+                issue_type=issue.type,
+                state=issue.state,
+                result_format=build_result_format(config, issue.type, issue.state),
+                issue=build_issue_context(state, event.issue_id),
+            )
+        )
+        return
 
     # If decompose, validate sub_issues is not empty (before mutation)
     if isinstance(rule, OnDecompose):
@@ -369,8 +421,7 @@ def _handle_feedback_received(
         )
         return
 
-    state_def = config.get_state(issue.type, issue.state)
-    if state_def.terminal:
+    if issue.state == "done":
         effects.append(
             ErrorEffect(
                 issue_id=event.issue_id,
@@ -491,7 +542,7 @@ def _apply_transition(
     issue.visit_counts[target_state] = issue.visit_counts.get(target_state, 0) + 1
     issue.hop_count += 1
 
-    if target_def.terminal:
+    if target_state == "done":
         # Run cascading unblock check
         _cascading_unblock(config, state, issue_id, effects, ts)
     elif target_def.worker is not None:
@@ -633,9 +684,7 @@ def _cascading_unblock(
         parent_id = terminal_issue.decomposed_from
         parent = state.issues[parent_id]
         children = get_children(state, parent_id)
-        all_terminal = all(
-            config.get_state(state.issues[cid].type, state.issues[cid].state).terminal for cid in children
-        )
+        all_terminal = all(state.issues[cid].state == "done" for cid in children)
         if all_terminal and not parent.worker_active:
             # Log unblocked on parent
             append_log(parent, ts, "unblocked", {"reason": "decomposition"})
@@ -657,10 +706,7 @@ def _cascading_unblock(
     for iid, iss in state.issues.items():
         if terminal_issue_id in iss.depends_on:
             # Check if all depends_on are now terminal
-            all_deps_terminal = all(
-                config.get_state(state.issues[dep_id].type, state.issues[dep_id].state).terminal
-                for dep_id in iss.depends_on
-            )
+            all_deps_terminal = all(state.issues[dep_id].state == "done" for dep_id in iss.depends_on)
             if (
                 all_deps_terminal
                 and not is_blocked(state, config, iid)

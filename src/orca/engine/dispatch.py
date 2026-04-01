@@ -30,15 +30,13 @@ def is_blocked(state: State, config: StateMachineConfig, issue_id: str) -> bool:
     if children:
         for child_id in children:
             child = state.issues[child_id]
-            child_state_def = config.get_state(child.type, child.state)
-            if not child_state_def.terminal:
+            if child.state != "done":
                 return True
 
     # Dependency-blocked: has depends_on entries not all in terminal states
     for dep_id in issue.depends_on:
         dep = state.issues[dep_id]
-        dep_state_def = config.get_state(dep.type, dep.state)
-        if not dep_state_def.terminal:
+        if dep.state != "done":
             return True
 
     return False

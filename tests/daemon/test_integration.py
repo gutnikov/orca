@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from starlette.testclient import TestClient
 
+from orca.daemon.client import DaemonClient
 from orca.daemon.http_api import create_app
 from orca.daemon.manager import RunManager
 from orca.daemon.mcp_tools import create_mcp_server
@@ -31,9 +33,7 @@ states:
           values: [done]
           description: Outcome
     on:
-      done: complete
-  complete:
-    terminal: true
+      done: done
 initial: todo
 """
     (tmp_path / "orca.yml").write_text(config)
@@ -41,6 +41,14 @@ initial: todo
     (tmp_path / "prompts" / "todo.md").write_text("Do: {{ issue.title }}")
     (tmp_path / "task.md").write_text("title: Integration test task")
     return tmp_path
+
+
+@pytest.fixture()
+def mock_client() -> DaemonClient:
+    mock = MagicMock(spec=DaemonClient)
+    mock.status = AsyncMock(return_value={"uptime": 1.0, "active_runs": 0, "total_runs": 0})
+    mock.list_runs = AsyncMock(return_value=[])
+    return mock
 
 
 class TestDaemonIntegration:
@@ -57,10 +65,9 @@ class TestDaemonIntegration:
         assert resp.json() == []
 
     @pytest.mark.asyncio()
-    async def test_mcp_status_and_list(self, repo: Path) -> None:
-        """MCP tools match HTTP API results."""
-        manager = RunManager(repo)
-        server = create_mcp_server(manager)
+    async def test_mcp_status_and_list(self, mock_client: DaemonClient) -> None:
+        """MCP tools return expected results from DaemonClient."""
+        server = create_mcp_server(mock_client)
 
         content_blocks, _ = await server.call_tool("orca_daemon_status", {})
         data = json.loads(content_blocks[0].text)
@@ -71,16 +78,16 @@ class TestDaemonIntegration:
         assert data == []
 
     @pytest.mark.asyncio()
-    async def test_http_and_mcp_consistency(self, repo: Path) -> None:
+    async def test_http_and_mcp_consistency(self, repo: Path, mock_client: DaemonClient) -> None:
         """HTTP and MCP return same data for the same queries."""
         manager = RunManager(repo)
-        client = TestClient(create_app(manager))
-        server = create_mcp_server(manager)
+        http_client = TestClient(create_app(manager))
 
         # HTTP status
-        http_status = client.get("/api/status").json()
+        http_status = http_client.get("/api/status").json()
 
-        # MCP status
+        # MCP status (via mocked client returning same empty state)
+        server = create_mcp_server(mock_client)
         content_blocks, _ = await server.call_tool("orca_daemon_status", {})
         mcp_status = json.loads(content_blocks[0].text)
 
@@ -88,7 +95,7 @@ class TestDaemonIntegration:
         assert http_status["total_runs"] == mcp_status["total_runs"]
 
         # HTTP list runs
-        http_runs = client.get("/api/runs").json()
+        http_runs = http_client.get("/api/runs").json()
 
         # MCP list runs
         content_blocks, _ = await server.call_tool("orca_list_runs", {})

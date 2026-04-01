@@ -25,7 +25,6 @@ def _make_config(
                 or {
                     "todo": StateDef(),
                     "work": StateDef(),
-                    "done": StateDef(terminal=True),
                 },
             )
         },

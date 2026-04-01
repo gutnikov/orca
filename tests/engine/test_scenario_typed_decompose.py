@@ -45,8 +45,6 @@ types:
             action: decompose
             child_type: task
             then: done
-      done:
-        terminal: true
 
   task:
     fields:
@@ -64,8 +62,6 @@ types:
               description: d
         on:
           done: done
-      done:
-        terminal: true
 """
 
 TS = "2026-01-01T00:00:00Z"
@@ -223,8 +219,6 @@ types:
         on:
           decompose:
             action: decompose
-      done:
-        terminal: true
 """
         config = parse_config(no_child_type_config)
         gen = _counter()

@@ -1,27 +1,38 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from orca.daemon.manager import RunManager
+from orca.daemon.client import DaemonClient
 from orca.daemon.mcp_tools import create_mcp_server
 
 
 @pytest.fixture()
-def manager(tmp_path: Path) -> RunManager:
-    return RunManager(tmp_path)
+def client() -> DaemonClient:
+    mock = MagicMock(spec=DaemonClient)
+    mock.status = AsyncMock(return_value={"uptime": 1.0, "active_runs": 0, "total_runs": 0})
+    mock.list_runs = AsyncMock(return_value=[])
+    mock.get_run = AsyncMock(return_value={"error": "run 'nope:default' not found"})
+    mock.get_issue = AsyncMock(return_value={"error": "issue 'iss-1' not found in run 'nope:default'"})
+    mock.get_insights = AsyncMock(return_value="")
+    mock.get_worker_log = AsyncMock(return_value="")
+    mock.retry_issue = AsyncMock(return_value={"error": "run 'nope:default' not found"})
+    mock.stop_run = AsyncMock(return_value={"error": "run 'nope:default' not found"})
+    mock.drop_run = AsyncMock(return_value={"error": "run 'nope:default' not found"})
+    mock.resume_run = AsyncMock(return_value={"error": "run 'nope:default' not found"})
+    return mock
 
 
 class TestMcpToolRegistration:
-    def test_server_has_all_tools(self, manager: RunManager) -> None:
-        server = create_mcp_server(manager)
+    def test_server_has_all_tools(self, client: DaemonClient) -> None:
+        server = create_mcp_server(client)
         assert server is not None
 
     @pytest.mark.asyncio()
-    async def test_all_nine_tools_registered(self, manager: RunManager) -> None:
-        server = create_mcp_server(manager)
+    async def test_all_tools_registered(self, client: DaemonClient) -> None:
+        server = create_mcp_server(client)
         tools = await server.list_tools()
         tool_names = {t.name for t in tools}
         expected = {
@@ -34,14 +45,16 @@ class TestMcpToolRegistration:
             "orca_get_worker_log",
             "orca_retry_issue",
             "orca_stop_run",
+            "orca_drop_run",
+            "orca_resume_run",
         }
         assert tool_names == expected
 
 
 @pytest.mark.asyncio()
 class TestDaemonStatusTool:
-    async def test_returns_uptime_and_counts(self, manager: RunManager) -> None:
-        server = create_mcp_server(manager)
+    async def test_returns_uptime_and_counts(self, client: DaemonClient) -> None:
+        server = create_mcp_server(client)
         content_blocks, _ = await server.call_tool("orca_daemon_status", {})
         data = json.loads(content_blocks[0].text)
         assert data["active_runs"] == 0
@@ -51,8 +64,8 @@ class TestDaemonStatusTool:
 
 @pytest.mark.asyncio()
 class TestListRunsTool:
-    async def test_empty_list(self, manager: RunManager) -> None:
-        server = create_mcp_server(manager)
+    async def test_empty_list(self, client: DaemonClient) -> None:
+        server = create_mcp_server(client)
         content_blocks, _ = await server.call_tool("orca_list_runs", {})
         data = json.loads(content_blocks[0].text)
         assert data == []
@@ -60,14 +73,14 @@ class TestListRunsTool:
 
 @pytest.mark.asyncio()
 class TestGetRunTool:
-    async def test_not_found(self, manager: RunManager) -> None:
-        server = create_mcp_server(manager)
+    async def test_not_found(self, client: DaemonClient) -> None:
+        server = create_mcp_server(client)
         content_blocks, _ = await server.call_tool("orca_get_run", {"run_id": "nope:default"})
         data = json.loads(content_blocks[0].text)
         assert "error" in data
 
-    async def test_not_found_message(self, manager: RunManager) -> None:
-        server = create_mcp_server(manager)
+    async def test_not_found_message(self, client: DaemonClient) -> None:
+        server = create_mcp_server(client)
         content_blocks, _ = await server.call_tool("orca_get_run", {"run_id": "nope:default"})
         data = json.loads(content_blocks[0].text)
         assert "nope:default" in data["error"]
@@ -75,8 +88,8 @@ class TestGetRunTool:
 
 @pytest.mark.asyncio()
 class TestGetIssueTool:
-    async def test_not_found_run(self, manager: RunManager) -> None:
-        server = create_mcp_server(manager)
+    async def test_not_found_run(self, client: DaemonClient) -> None:
+        server = create_mcp_server(client)
         content_blocks, _ = await server.call_tool("orca_get_issue", {"run_id": "nope:default", "issue_id": "iss-1"})
         data = json.loads(content_blocks[0].text)
         assert "error" in data
@@ -84,16 +97,16 @@ class TestGetIssueTool:
 
 @pytest.mark.asyncio()
 class TestGetInsightsTool:
-    async def test_empty_for_unknown_run(self, manager: RunManager) -> None:
-        server = create_mcp_server(manager)
+    async def test_empty_for_unknown_run(self, client: DaemonClient) -> None:
+        server = create_mcp_server(client)
         content_blocks, _ = await server.call_tool("orca_get_insights", {"run_id": "nope:default"})
         assert content_blocks[0].text == ""
 
 
 @pytest.mark.asyncio()
 class TestGetWorkerLogTool:
-    async def test_empty_for_unknown_run(self, manager: RunManager) -> None:
-        server = create_mcp_server(manager)
+    async def test_empty_for_unknown_run(self, client: DaemonClient) -> None:
+        server = create_mcp_server(client)
         content_blocks, _ = await server.call_tool(
             "orca_get_worker_log", {"run_id": "nope:default", "issue_id": "iss-1"}
         )
@@ -102,8 +115,8 @@ class TestGetWorkerLogTool:
 
 @pytest.mark.asyncio()
 class TestRetryIssueTool:
-    async def test_not_found(self, manager: RunManager) -> None:
-        server = create_mcp_server(manager)
+    async def test_not_found(self, client: DaemonClient) -> None:
+        server = create_mcp_server(client)
         content_blocks, _ = await server.call_tool("orca_retry_issue", {"run_id": "nope:default", "issue_id": "iss-1"})
         data = json.loads(content_blocks[0].text)
         assert "error" in data
@@ -111,8 +124,8 @@ class TestRetryIssueTool:
 
 @pytest.mark.asyncio()
 class TestStopRunTool:
-    async def test_not_found(self, manager: RunManager) -> None:
-        server = create_mcp_server(manager)
+    async def test_not_found(self, client: DaemonClient) -> None:
+        server = create_mcp_server(client)
         content_blocks, _ = await server.call_tool("orca_stop_run", {"run_id": "nope:default"})
         data = json.loads(content_blocks[0].text)
         assert "error" in data

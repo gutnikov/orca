@@ -54,9 +54,6 @@ states:
       complete: done
       reject: todo
 
-  done:
-    terminal: true
-
 initial: todo
 """
 
@@ -119,9 +116,6 @@ states:
     on:
       complete: done
 
-  done:
-    terminal: true
-
 initial: todo
 """
 
@@ -176,9 +170,6 @@ states:
     on:
       applied: done
 
-  done:
-    terminal: true
-
 initial: todo
 """
 
@@ -210,9 +201,6 @@ states:
           required_when: needs_feedback
     on:
       complete: done
-
-  done:
-    terminal: true
 
 initial: implementing
 

@@ -50,6 +50,7 @@ async def serve(repo_root: Path) -> None:
         app=app,
         uds=str(sock),
         log_level="info",
+        access_log=False,
     )
     server = uvicorn.Server(config)
 

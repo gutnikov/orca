@@ -56,8 +56,10 @@ async def _start_run(request: Request) -> JSONResponse:
             workflow=body.get("workflow"),
             branch=body.get("branch"),
             base=body.get("base"),
+            run_id=body.get("run_id"),
             max_hops=body.get("max_hops"),
             max_retries=body.get("max_retries"),
+            insights=bool(body.get("insights", False)),
         )
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
@@ -72,7 +74,8 @@ async def _get_run(request: Request) -> JSONResponse:
     if state is None:
         return JSONResponse({"error": f"run '{run_id}' not found"}, status_code=404)
     run_info = manager.get_run(run_id)
-    result: dict[str, Any] = {"run_id": run_id, "state": state}
+    sessions = manager.get_sessions(run_id)
+    result: dict[str, Any] = {"run_id": run_id, "state": state, "sessions": sessions}
     if run_info is not None:
         result["status"] = run_info.status.value
     return JSONResponse(result)
@@ -98,9 +101,9 @@ async def _get_insights(request: Request) -> PlainTextResponse:
 async def _get_worker_log(request: Request) -> PlainTextResponse:
     manager: RunManager = request.app.state.manager
     run_id: str = request.path_params["run_id"]
-    tracking_id: str = request.path_params["tracking_id"]
+    issue_id: str = request.path_params["issue_id"]
     tail = int(request.query_params.get("tail", "100"))
-    text = manager.get_worker_log(run_id, tracking_id, tail)
+    text = manager.get_worker_log(run_id, issue_id, tail)
     return PlainTextResponse(text)
 
 
@@ -112,6 +115,26 @@ async def _stop_run(request: Request) -> JSONResponse:
         return JSONResponse({"error": f"run '{run_id}' not found"}, status_code=404)
     await manager.stop_run(run_id)
     return JSONResponse({"status": "stopped"})
+
+
+async def _drop_run(request: Request) -> JSONResponse:
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    try:
+        await manager.drop_run(run_id)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=404)
+    return JSONResponse({"status": "dropped"})
+
+
+async def _resume_run(request: Request) -> JSONResponse:
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    try:
+        await manager.resume_run(run_id)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return JSONResponse({"status": "resumed"})
 
 
 async def _retry_issue(request: Request) -> JSONResponse:
@@ -163,8 +186,10 @@ def create_app(manager: RunManager) -> Starlette:
         Route("/api/runs/start", _start_run, methods=["POST"]),
         Route("/api/runs/{run_id:path}/issues/{issue_id}", _get_issue, methods=["GET"]),
         Route("/api/runs/{run_id:path}/insights", _get_insights, methods=["GET"]),
-        Route("/api/runs/{run_id:path}/logs/{tracking_id}", _get_worker_log, methods=["GET"]),
+        Route("/api/runs/{run_id:path}/logs/{issue_id}", _get_worker_log, methods=["GET"]),
         Route("/api/runs/{run_id:path}/stop", _stop_run, methods=["POST"]),
+        Route("/api/runs/{run_id:path}/resume", _resume_run, methods=["POST"]),
+        Route("/api/runs/{run_id:path}/drop", _drop_run, methods=["POST"]),
         Route("/api/runs/{run_id:path}/retry/{issue_id}", _retry_issue, methods=["POST"]),
         Route("/api/runs/{run_id:path}/hot-session", _hot_session, methods=["POST"]),
         Route("/api/runs/{run_id:path}", _get_run, methods=["GET"]),

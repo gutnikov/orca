@@ -60,12 +60,13 @@ class OnDecompose:
 
 OnRule = OnTransition | OnDecompose
 
+BUILTIN_STATES: frozenset[str] = frozenset({"done", "failed"})
+
 
 @dataclass(frozen=True)
 class StateDef:
     worker: WorkerDef | None = None
     on: dict[str, OnRule] = field(default_factory=dict)
-    terminal: bool = False
     max_workers: int | None = None
 
 
@@ -74,6 +75,9 @@ class TypeDef:
     fields: dict[str, FieldDef]
     initial: str
     states: dict[str, StateDef]
+
+
+_DONE_SENTINEL = StateDef()
 
 
 @dataclass(frozen=True)
@@ -87,6 +91,8 @@ class StateMachineConfig:
         return self.types[type_name]
 
     def get_state(self, type_name: str, state_name: str) -> StateDef:
+        if state_name == "done":
+            return _DONE_SENTINEL
         return self.types[type_name].states[state_name]
 
     @property

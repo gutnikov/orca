@@ -177,6 +177,30 @@ class PhasesPanel(VerticalScroll):
                 elapsed = _elapsed_str(str(session.get("started_at", "")))
                 if elapsed:
                     lines.append(f"\n  {elapsed}", style="dim")
+            elif session.get("interrupted"):
+                prefix = "→ " if is_selected else "  "
+                lines.append(prefix)
+                lines.append("⏸ ", style="bold orange3")
+                lines.append(state_name, style="bold orange3")
+                lines.append("  interrupted", style="dim italic")
+                duration = _duration_str(
+                    str(session.get("started_at", "")),
+                    str(session.get("completed_at", "")),
+                )
+                if duration:
+                    lines.append(f"\n  {duration}", style="dim")
+            elif session.get("failed"):
+                prefix = "→ " if is_selected else "  "
+                lines.append(prefix)
+                lines.append("✗ ", style="bold red")
+                lines.append(state_name, style="bold red")
+                lines.append("  stopped", style="dim italic")
+                duration = _duration_str(
+                    str(session.get("started_at", "")),
+                    str(session.get("completed_at", "")),
+                )
+                if duration:
+                    lines.append(f"\n  {duration}", style="dim")
             else:
                 is_failed = session.get("failed", False)
                 is_interrupted = session.get("interrupted", False)

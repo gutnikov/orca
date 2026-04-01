@@ -39,8 +39,6 @@ states:
           description: Outcome
     on:
       complete: done
-  done:
-    terminal: true
 initial: todo
 """
 

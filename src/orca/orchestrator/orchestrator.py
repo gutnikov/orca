@@ -94,6 +94,18 @@ class Orchestrator:
         for branch in self.branches.values():
             self._used_slugs.add(branch)
 
+    async def stop(self) -> None:
+        """Cancel in-flight workers and kill all tmux sessions."""
+        for task in list(self._in_flight.keys()):
+            task.cancel()
+        if self._in_flight:
+            await asyncio.gather(*self._in_flight.keys(), return_exceptions=True)
+        self._in_flight.clear()
+        for session in list(self._tmux_sessions.values()):
+            with contextlib.suppress(Exception):
+                session.close()
+        self._tmux_sessions.clear()
+
     @property
     def state(self) -> State:
         """Current state of the state machine."""
@@ -137,6 +149,25 @@ class Orchestrator:
             lines = lines[-tail:]
         return "\n".join(lines) + "\n"
 
+    def get_session_log_by_issue(self, issue_id: str, tail: int = 100) -> str:
+        """Read session log for the latest session of the given issue_id.
+
+        Looks up the issue's most recent session in the manifest, then
+        delegates to ``get_session_log`` with the session's tracking_id.
+        Returns empty string if no session is found.
+        """
+        if self._session_sync is None:
+            return ""
+        entries = self._session_sync.manifest.read()
+        # Find the latest session for this issue_id (last in the list)
+        tracking_id = ""
+        for entry in entries:
+            if entry.get("issue_id") == issue_id:
+                tracking_id = entry.get("session_id", "")
+        if not tracking_id:
+            return ""
+        return self.get_session_log(tracking_id, tail)
+
     def set_hot_session(self, session_id: str) -> None:
         """Mark a session as hot (high-frequency capture)."""
         self._hot_sessions.add(session_id)
@@ -150,13 +181,7 @@ class Orchestrator:
         issue = self._state.issues.get(issue_id)
         if issue is None:
             return False
-        type_def = self._config.types.get(issue.type)
-        if type_def is None:
-            return False
-        state_def = type_def.states.get(issue.state)
-        if state_def is None:
-            return False
-        return state_def.terminal
+        return issue.state == "done"
 
     def _unique_branch_name(self, title: str, parent_branch: str) -> str:
         """Generate a unique, human-readable branch name from an issue title.
