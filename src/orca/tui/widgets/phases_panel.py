@@ -14,6 +14,37 @@ from orca.tui.messages import PhaseSelected
 
 _SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 _PLACEHOLDER = "*Select an issue to view phases*"
+_BAR_CHAR = "━"
+_PROGRESS_STALE_SECONDS = 60
+_DEFAULT_BAR_WIDTH = 24
+
+
+def _render_progress_bar(
+    lines: Text,
+    progress: int,
+    fill_style: str,
+    dim_style: str = "dim",
+    bar_width: int = _DEFAULT_BAR_WIDTH,
+) -> None:
+    """Render a thin progress bar using ━ characters."""
+    filled = int(bar_width * progress / 100)
+    unfilled = bar_width - filled
+    lines.append(f"  {_BAR_CHAR * filled}", style=fill_style)
+    if unfilled > 0:
+        lines.append(_BAR_CHAR * unfilled, style=dim_style)
+    lines.append(f" {progress}%", style=f"bold {fill_style}" if progress < 100 else dim_style)
+
+
+def _is_progress_stale(progress_updated_at: str | None) -> bool:
+    """Return True if progress hasn't been updated in _PROGRESS_STALE_SECONDS."""
+    if not progress_updated_at:
+        return False
+    try:
+        updated = datetime.fromisoformat(progress_updated_at)
+        elapsed = (datetime.now(UTC) - updated).total_seconds()
+        return elapsed > _PROGRESS_STALE_SECONDS
+    except (ValueError, TypeError):
+        return False
 
 
 class PhasesPanel(VerticalScroll):
@@ -127,16 +158,58 @@ class PhasesPanel(VerticalScroll):
                 lines.append(prefix)
                 lines.append(f"{frame} ", style="bold yellow")
                 lines.append(state_name, style="bold yellow")
+
+                progress = session.get("progress")
+                status_text = session.get("status")
+                progress_updated_at = session.get("progress_updated_at")
+                stale = _is_progress_stale(progress_updated_at)
+
+                if status_text:
+                    display_status = f"{status_text} (stalled)" if stale else status_text
+                    style = "dim italic" if stale else "dim"
+                    lines.append(f"\n  {display_status}", style=style)
+
+                if progress is not None and progress > 0:
+                    fill_style = "#777777" if stale else "yellow"
+                    lines.append("\n")
+                    _render_progress_bar(lines, progress, fill_style)
+
                 elapsed = _elapsed_str(str(session.get("started_at", "")))
                 if elapsed:
                     lines.append(f"\n  {elapsed}", style="dim")
             else:
+                is_failed = session.get("failed", False)
+                is_interrupted = session.get("interrupted", False)
                 prefix = "→ " if is_selected else "  "
                 lines.append(prefix)
-                lines.append("✓ ", style="green")
-                lines.append(state_name, style="green")
-                if outcome:
-                    lines.append(f"  {outcome}", style="dim italic")
+
+                if is_failed:
+                    lines.append("✗ ", style="bold red")
+                    lines.append(state_name, style="bold red")
+                    lines.append("  stopped", style="dim italic")
+                elif is_interrupted:
+                    lines.append("⏸ ", style="bold orange3")
+                    lines.append(state_name, style="bold orange3")
+                    lines.append("  interrupted", style="dim italic")
+                else:
+                    lines.append("✓ ", style="green")
+                    lines.append(state_name, style="green")
+                    if outcome:
+                        lines.append(f"  {outcome}", style="dim italic")
+
+                # Progress bar for completed/failed/interrupted
+                progress = session.get("progress")
+                if progress is not None:
+                    if is_failed:
+                        lines.append("\n")
+                        _render_progress_bar(lines, progress, "red")
+                    elif is_interrupted:
+                        lines.append("\n")
+                        _render_progress_bar(lines, progress, "orange3")
+                    else:
+                        lines.append("\n")
+                        _render_progress_bar(lines, 100, "dim")
+
                 duration = _duration_str(
                     str(session.get("started_at", "")),
                     str(session.get("completed_at", "")),

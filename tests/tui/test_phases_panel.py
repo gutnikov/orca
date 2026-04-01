@@ -102,3 +102,88 @@ class TestPhasesPanel:
             await pilot.pause()
             text = _get_static_text(panel)
             assert "planning" not in text
+
+
+class TestProgressRendering:
+    @pytest.mark.asyncio
+    async def test_active_worker_with_progress_shows_bar(self) -> None:
+        app = PhasesPanelApp()
+        async with app.run_test() as pilot:
+            panel = app.query_one(PhasesPanel)
+            sessions = [
+                {
+                    **_make_session("s1", state="implementing", completed_at=None),
+                    "progress": 68,
+                    "status": "Exploring sidebar...",
+                    "progress_updated_at": "2026-04-01T12:30:00+00:00",
+                },
+            ]
+            panel.show_phases("issue-1", sessions)
+            await pilot.pause()
+            text = _get_static_text(panel)
+            assert "68%" in text
+            assert "Exploring sidebar..." in text
+            assert "━" in text
+
+    @pytest.mark.asyncio
+    async def test_active_worker_without_progress_no_bar(self) -> None:
+        app = PhasesPanelApp()
+        async with app.run_test() as pilot:
+            panel = app.query_one(PhasesPanel)
+            sessions = [_make_session("s1", state="implementing", completed_at=None)]
+            panel.show_phases("issue-1", sessions)
+            await pilot.pause()
+            text = _get_static_text(panel)
+            assert "━" not in text
+            assert "%" not in text
+
+    @pytest.mark.asyncio
+    async def test_completed_worker_with_progress_shows_full_bar(self) -> None:
+        app = PhasesPanelApp()
+        async with app.run_test() as pilot:
+            panel = app.query_one(PhasesPanel)
+            sessions = [
+                {
+                    **_make_session("s1", state="implementing"),
+                    "progress": 100,
+                    "status": "Done",
+                    "progress_updated_at": "2026-04-01T12:30:00+00:00",
+                },
+            ]
+            panel.show_phases("issue-1", sessions)
+            await pilot.pause()
+            text = _get_static_text(panel)
+            assert "100%" in text
+            assert "━" in text
+
+    @pytest.mark.asyncio
+    async def test_failed_worker_with_progress_shows_frozen_bar(self) -> None:
+        app = PhasesPanelApp()
+        async with app.run_test() as pilot:
+            panel = app.query_one(PhasesPanel)
+            sessions = [
+                {
+                    **_make_session("s1", state="implementing"),
+                    "failed": True,
+                    "progress": 42,
+                    "status": "Was writing code",
+                    "progress_updated_at": "2026-04-01T12:30:00+00:00",
+                },
+            ]
+            panel.show_phases("issue-1", sessions)
+            await pilot.pause()
+            text = _get_static_text(panel)
+            assert "42%" in text
+            assert "━" in text
+            assert "stopped" in text
+
+    @pytest.mark.asyncio
+    async def test_completed_without_progress_no_bar(self) -> None:
+        app = PhasesPanelApp()
+        async with app.run_test() as pilot:
+            panel = app.query_one(PhasesPanel)
+            sessions = [_make_session("s1", state="implementing")]
+            panel.show_phases("issue-1", sessions)
+            await pilot.pause()
+            text = _get_static_text(panel)
+            assert "━" not in text
