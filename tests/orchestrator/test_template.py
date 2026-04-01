@@ -111,6 +111,43 @@ class TestRenderPrompt:
         assert "final action" in output.lower()
         assert "terminate this session" in output.lower()
 
+
+class TestProgressInjection:
+    def test_progress_instruction_appended_when_enabled(self, tmp_path: Path) -> None:
+        template_file = tmp_path / "template.md"
+        template_file.write_text("Do the work.")
+
+        issue: dict[str, Any] = {
+            "fields": {"title": "Test"},
+            "event_log": [],
+            "decomposed_from": None,
+            "depends_on": [],
+            "children": [],
+        }
+
+        output = render_prompt(template_file, tmp_path, issue, {}, Path("/tmp/result.json"), progress=True)
+
+        assert "<!-- PROGRESS:" in output
+        assert "periodically report your progress" in output.lower()
+
+    def test_progress_instruction_not_appended_by_default(self, tmp_path: Path) -> None:
+        template_file = tmp_path / "template.md"
+        template_file.write_text("Do the work.")
+
+        issue: dict[str, Any] = {
+            "fields": {"title": "Test"},
+            "event_log": [],
+            "decomposed_from": None,
+            "depends_on": [],
+            "children": [],
+        }
+
+        output = render_prompt(template_file, tmp_path, issue, {}, Path("/tmp/result.json"))
+
+        assert "<!-- PROGRESS:" not in output
+
+
+class TestRenderPromptSubdir:
     def test_subdirectory_template(self, tmp_path: Path) -> None:
         """Test loading template from subdirectory."""
         prompts_dir = tmp_path / "prompts"

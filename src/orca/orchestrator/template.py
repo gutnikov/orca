@@ -27,6 +27,21 @@ _RESULT_FILE_WARNING = """
 The orchestrator will terminate this session shortly after detecting the result file. \
 Complete ALL other work — git commits, file writes, code changes — before writing the result file.**"""
 
+_PROGRESS_INSTRUCTION = """
+
+---
+
+## Progress Reporting
+
+As you work, periodically report your progress by outputting an HTML comment:
+
+<!-- PROGRESS: <percent> | <status> -->
+
+- `<percent>` is an integer from 0 to 100
+- `<status>` is a short description of what you're currently doing
+- Emit this after completing meaningful milestones, not on every action
+- Example: <!-- PROGRESS: 25 | Writing unit tests for auth module -->"""
+
 
 def render_prompt(
     template_path: Path,
@@ -34,6 +49,8 @@ def render_prompt(
     issue: dict[str, Any],
     result_format: dict[str, Any],
     result_path: Path,
+    *,
+    progress: bool = False,
 ) -> str:
     """Render a Jinja2 template with issue context and output rules.
 
@@ -67,4 +84,6 @@ def render_prompt(
     }
 
     rendered = template.render(context)
+    if progress:
+        rendered += _PROGRESS_INSTRUCTION
     return rendered + _RESULT_FILE_WARNING

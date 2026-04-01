@@ -137,7 +137,14 @@ class CliAgentWorker:
 
         # b. Render prompt
         if prompt_path is not None:
-            prompt = render_prompt(prompt_path, self._repo_root, effect.issue, effect.result_format, result_path)
+            prompt = render_prompt(
+                prompt_path,
+                self._repo_root,
+                effect.issue,
+                effect.result_format,
+                result_path,
+                progress=effect.progress_enabled,
+            )
         else:
             prompt = ""
 
