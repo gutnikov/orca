@@ -88,6 +88,7 @@ class Orchestrator:
         self._in_flight: dict[asyncio.Task[WorkerOutcome], tuple[str, str]] = {}
         # Track feedback agent tasks by tracking_id
         self._feedback_tasks: set[str] = set()
+        self._progress_sessions: set[str] = set()
         # Track used branch slugs to avoid collisions
         self._used_slugs: set[str] = set()
         for branch in self.branches.values():
@@ -257,6 +258,9 @@ class Orchestrator:
                 worktree_path=str(workdir),
                 started_at=self.now(),
             )
+
+        if effect.progress_enabled:
+            self._progress_sessions.add(tracking_id)
 
         # Exponential backoff for retries: 5s, 10s, 20s, 40s, ...
         issue = self._state.issues.get(effect.issue_id)
@@ -612,6 +616,13 @@ class Orchestrator:
                         raw = tmux.capture_scrollback()
                         if raw:
                             Path(log_path_str).write_text(raw)
+                            if tid in self._progress_sessions and self._session_sync is not None:
+                                from orca.orchestrator.worker import parse_progress
+
+                                progress_result = parse_progress(raw)
+                                if progress_result is not None:
+                                    percent, status = progress_result
+                                    self._session_sync.manifest.update_progress(tid, percent, status)
                         self._last_save[tid] = now
                 except Exception:
                     pass
@@ -690,6 +701,7 @@ class Orchestrator:
                 # Mark the in-flight session as completed
                 if self._session_sync is not None:
                     self._session_sync.manifest.mark_completed(tracking_id, ts)
+                    self._progress_sessions.discard(tracking_id)
 
                 if isinstance(outcome, WorkerSuccess):
                     if tracking_id in self._feedback_tasks:
