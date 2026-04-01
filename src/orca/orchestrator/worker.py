@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -14,6 +15,22 @@ from orca.orchestrator.template import render_prompt
 from orca.orchestrator.validation import validate_result
 
 logger = logging.getLogger(__name__)
+
+_PROGRESS_RE = re.compile(r"<!--\s*PROGRESS:\s*(\d{1,3})\s*(?:\|\s*(.*?))?\s*-->")
+
+
+def parse_progress(scrollback: str) -> tuple[int, str | None] | None:
+    """Parse the last progress marker from scrollback text.
+
+    Returns (percent, status) or None if no marker found.
+    """
+    matches = _PROGRESS_RE.findall(scrollback)
+    if not matches:
+        return None
+    percent_str, status = matches[-1]
+    percent = min(int(percent_str), 100)
+    return (percent, status.strip() or None)
+
 
 # Poll result file and session liveness every this many seconds.
 _POLL_INTERVAL = 2.0

@@ -8,7 +8,14 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from orca.engine.types import DispatchWorkerEffect
-from orca.orchestrator.worker import KIND_REGISTRY, CliAgentWorker, KindConfig, WorkerFailure, WorkerSuccess
+from orca.orchestrator.worker import (
+    KIND_REGISTRY,
+    CliAgentWorker,
+    KindConfig,
+    WorkerFailure,
+    WorkerSuccess,
+    parse_progress,
+)
 
 
 def _make_effect(state: str = "implementing") -> DispatchWorkerEffect:
@@ -292,3 +299,46 @@ class TestCliAgentWorker:
         pty.spawn.assert_called_once()
         spawn_kwargs = pty.spawn.call_args.kwargs
         assert spawn_kwargs.get("env") == env
+
+
+class TestParseProgress:
+    def test_basic_marker(self) -> None:
+        scrollback = "some output\n<!-- PROGRESS: 42 | Writing tests -->\nmore output"
+        result = parse_progress(scrollback)
+        assert result == (42, "Writing tests")
+
+    def test_last_marker_wins(self) -> None:
+        scrollback = "<!-- PROGRESS: 10 | Starting -->\nwork\n<!-- PROGRESS: 75 | Almost done -->"
+        result = parse_progress(scrollback)
+        assert result == (75, "Almost done")
+
+    def test_no_marker(self) -> None:
+        scrollback = "just normal output with no markers"
+        result = parse_progress(scrollback)
+        assert result is None
+
+    def test_marker_without_status(self) -> None:
+        scrollback = "<!-- PROGRESS: 50 -->"
+        result = parse_progress(scrollback)
+        assert result == (50, None)
+
+    def test_clamps_to_100(self) -> None:
+        scrollback = "<!-- PROGRESS: 150 | Overshot -->"
+        result = parse_progress(scrollback)
+        assert result == (100, "Overshot")
+
+    def test_zero_progress(self) -> None:
+        scrollback = "<!-- PROGRESS: 0 | Just started -->"
+        result = parse_progress(scrollback)
+        assert result == (0, "Just started")
+
+    def test_whitespace_tolerance(self) -> None:
+        scrollback = "<!--  PROGRESS:  68  |  Exploring sidebar...  -->"
+        result = parse_progress(scrollback)
+        assert result == (68, "Exploring sidebar...")
+
+    def test_marker_with_ansi_codes(self) -> None:
+        """Scrollback from tmux may contain ANSI escape sequences around the marker."""
+        scrollback = "\x1b[0m<!-- PROGRESS: 30 | Parsing files -->\x1b[0m"
+        result = parse_progress(scrollback)
+        assert result == (30, "Parsing files")
