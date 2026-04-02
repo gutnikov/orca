@@ -45,3 +45,4 @@ Project documentation lives in `docs/`. See `docs/` subdirectories for specific 
 ## Skills
 
 - `skills/orca-manager/` — Autonomous orca workflow management skill. Invoke by asking the agent to manage orca workflows or by reading `skills/orca-manager/SKILL.md`.
+- `skills/orca-workflow-builder/` — Orca workflow authoring skill. Invoke when creating, updating, or auditing orca workflows and prompt templates.
