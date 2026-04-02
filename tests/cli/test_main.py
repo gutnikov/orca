@@ -99,3 +99,16 @@ class TestCliDispatch:
         assert args.run_id == "main:default"
         assert args.issue_id == "issue-123"
         assert args.tail == 50
+
+    def test_root_flag_default_none(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["runs"])
+        assert args.root is None
+
+    def test_root_flag_with_path(self) -> None:
+        from pathlib import Path
+
+        parser = build_parser()
+        args = parser.parse_args(["--root", "/tmp/myrepo", "daemon", "status"])
+        assert args.root == Path("/tmp/myrepo")
+        assert args.subcommand == "daemon"

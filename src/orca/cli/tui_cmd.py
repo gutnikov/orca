@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 
 
-def tui_command() -> None:
+def tui_command(root: Path | None = None) -> None:
     """Check daemon running, launch OrcaApp connected to daemon."""
     from orca.cli.daemon_cmd import _repo_root
     from orca.daemon.lifecycle import check_daemon_running, socket_path
 
-    repo = _repo_root()
+    repo = _repo_root(root)
     if not check_daemon_running(repo):
         print("Error: daemon is not running. Start it with: orca daemon start", file=sys.stderr)
         raise SystemExit(1)

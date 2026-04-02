@@ -31,6 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Build the top-level argument parser with subcommands."""
     parser = argparse.ArgumentParser(prog="orca", description="Orca workflow orchestrator")
     parser.add_argument("-v", "--version", action="store_true", help="Print version and exit")
+    parser.add_argument("--root", type=Path, default=None, help="Repository root (default: auto-detect via git)")
     sub = parser.add_subparsers(dest="subcommand")
 
     # orca daemon start|stop|status
@@ -95,47 +96,47 @@ def main() -> None:
     if args.subcommand == "daemon":
         from orca.cli.daemon_cmd import daemon_command
 
-        daemon_command(args.daemon_action)
+        daemon_command(args.daemon_action, root=args.root)
 
     elif args.subcommand == "run":
         from orca.cli.run_cmd import run_command
 
-        run_command(args)
+        run_command(args)  # args.root already in args
 
     elif args.subcommand == "tui":
         from orca.cli.tui_cmd import tui_command
 
-        tui_command()
+        tui_command(root=args.root)
 
     elif args.subcommand == "mcp":
         from orca.cli.mcp_cmd import mcp_command
 
-        mcp_command()
+        mcp_command(root=args.root)
 
     elif args.subcommand == "stop":
         from orca.cli.stop_cmd import stop_command
 
-        stop_command(args.run_id)
+        stop_command(args.run_id, root=args.root)
 
     elif args.subcommand == "drop":
         from orca.cli.drop_cmd import drop_command
 
-        drop_command(args.run_id)
+        drop_command(args.run_id, root=args.root)
 
     elif args.subcommand == "resume":
         from orca.cli.resume_cmd import resume_command
 
-        resume_command(args.run_id)
+        resume_command(args.run_id, root=args.root)
 
     elif args.subcommand == "runs":
         from orca.cli.list_cmd import runs_command
 
-        runs_command()
+        runs_command(root=args.root)
 
     elif args.subcommand == "logs":
         from orca.cli.list_cmd import logs_command
 
-        logs_command(args)
+        logs_command(args)  # args.root already in args
 
     else:
         parser.print_help()

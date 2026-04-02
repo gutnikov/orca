@@ -17,7 +17,7 @@ def run_command(args: Namespace) -> None:
     from orca.cli.daemon_cmd import _repo_root
     from orca.daemon.lifecycle import check_daemon_running, socket_path
 
-    repo = _repo_root()
+    repo = _repo_root(args.root)
     if not check_daemon_running(repo):
         print("Error: daemon is not running. Start it with: orca daemon start", file=sys.stderr)
         raise SystemExit(1)
