@@ -26,7 +26,7 @@ Confirm your understanding before starting. Example:
 
 ```
 ENSURE PREREQUISITES
-  ├── orca_daemon_status() — if fails, run: orca daemon start
+  ├── orca_daemon_status() — if fails, start daemon (see Daemon Management)
   ├── Target project path exists and is a git repo
   ├── Task file exists
   └── Flow-specific deps (docker info, etc.)
@@ -104,7 +104,7 @@ orca_get_insights(run_id)         → orchestrator-level view
 - ENVIRONMENT → read `skills/orca-manager/remediation-catalog.md`
 - PROMPT_ISSUE → read `skills/orca-manager/prompt-issues.md`
 - TRANSIENT → stop run, wait (within tier limit), resume
-- ORCA_BUG → at `full`: read traceback, search orca source, fix, lint (`uv run ruff check . && uv run mypy src/`), commit, restart daemon, resume. Otherwise: escalate with diagnosis.
+- ORCA_BUG → at `full`: read traceback, search orca source, fix, lint (`uv run ruff check . && uv run mypy src/`), commit, reinstall+restart daemon (see Daemon Management), resume. Otherwise: escalate with diagnosis.
 - TASK_ISSUE → always escalate to user
 
 ### Rules
@@ -128,6 +128,40 @@ When mission has multiple flows (e.g. "prd then qa-spec then implement"):
 - All flows chain on the **same branch** unless user specifies otherwise
 
 Read `skills/orca-manager/flow-patterns.md` for common mission patterns.
+
+## Daemon Management
+
+The orca daemon runs in the **target project directory** (`.orca/daemon.sock` and `.orca/daemon.pid` live there). All daemon shell commands must run from that directory. You run from the orca repo, so use `cd <target_project> && orca daemon ...` for daemon operations.
+
+### Starting the daemon
+
+When `orca_daemon_status()` fails during prerequisite check:
+
+1. `cd <target_project> && orca daemon start`
+2. Wait 3 seconds, verify `orca_daemon_status()` succeeds
+3. If still fails, check for stale files: `ls <target_project>/.orca/daemon.{pid,sock}`
+4. If stale pidfile exists (process dead): `rm <target_project>/.orca/daemon.pid <target_project>/.orca/daemon.sock`, then retry start
+5. If still fails after cleanup, escalate to user
+
+### Self-healing restart
+
+After fixing orca source code, the running daemon still has the old code. Full restart sequence:
+
+1. `cd <orca_repo> && uv sync` — reinstall orca from fixed source
+2. `cd <target_project> && orca daemon stop` — stop the running daemon
+3. Wait for process exit (pidfile should disappear within a few seconds)
+4. `cd <target_project> && orca daemon start` — start with new code
+5. Verify `orca_daemon_status()` succeeds
+6. `orca_resume_run(run_id)` for each affected run
+
+### Crash recovery
+
+If `orca_daemon_status()` or any MCP tool fails unexpectedly during monitoring:
+
+1. Check if daemon is actually dead: `ls <target_project>/.orca/daemon.pid` — if pidfile exists, check if process is alive
+2. If process is dead (stale pidfile): clean up pidfile+socket, restart daemon, resume runs
+3. If process is alive but unresponsive: wait 10s, retry MCP call. If still unresponsive, `orca daemon stop` then restart
+4. After restart, `orca_list_runs()` to see which runs need resuming — any that were `RUNNING` are now `STOPPED` and need `orca_resume_run()`
 
 ## Session Exit
 
