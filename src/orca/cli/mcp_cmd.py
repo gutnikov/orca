@@ -2,14 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 
-
-def mcp_command(root: Path | None = None) -> None:
-    """Create an MCP server backed by DaemonClient, run on stdio transport."""
-    from orca.cli.daemon_cmd import _repo_root
+def mcp_command() -> None:
+    """Create an MCP server and run on stdio transport."""
     from orca.daemon.mcp_tools import create_mcp_server
 
-    repo = _repo_root(root)
-    server = create_mcp_server(repo)
+    server = create_mcp_server()
     server.run(transport="stdio")

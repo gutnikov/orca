@@ -111,7 +111,7 @@ def main() -> None:
     elif args.subcommand == "mcp":
         from orca.cli.mcp_cmd import mcp_command
 
-        mcp_command(root=args.root)
+        mcp_command()
 
     elif args.subcommand == "stop":
         from orca.cli.stop_cmd import stop_command
