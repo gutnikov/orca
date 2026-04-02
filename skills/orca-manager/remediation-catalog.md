@@ -4,35 +4,38 @@ Known environment and infrastructure issues with tested fixes. Match error patte
 
 ## Orca Daemon
 
+Daemon process state (PID, socket) lives in `~/.orca/daemons/{hash}/`, not in the project directory. Use `--root` to target a specific project.
+
 ### Daemon not running
 
 **Pattern:** `orca_daemon_status()` MCP call fails, or `Connection refused` when any `orca_*` MCP tool is called
 **Platform:** both
 **Fix:**
-- Start daemon in target project: `cd <target_project> && orca daemon start`
+- Start daemon: `orca --root <target_project> daemon start`
 - Wait 3s, verify with `orca_daemon_status()`
 **Verify:** `orca_daemon_status()` returns uptime and run count
 **Risk:** low
 
 ### Daemon crashed (stale pidfile)
 
-**Pattern:** Daemon was running but MCP tools suddenly fail. `.orca/daemon.pid` exists but process is dead.
+**Pattern:** Daemon was running but MCP tools suddenly fail. PID file exists in `~/.orca/daemons/{hash}/` but process is dead.
 **Platform:** both
 **Fix:**
-- Check process: `cat <target_project>/.orca/daemon.pid` then `kill -0 <pid>` (fails if dead)
-- Clean up: `rm <target_project>/.orca/daemon.pid <target_project>/.orca/daemon.sock`
-- Restart: `cd <target_project> && orca daemon start`
+- Find daemon dir: `ls ~/.orca/daemons/` and check `root` files to find the matching project
+- Check process: `cat ~/.orca/daemons/<hash>/daemon.pid` then `kill -0 <pid>` (fails if dead)
+- Clean up: `rm ~/.orca/daemons/<hash>/daemon.pid ~/.orca/daemons/<hash>/daemon.sock`
+- Restart: `orca --root <target_project> daemon start`
 - Resume runs: `orca_list_runs()` to find stopped runs, `orca_resume_run()` for each
 **Verify:** `orca_daemon_status()` succeeds, runs resumed
 **Risk:** low
 
 ### Daemon unresponsive
 
-**Pattern:** `.orca/daemon.pid` exists, process is alive, but MCP tools timeout or return errors
+**Pattern:** PID file exists in `~/.orca/daemons/{hash}/`, process is alive, but MCP tools timeout or return errors
 **Platform:** both
 **Fix:**
 - Wait 10 seconds and retry — may be transient (heavy load)
-- If persists: `cd <target_project> && orca daemon stop && sleep 2 && orca daemon start`
+- If persists: `orca --root <target_project> daemon stop && sleep 2 && orca --root <target_project> daemon start`
 - Resume any affected runs
 **Verify:** `orca_daemon_status()` responds promptly
 **Risk:** low
