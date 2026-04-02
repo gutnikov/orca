@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "orca": {
+      "type": "stdio",
+      "command": "/Users/agutnikov/work/orca/bin/orca-mcp.sh",
+      "args": []
+    }
+  }
+}
