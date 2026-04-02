@@ -30,6 +30,8 @@ The engine reducer is pure: `reduce(config, state, event, generate_id, now) -> (
 
 Key types: `StateMachineConfig`, `State`, `Event` (Create/Advance/WorkerResult/WorkerFailed), `Effect` (DispatchWorker/Error).
 
+Built-in states: `done` (success terminal) and `failed` (triggers worker failure/retry semantics). Never defined in `states:` block — always available as transition targets.
+
 Worker config in `orca.yml`: `kind` (only "claude-code"), `prompt` (Jinja2 template path), optional `timeout`.
 
 ## CI

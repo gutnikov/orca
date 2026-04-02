@@ -57,7 +57,7 @@ On each wake-up, check for these in order:
 
 ### Errors (check first)
 - **Worker failed** — non-zero exit code, missing result.json, or timeout. Read the worker's session log to find the root cause. Don't just say "worker failed" — explain WHY.
-- **Pipeline deadlocked** — no workers in-flight and no issues are terminal. Something is stuck.
+- **Pipeline deadlocked** — no workers in-flight and no issues are in `done` state. Something is stuck.
 - **Orca log errors** — ERROR-level entries in orca.log.jsonl. These indicate orchestrator-level problems.
 
 ### Warnings
@@ -97,7 +97,7 @@ states:
 
 ### Info
 - **Issue completed** — brief note on what was produced, only if noteworthy
-- **Pipeline approaching completion** — mention when most issues are terminal
+- **Pipeline approaching completion** — mention when most issues are in `done` state
 
 ## Sleep Pattern
 
@@ -108,7 +108,7 @@ After each investigation cycle:
 
 ## Termination
 
-On each wake-up, check `state.json`. When ALL issues have terminal states (check the workflow config to know which states are terminal), write a final summary entry and stop.
+On each wake-up, check `state.json`. When ALL issues have `state: "done"`, write a final summary entry and stop.
 
 **Final summary entry** (severity: `summary`):
 - **title**: "Pipeline completed: {{elapsed}}m, {{completed}}/{{total}} issues succeeded"

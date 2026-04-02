@@ -132,6 +132,6 @@ states:
       applied: done
       failed: implementing             # go back to fix conflicts
 
-  # Terminal state — issue is complete.
-  done:
-    terminal: true
+  # No need to define `done` — it's a built-in terminal state.
+  # `failed` is also built-in: transitions targeting it trigger
+  # worker failure/retry semantics instead of a state change.

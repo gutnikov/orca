@@ -74,9 +74,6 @@ states:
     on:
       complete: done
       reject: todo
-
-  done:
-    terminal: true
 ```
 
 ### 2. Write worker prompts
@@ -265,8 +262,6 @@ types:
             action: decompose
             child_type: task    # children use a different type
             then: done
-      done:
-        terminal: true
 
   task:
     fields:
@@ -283,8 +278,6 @@ types:
               values: [done]
         on:
           done: done
-      done:
-        terminal: true
 ```
 
 The flat format (`issue:` / `states:` / `initial:` at the top level) is still supported and recommended for single-type workflows.
