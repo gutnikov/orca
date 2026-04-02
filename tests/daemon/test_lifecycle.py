@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
+
+import pytest
 
 from orca.daemon.lifecycle import (
     DaemonAlreadyRunningError,
     check_daemon_running,
     cleanup_stale_socket,
+    daemon_dir,
     pidfile_path,
     read_pidfile,
     remove_pidfile,
@@ -99,6 +103,30 @@ class TestSendStopSignal:
         pf = orca_dir / "daemon.pid"
         write_pidfile(pf, 99999999)
         assert send_stop_signal(tmp_path) is False
+
+
+class TestDaemonDir:
+    def test_returns_path_under_home(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = Path("/Users/alice/work/myrepo")
+        result = daemon_dir(repo)
+        repo_hash = hashlib.sha1(str(repo).encode()).hexdigest()[:12]
+        assert result == fake_home / ".orca" / "daemons" / repo_hash
+
+    def test_deterministic(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = Path("/Users/alice/work/myrepo")
+        assert daemon_dir(repo) == daemon_dir(repo)
+
+    def test_different_repos_different_dirs(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        assert daemon_dir(Path("/repo/a")) != daemon_dir(Path("/repo/b"))
 
 
 class TestDaemonAlreadyRunningError:

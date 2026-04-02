@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import signal
 from pathlib import Path
@@ -13,6 +14,12 @@ class DaemonAlreadyRunningError(Exception):
     def __init__(self, pid: int) -> None:
         self.pid = pid
         super().__init__(f"Daemon already running (PID: {pid})")
+
+
+def daemon_dir(repo_root: Path) -> Path:
+    """Return ~/.orca/daemons/{hash}/ for the given repo root."""
+    repo_hash = hashlib.sha1(str(repo_root).encode()).hexdigest()[:12]
+    return Path.home() / ".orca" / "daemons" / repo_hash
 
 
 def socket_path(repo_root: Path) -> Path:
