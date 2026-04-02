@@ -19,6 +19,7 @@ from orca.daemon.lifecycle import (
     remove_pidfile,
     socket_path,
     write_pidfile,
+    write_root_marker,
 )
 from orca.daemon.manager import RunManager
 
@@ -44,6 +45,7 @@ async def serve(repo_root: Path) -> None:
     sock.parent.mkdir(parents=True, exist_ok=True)
     pf = pidfile_path(repo_root)
     write_pidfile(pf, os.getpid())
+    write_root_marker(repo_root)
 
     # 5. Configure uvicorn
     config = uvicorn.Config(

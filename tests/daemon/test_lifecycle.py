@@ -13,10 +13,12 @@ from orca.daemon.lifecycle import (
     daemon_dir,
     pidfile_path,
     read_pidfile,
+    read_root_marker,
     remove_pidfile,
     send_stop_signal,
     socket_path,
     write_pidfile,
+    write_root_marker,
 )
 
 
@@ -162,6 +164,19 @@ class TestDaemonDir:
         fake_home.mkdir()
         monkeypatch.setenv("HOME", str(fake_home))
         assert daemon_dir(Path("/repo/a")) != daemon_dir(Path("/repo/b"))
+
+
+class TestRootMarker:
+    def test_write_and_read(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = tmp_path / "repo"
+        write_root_marker(repo)
+        assert read_root_marker(daemon_dir(repo)) == repo
+
+    def test_read_missing(self, tmp_path: Path) -> None:
+        assert read_root_marker(tmp_path / "nonexistent") is None
 
 
 class TestDaemonAlreadyRunningError:

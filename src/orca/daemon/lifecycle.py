@@ -83,6 +83,22 @@ def cleanup_stale_socket(repo_root: Path) -> None:
     sock.unlink(missing_ok=True)
 
 
+def write_root_marker(repo_root: Path) -> None:
+    """Write the repo root path into the daemon dir for reverse lookup."""
+    dd = daemon_dir(repo_root)
+    dd.mkdir(parents=True, exist_ok=True)
+    (dd / "root").write_text(str(repo_root) + "\n")
+
+
+def read_root_marker(dd: Path) -> Path | None:
+    """Read the repo root from a daemon dir's root marker file."""
+    root_file = dd / "root"
+    try:
+        return Path(root_file.read_text().strip())
+    except FileNotFoundError:
+        return None
+
+
 def send_stop_signal(repo_root: Path) -> bool:
     """Send SIGTERM to the daemon. Return True if signal was sent, False otherwise."""
     pf = pidfile_path(repo_root)
