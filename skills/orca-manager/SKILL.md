@@ -7,7 +7,7 @@ description: Use when managing orca workflow runs — starting flows, monitoring
 
 Autonomous orca workflow management. You parse a natural language mission, drive orca via MCP tools, monitor progress, diagnose failures, remediate problems, and chain flows.
 
-You are running from the **orca repo**. You reach target projects via file paths. You control orca exclusively through MCP tools (`orca_*`).
+You are running from the **orca repo**. You reach target projects via file paths. You control orca exclusively through MCP tools (`orca_*`). **Every MCP tool requires `root`** — the absolute path to the target project's repo root.
 
 ## Mission Parsing
 
@@ -26,14 +26,14 @@ Confirm your understanding before starting. Example:
 
 ```
 ENSURE PREREQUISITES
-  ├── orca_daemon_status() — if fails, start daemon (see Daemon Management)
+  ├── orca_daemon_status(root) — if fails, start daemon (see Daemon Management)
   ├── Target project path exists and is a git repo
   ├── Task file exists
   └── Flow-specific deps (docker info, etc.)
        │
        ▼
 START FLOW ◄──────────────────────────────┐
-  orca_start_run(task_file, workflow, branch)
+  orca_start_run(root, task_file, workflow, branch)
        │                                   │
        ▼                                   │
 MONITOR (poll orca_get_run every 30-60s)   │
@@ -82,10 +82,10 @@ When STALLED or FAILED, follow this sequence. **Never remediate without diagnosi
 ### 1. Gather
 
 ```
-orca_get_run(run_id)              → status, issue overview
-orca_get_issue(run_id, issue_id)  → per non-terminal issue
-orca_get_worker_log(run_id, id)   → for failed/stalled issues
-orca_get_insights(run_id)         → orchestrator-level view
+orca_get_run(root, run_id)              → status, issue overview
+orca_get_issue(root, run_id, issue_id)  → per non-terminal issue
+orca_get_worker_log(root, run_id, id)   → for failed/stalled issues
+orca_get_insights(root, run_id)         → orchestrator-level view
 ```
 
 ### 2. Classify
@@ -135,10 +135,10 @@ The orca daemon manages a **target project** identified by its repo root. Daemon
 
 ### Starting the daemon
 
-When `orca_daemon_status()` fails during prerequisite check:
+When `orca_daemon_status(root)` fails during prerequisite check:
 
 1. `orca --root <target_project> daemon start`
-2. Wait 3 seconds, verify `orca_daemon_status()` succeeds
+2. Wait 3 seconds, verify `orca_daemon_status(root)` succeeds
 3. If still fails, check for stale files in `~/.orca/daemons/` (each subdirectory has a `root` file mapping back to the project)
 4. If stale pidfile exists (process dead): `rm ~/.orca/daemons/<hash>/daemon.pid ~/.orca/daemons/<hash>/daemon.sock`, then retry start
 5. If still fails after cleanup, escalate to user
@@ -151,17 +151,17 @@ After fixing orca source code, the running daemon still has the old code. Full r
 2. `orca --root <target_project> daemon stop` — stop the running daemon
 3. Wait for process exit (pidfile should disappear within a few seconds)
 4. `orca --root <target_project> daemon start` — start with new code
-5. Verify `orca_daemon_status()` succeeds
-6. `orca_resume_run(run_id)` for each affected run
+5. Verify `orca_daemon_status(root)` succeeds
+6. `orca_resume_run(root, run_id)` for each affected run
 
 ### Crash recovery
 
-If `orca_daemon_status()` or any MCP tool fails unexpectedly during monitoring:
+If `orca_daemon_status(root)` or any MCP tool fails unexpectedly during monitoring:
 
 1. Check if daemon is actually dead: look in `~/.orca/daemons/` for the project's hash dir, check if pidfile's process is alive
 2. If process is dead (stale pidfile): clean up pidfile+socket, restart daemon, resume runs
 3. If process is alive but unresponsive: wait 10s, retry MCP call. If still unresponsive, `orca --root <target_project> daemon stop` then restart
-4. After restart, `orca_list_runs()` to see which runs need resuming — any that were `RUNNING` are now `STOPPED` and need `orca_resume_run()`
+4. After restart, `orca_list_runs(root)` to see which runs need resuming — any that were `RUNNING` are now `STOPPED` and need `orca_resume_run(root, run_id)`
 
 ## Session Exit
 
@@ -174,16 +174,18 @@ When you need to stop (context limits, user interrupt, long wait):
 
 ## MCP Tools Quick Reference
 
+All tools require `root` — the absolute path to the target project.
+
 | Tool | Use |
 |---|---|
-| `orca_daemon_status` | Prereq check, health monitoring |
-| `orca_start_run(task_file, workflow?, branch?)` | Start a flow |
-| `orca_list_runs` | Overview of all runs |
-| `orca_get_run(run_id)` | Detailed run state + sessions |
-| `orca_get_issue(run_id, issue_id)` | Issue details, failure_count, event_log |
-| `orca_get_worker_log(run_id, issue_id, tail?)` | Worker output (default last 100 lines) |
-| `orca_get_insights(run_id)` | Orchestrator insights log |
-| `orca_retry_issue(run_id, issue_id)` | Re-dispatch a failed issue |
-| `orca_stop_run(run_id)` | Stop a running flow |
-| `orca_resume_run(run_id)` | Resume a stopped flow |
-| `orca_drop_run(run_id)` | Delete run state entirely |
+| `orca_daemon_status(root)` | Prereq check, health monitoring |
+| `orca_start_run(root, task_file, workflow?, branch?)` | Start a flow |
+| `orca_list_runs(root)` | Overview of all runs |
+| `orca_get_run(root, run_id)` | Detailed run state + sessions |
+| `orca_get_issue(root, run_id, issue_id)` | Issue details, failure_count, event_log |
+| `orca_get_worker_log(root, run_id, issue_id, tail?)` | Worker output (default last 100 lines) |
+| `orca_get_insights(root, run_id)` | Orchestrator insights log |
+| `orca_retry_issue(root, run_id, issue_id)` | Re-dispatch a failed issue |
+| `orca_stop_run(root, run_id)` | Stop a running flow |
+| `orca_resume_run(root, run_id)` | Resume a stopped flow |
+| `orca_drop_run(root, run_id)` | Delete run state entirely |

@@ -8,12 +8,12 @@ Daemon process state (PID, socket) lives in `~/.orca/daemons/{hash}/`, not in th
 
 ### Daemon not running
 
-**Pattern:** `orca_daemon_status()` MCP call fails, or `Connection refused` when any `orca_*` MCP tool is called
+**Pattern:** `orca_daemon_status(root)` MCP call fails, or `Connection refused` when any `orca_*` MCP tool is called
 **Platform:** both
 **Fix:**
 - Start daemon: `orca --root <target_project> daemon start`
-- Wait 3s, verify with `orca_daemon_status()`
-**Verify:** `orca_daemon_status()` returns uptime and run count
+- Wait 3s, verify with `orca_daemon_status(root)`
+**Verify:** `orca_daemon_status(root)` returns uptime and run count
 **Risk:** low
 
 ### Daemon crashed (stale pidfile)
@@ -25,8 +25,8 @@ Daemon process state (PID, socket) lives in `~/.orca/daemons/{hash}/`, not in th
 - Check process: `cat ~/.orca/daemons/<hash>/daemon.pid` then `kill -0 <pid>` (fails if dead)
 - Clean up: `rm ~/.orca/daemons/<hash>/daemon.pid ~/.orca/daemons/<hash>/daemon.sock`
 - Restart: `orca --root <target_project> daemon start`
-- Resume runs: `orca_list_runs()` to find stopped runs, `orca_resume_run()` for each
-**Verify:** `orca_daemon_status()` succeeds, runs resumed
+- Resume runs: `orca_list_runs(root)` to find stopped runs, `orca_resume_run(root, run_id)` for each
+**Verify:** `orca_daemon_status(root)` succeeds, runs resumed
 **Risk:** low
 
 ### Daemon unresponsive
@@ -37,7 +37,7 @@ Daemon process state (PID, socket) lives in `~/.orca/daemons/{hash}/`, not in th
 - Wait 10 seconds and retry — may be transient (heavy load)
 - If persists: `orca --root <target_project> daemon stop && sleep 2 && orca --root <target_project> daemon start`
 - Resume any affected runs
-**Verify:** `orca_daemon_status()` responds promptly
+**Verify:** `orca_daemon_status(root)` responds promptly
 **Risk:** low
 
 ## Docker
