@@ -143,3 +143,13 @@ Put SCOPE (what to change) in the description, not HOW to change it. The impleme
 ```
 **Applies to:** Scoping and planning prompts
 **Risk:** low
+
+## Deep Analysis
+
+### Problem beyond catalog fixes
+
+**Pattern:** Issue persists after applying catalog fixes from this document, or the problem is novel and doesn't match any entry above.
+**Root cause:** Structural workflow config or prompt issue requiring deeper analysis than pattern matching.
+**Fix:** Invoke the orca-workflow-builder skill in audit mode on the affected flow/state. Read `skills/orca-workflow-builder/SKILL.md` and pass the worker logs and your diagnosis as context. The builder will run its three-layer audit checklist and apply targeted fixes.
+**Applies to:** Any workflow when catalog fixes are insufficient
+**Risk:** low (audit), medium (fixes)
