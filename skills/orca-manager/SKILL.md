@@ -1,0 +1,155 @@
+---
+name: managing-orca-workflows
+description: Use when managing orca workflow runs — starting flows, monitoring progress, diagnosing failures, remediating problems, and chaining flows. Triggers on "run X flow", "manage orca", "start prd then qa-spec", "check orca status", or any orca workflow orchestration task.
+---
+
+# Managing Orca Workflows
+
+Autonomous orca workflow management. You parse a natural language mission, drive orca via MCP tools, monitor progress, diagnose failures, remediate problems, and chain flows.
+
+You are running from the **orca repo**. You reach target projects via file paths. You control orca exclusively through MCP tools (`orca_*`).
+
+## Mission Parsing
+
+Extract from the user's instruction:
+
+1. **Flows** — what workflows to run and in what order
+2. **Target project path** — where the target repo lives (ask if unclear)
+3. **Success criteria** — what "done" looks like
+4. **Autonomy level** — `full`, `supervised`, or `cautious` (default: `supervised`)
+
+Confirm your understanding before starting. Example:
+
+> "I'll run the prd flow for /path/to/ai-team on the feature-x branch, then chain to qa-spec when it succeeds. Autonomy: supervised. Sound right?"
+
+## The Loop
+
+```
+ENSURE PREREQUISITES
+  ├── orca_daemon_status() — if fails, run: orca daemon start
+  ├── Target project path exists and is a git repo
+  ├── Task file exists
+  └── Flow-specific deps (docker info, etc.)
+       │
+       ▼
+START FLOW ◄──────────────────────────────┐
+  orca_start_run(task_file, workflow, branch)
+       │                                   │
+       ▼                                   │
+MONITOR (poll orca_get_run every 30-60s)   │
+  Track: issue states, active workers,     │
+         terminal_count vs issue_count     │
+       │                                   │
+       ▼                                   │
+ASSESS                                     │
+  PROGRESSING → continue polling           │
+  STALLED → diagnose (no change 3+ polls)  │
+  FAILED → diagnose (failure_count high)   │
+  COMPLETED → chain next flow ─────────────┘
+              or report done
+```
+
+**Polling cadence:** 30s base, 60s when stable, 15s when issues detected.
+
+**Proactive failure detection:** If any issue's `failure_count > max_worker_retries / 2`, investigate immediately — don't wait for orca to exhaust retries.
+
+## Autonomy Tiers
+
+Tiers control creative problem-solving, not safety. Even at `full`, confirm destructive/shared-state actions.
+
+### `cautious`
+
+Autonomous: start listed flows, poll, diagnose, retry issues (`orca_retry_issue`).
+
+Confirm first: env changes, stop/drop runs, unlisted flow chains, any code changes, waits > 5min.
+
+### `supervised` (default)
+
+Adds autonomous: known env fixes (from catalog), stop/restart stalled runs, chain next listed flow, known prompt fixes, waits up to 15min.
+
+Confirm first: orca source changes, novel remediations, dropping runs, novel prompt changes, target project code changes.
+
+### `full`
+
+Adds autonomous: orca source fixes (self-healing), novel remediations, drop+recreate failed runs, novel prompt edits.
+
+Confirm first: pushing to remote, affecting other users' branches, destructive operations (deleting worktrees, dropping data).
+
+## Diagnosis
+
+When STALLED or FAILED, follow this sequence. **Never remediate without diagnosis.**
+
+### 1. Gather
+
+```
+orca_get_run(run_id)              → status, issue overview
+orca_get_issue(run_id, issue_id)  → per non-terminal issue
+orca_get_worker_log(run_id, id)   → for failed/stalled issues
+orca_get_insights(run_id)         → orchestrator-level view
+```
+
+### 2. Classify
+
+| Root Cause | Signals |
+|---|---|
+| ENVIRONMENT | "command not found", "docker: not running", "EACCES", "connection refused" on localhost |
+| TRANSIENT | "rate limit", "503", "timeout", "ECONNRESET", intermittent |
+| ORCA_BUG | Python traceback, state inconsistency, resume fails |
+| PROMPT_ISSUE | Invalid result repeatedly, worker loops, result doesn't match format |
+| TASK_ISSUE | Worker says "impossible"/"unclear", persists after other fixes |
+
+### 3. Remediate
+
+**Read the appropriate reference doc** before applying fixes:
+- ENVIRONMENT → read `skills/orca-manager/remediation-catalog.md`
+- PROMPT_ISSUE → read `skills/orca-manager/prompt-issues.md`
+- TRANSIENT → stop run, wait (within tier limit), resume
+- ORCA_BUG → at `full`: read traceback, search orca source, fix, lint (`uv run ruff check . && uv run mypy src/`), commit, restart daemon, resume. Otherwise: escalate with diagnosis.
+- TASK_ISSUE → always escalate to user
+
+### Rules
+
+- **One fix at a time.** Apply, retry, observe. Don't stack fixes.
+- **Escalation budget.** After 2 failed remediations for the same issue, escalate regardless of autonomy.
+- **Report before acting.** State your diagnosis and intended action before executing.
+- **Self-healing safety.** Lint+typecheck must pass before restarting daemon. If fix doesn't resolve on retry, revert commit and escalate.
+
+## Flow Chaining
+
+When mission has multiple flows (e.g. "prd then qa-spec then implement"):
+
+- **SUCCESS** → verify prior flow's output exists (e.g. PRD doc), start next flow on same branch
+- **PARTIAL** (some issues done) → assess if failed issues block next flow. Independent? Proceed. Critical? Fix first.
+- **FAILED** → diagnose and remediate current flow, don't start next
+
+**Judgment calls:**
+- For dependent flows (e.g. prd → implement), verify the output looks reasonable before chaining
+- If output is unexpected, pause and report rather than blindly chaining
+- All flows chain on the **same branch** unless user specifies otherwise
+
+Read `skills/orca-manager/flow-patterns.md` for common mission patterns.
+
+## Session Exit
+
+When you need to stop (context limits, user interrupt, long wait):
+
+1. **Report state** — which flows completed, in-progress, pending. Any diagnosed problems.
+2. **Leave runs resumable** — don't drop. Stop actively-failing runs.
+3. **Resume instructions** — exact run IDs, next flow, pending remediations.
+4. **Re-invocation string** — give the user the exact mission to paste when re-invoking.
+
+## MCP Tools Quick Reference
+
+| Tool | Use |
+|---|---|
+| `orca_daemon_status` | Prereq check, health monitoring |
+| `orca_start_run(task_file, workflow?, branch?)` | Start a flow |
+| `orca_list_runs` | Overview of all runs |
+| `orca_get_run(run_id)` | Detailed run state + sessions |
+| `orca_get_issue(run_id, issue_id)` | Issue details, failure_count, event_log |
+| `orca_get_worker_log(run_id, issue_id, tail?)` | Worker output (default last 100 lines) |
+| `orca_get_insights(run_id)` | Orchestrator insights log |
+| `orca_retry_issue(run_id, issue_id)` | Re-dispatch a failed issue |
+| `orca_stop_run(run_id)` | Stop a running flow |
+| `orca_resume_run(run_id)` | Resume a stopped flow |
+| `orca_drop_run(run_id)` | Delete run state entirely |
