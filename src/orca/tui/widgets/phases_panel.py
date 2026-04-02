@@ -164,15 +164,12 @@ class PhasesPanel(VerticalScroll):
                 progress_updated_at = session.get("progress_updated_at")
                 stale = _is_progress_stale(progress_updated_at)
 
-                if status_text:
-                    display_status = f"{status_text} (stalled)" if stale else status_text
-                    style = "dim italic" if stale else "dim"
-                    lines.append(f"\n  {display_status}", style=style)
+                if status_text and not stale:
+                    lines.append(f"\n  {status_text}", style="dim")
 
-                if progress is not None and progress > 0:
-                    fill_style = "#777777" if stale else "yellow"
+                if progress is not None and progress > 0 and not stale:
                     lines.append("\n")
-                    _render_progress_bar(lines, progress, fill_style)
+                    _render_progress_bar(lines, progress, "yellow")
 
                 elapsed = _elapsed_str(str(session.get("started_at", "")))
                 if elapsed:

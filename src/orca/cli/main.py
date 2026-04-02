@@ -7,10 +7,31 @@ import sys
 from pathlib import Path
 
 
+def _git_short_hash() -> str:
+    """Return the short git commit hash of the orca package source, or 'unknown'."""
+    import subprocess
+
+    src_dir = Path(__file__).resolve().parent.parent.parent.parent
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=src_dir,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
+
+
 def build_parser() -> argparse.ArgumentParser:
     """Build the top-level argument parser with subcommands."""
     parser = argparse.ArgumentParser(prog="orca", description="Orca workflow orchestrator")
-    sub = parser.add_subparsers(dest="subcommand", required=True)
+    parser.add_argument("-v", "--version", action="store_true", help="Print version and exit")
+    sub = parser.add_subparsers(dest="subcommand")
 
     # orca daemon start|stop|status
     daemon_parser = sub.add_parser("daemon", help="Manage the orca daemon")
@@ -62,6 +83,14 @@ def main() -> None:
     """CLI entry point: dispatch to subcommand handlers via lazy imports."""
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.version:
+        print(f"orca {_git_short_hash()}")
+        return
+
+    if args.subcommand is None:
+        parser.print_help()
+        sys.exit(1)
 
     if args.subcommand == "daemon":
         from orca.cli.daemon_cmd import daemon_command

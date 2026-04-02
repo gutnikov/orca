@@ -269,6 +269,7 @@ def _recover_effects(
                     state=issue.state,
                     result_format=result_format,
                     issue=issue_context,
+                    progress_enabled=state_def.worker.progress if state_def.worker else False,
                 )
             )
 
