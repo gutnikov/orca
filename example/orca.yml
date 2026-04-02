@@ -1,11 +1,12 @@
 # Orca workflow configuration
 #
-# This example implements a 4-stage pipeline:
-#   scoping -> planning -> implementing -> applying -> done
+# This example implements a 5-stage pipeline:
+#   scoping -> planning -> implementing -> applying -> retro -> done
 #
 # A large task enters "scoping" where an agent decides whether to break it
 # into sub-issues (decompose) or pass it straight to planning. Each sub-issue
 # then flows independently through planning -> implementing -> applying.
+# After applying, a retro step reviews the full run and writes a retro.md.
 #
 # The "applying" state has max_workers: 1 so merges happen one at a time,
 # avoiding merge conflicts on the base branch.
@@ -129,8 +130,26 @@ states:
           type: string
           description: "Brief summary of the merge result"
     on:
-      applied: done
+      applied: retro
       failed: implementing             # go back to fix conflicts
+
+  # Stage 5: Review the full run and write a retrospective.
+  # Uses the `run` template variable to access session logs, insights,
+  # and structured event history. Writes retro.md in the repo root.
+  retro:
+    worker:
+      kind: claude-code
+      prompt: prompts/retro.md
+      timeout: 600
+      result_format:
+        outcome:
+          type: enum
+          values: [done]
+          description: "Whether the retro was written"
+          values_description:
+            done: "retro.md written and committed"
+    on:
+      done: done
 
   # No need to define `done` — it's a built-in terminal state.
   # `failed` is also built-in: transitions targeting it trigger
