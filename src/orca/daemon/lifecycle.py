@@ -24,12 +24,12 @@ def daemon_dir(repo_root: Path) -> Path:
 
 def socket_path(repo_root: Path) -> Path:
     """Return the UDS socket path for the given repo."""
-    return repo_root / ".orca" / "daemon.sock"
+    return daemon_dir(repo_root) / "daemon.sock"
 
 
 def pidfile_path(repo_root: Path) -> Path:
     """Return the pidfile path for the given repo."""
-    return repo_root / ".orca" / "daemon.pid"
+    return daemon_dir(repo_root) / "daemon.pid"
 
 
 def write_pidfile(path: Path, pid: int) -> None:

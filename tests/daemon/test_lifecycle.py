@@ -47,62 +47,97 @@ class TestPidfile:
 
 
 class TestPaths:
-    def test_socket_path(self, tmp_path: Path) -> None:
-        assert socket_path(tmp_path) == tmp_path / ".orca" / "daemon.sock"
+    def test_socket_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = tmp_path / "repo"
+        expected = daemon_dir(repo) / "daemon.sock"
+        assert socket_path(repo) == expected
 
-    def test_pidfile_path(self, tmp_path: Path) -> None:
-        assert pidfile_path(tmp_path) == tmp_path / ".orca" / "daemon.pid"
+    def test_pidfile_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = tmp_path / "repo"
+        expected = daemon_dir(repo) / "daemon.pid"
+        assert pidfile_path(repo) == expected
 
 
 class TestCheckDaemonRunning:
-    def test_not_running_no_pidfile(self, tmp_path: Path) -> None:
-        (tmp_path / ".orca").mkdir()
-        assert check_daemon_running(tmp_path) is False
+    def test_not_running_no_pidfile(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = tmp_path / "repo"
+        dd = daemon_dir(repo)
+        dd.mkdir(parents=True)
+        assert check_daemon_running(repo) is False
 
-    def test_not_running_stale_pid(self, tmp_path: Path) -> None:
-        orca_dir = tmp_path / ".orca"
-        orca_dir.mkdir()
-        pf = orca_dir / "daemon.pid"
+    def test_not_running_stale_pid(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = tmp_path / "repo"
+        pf = pidfile_path(repo)
+        pf.parent.mkdir(parents=True, exist_ok=True)
         # PID 99999999 should not exist on any system
         write_pidfile(pf, 99999999)
-        assert check_daemon_running(tmp_path) is False
+        assert check_daemon_running(repo) is False
         # Stale pidfile should be cleaned up
         assert not pf.exists()
 
-    def test_running(self, tmp_path: Path) -> None:
-        orca_dir = tmp_path / ".orca"
-        orca_dir.mkdir()
-        pf = orca_dir / "daemon.pid"
+    def test_running(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = tmp_path / "repo"
+        pf = pidfile_path(repo)
+        pf.parent.mkdir(parents=True, exist_ok=True)
         # Use our own PID, which is guaranteed alive
         write_pidfile(pf, os.getpid())
-        assert check_daemon_running(tmp_path) is True
+        assert check_daemon_running(repo) is True
 
 
 class TestCleanupStaleSocket:
-    def test_removes_stale_socket(self, tmp_path: Path) -> None:
-        orca_dir = tmp_path / ".orca"
-        orca_dir.mkdir()
-        sock = orca_dir / "daemon.sock"
+    def test_removes_stale_socket(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = tmp_path / "repo"
+        sock = socket_path(repo)
+        sock.parent.mkdir(parents=True, exist_ok=True)
         sock.touch()
-        cleanup_stale_socket(tmp_path)
+        cleanup_stale_socket(repo)
         assert not sock.exists()
 
-    def test_noop_when_no_socket(self, tmp_path: Path) -> None:
-        (tmp_path / ".orca").mkdir()
-        cleanup_stale_socket(tmp_path)  # should not raise
+    def test_noop_when_no_socket(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = tmp_path / "repo"
+        daemon_dir(repo).mkdir(parents=True, exist_ok=True)
+        cleanup_stale_socket(repo)  # should not raise
 
 
 class TestSendStopSignal:
-    def test_returns_false_when_no_pidfile(self, tmp_path: Path) -> None:
-        (tmp_path / ".orca").mkdir()
-        assert send_stop_signal(tmp_path) is False
+    def test_returns_false_when_no_pidfile(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = tmp_path / "repo"
+        daemon_dir(repo).mkdir(parents=True, exist_ok=True)
+        assert send_stop_signal(repo) is False
 
-    def test_returns_false_when_stale_pid(self, tmp_path: Path) -> None:
-        orca_dir = tmp_path / ".orca"
-        orca_dir.mkdir()
-        pf = orca_dir / "daemon.pid"
+    def test_returns_false_when_stale_pid(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = tmp_path / "repo"
+        pf = pidfile_path(repo)
+        pf.parent.mkdir(parents=True, exist_ok=True)
         write_pidfile(pf, 99999999)
-        assert send_stop_signal(tmp_path) is False
+        assert send_stop_signal(repo) is False
 
 
 class TestDaemonDir:
