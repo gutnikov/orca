@@ -33,14 +33,14 @@ _PROGRESS_INSTRUCTION = """
 
 ## Progress Reporting
 
-As you work, periodically report your progress by outputting an HTML comment:
+As you work, periodically report your progress by printing a progress line:
 
-<!-- PROGRESS: <percent> | <status> -->
+PROGRESS: <percent> | <status>
 
 - `<percent>` is an integer from 0 to 100
 - `<status>` is a short description of what you're currently doing
 - Emit this after completing meaningful milestones, not on every action
-- Example: <!-- PROGRESS: 25 | Writing unit tests for auth module -->"""
+- Example: PROGRESS: 25 | Exploring codebase structure"""
 
 
 def render_prompt(
@@ -51,6 +51,7 @@ def render_prompt(
     result_path: Path,
     *,
     progress: bool = False,
+    run: dict[str, Any] | None = None,
 ) -> str:
     """Render a Jinja2 template with issue context and output rules.
 
@@ -81,9 +82,10 @@ def render_prompt(
         "issue": issue,
         "result_format": result_format,
         "result_path": str(result_path),
+        "run": run,
     }
 
     rendered = template.render(context)
     if progress:
-        rendered += _PROGRESS_INSTRUCTION
+        rendered = _PROGRESS_INSTRUCTION + "\n\n---\n\n" + rendered
     return rendered + _RESULT_FILE_WARNING

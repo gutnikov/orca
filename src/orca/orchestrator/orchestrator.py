@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from orca.engine.dispatch import build_run_context
 from orca.engine.reducer import reduce
 from orca.engine.types import (
     DispatchFeedbackAgentEffect,
@@ -484,6 +485,7 @@ class Orchestrator:
             state=effect.state,
             result_format=effect.result_format,
             issue={**effect.issue, "base_branch": base_branch},
+            progress_enabled=effect.progress_enabled,
         )
 
         type_def = self._config.types.get(effect.issue_type)
@@ -508,6 +510,20 @@ class Orchestrator:
         if self._slack_mcp_url:
             worker_env = {"SLACK_HITL_MCP_URL": self._slack_mcp_url}
 
+        # Build run context for prompt templates
+        run_context: dict[str, Any] | None = None
+        if self.repo_root is not None and self._session_sync is not None:
+            run_dir = self.persistence.state_path.parent
+            sessions_dir = self.repo_root / ".orca" / "sessions"
+            run_context = build_run_context(
+                state=self._state,
+                run_dir=run_dir,
+                sessions_dir=sessions_dir,
+                sessions=self._session_sync.manifest.read(),
+                branch=self.root_branch,
+                workflow=run_dir.name,
+            )
+
         try:
             outcome = await worker.execute(
                 enriched_effect,
@@ -521,6 +537,7 @@ class Orchestrator:
                 extra_args=list(extra_args) if extra_args else None,
                 session_manifest=self._session_sync.manifest if self._session_sync else None,
                 session_id=tracking_id,
+                run_context=run_context,
             )
         finally:
             # Final scrollback save before killing the session

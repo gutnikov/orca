@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path as _Path
+
 import pytest
 
 from orca.engine.config import parse_config
@@ -7,6 +9,7 @@ from orca.engine.dispatch import (
     backfill_queue,
     build_issue_context,
     build_result_format,
+    build_run_context,
     get_children,
     is_blocked,
     remove_from_queue,
@@ -456,3 +459,171 @@ states:
         assert len(effects) == 1
         assert isinstance(effects[0], DispatchWorkerEffect)
         assert effects[0].progress_enabled is False
+
+
+class TestBuildRunContext:
+    def test_file_map(self, tmp_path: _Path) -> None:
+        run_dir = tmp_path / ".orca" / "runs" / "my-branch" / "prd"
+        run_dir.mkdir(parents=True)
+        (run_dir / "orca.log.jsonl").touch()
+        (run_dir / "state.json").touch()
+        sessions_dir = tmp_path / ".orca" / "sessions"
+        sessions_dir.mkdir(parents=True)
+
+        issue = Issue(
+            type="default",
+            fields={"title": "test"},
+            state="work",
+            worker_active=False,
+            decomposed_from=None,
+            depends_on=[],
+            event_log=[],
+            visit_counts={"work": 1},
+        )
+        state = State(issues={"i1": issue}, worker_queues={})
+
+        ctx = build_run_context(
+            state=state,
+            run_dir=run_dir,
+            sessions_dir=sessions_dir,
+            sessions=[],
+            branch="my-branch",
+            workflow="prd",
+        )
+
+        assert ctx["run_dir"] == str(run_dir)
+        assert ctx["log"] == str(run_dir / "orca.log.jsonl")
+        assert ctx["state"] == str(run_dir / "state.json")
+        assert ctx["sessions_dir"] == str(sessions_dir)
+        assert ctx["branch"] == "my-branch"
+        assert ctx["workflow"] == "prd"
+        assert ctx["insights"] is None
+
+    def test_insights_path_when_present(self, tmp_path: _Path) -> None:
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        (run_dir / "insights.json").touch()
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+
+        state = State(issues={}, worker_queues={})
+
+        ctx = build_run_context(
+            state=state,
+            run_dir=run_dir,
+            sessions_dir=sessions_dir,
+            sessions=[],
+            branch="b",
+            workflow="w",
+        )
+
+        assert ctx["insights"] == str(run_dir / "insights.json")
+
+    def test_sessions_list(self, tmp_path: _Path) -> None:
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+
+        sessions = [
+            {
+                "state": "generate_prd",
+                "log_path": "/logs/generate_prd-20260402.log",
+                "started_at": "2026-04-02T06:00:00+00:00",
+                "completed_at": "2026-04-02T06:06:14+00:00",
+            },
+            {
+                "state": "territory_map",
+                "log_path": "/logs/territory_map-20260402.log",
+                "started_at": "2026-04-02T06:06:14+00:00",
+                "completed_at": "2026-04-02T06:08:06+00:00",
+            },
+        ]
+
+        state = State(issues={}, worker_queues={})
+
+        ctx = build_run_context(
+            state=state,
+            run_dir=run_dir,
+            sessions_dir=sessions_dir,
+            sessions=sessions,
+            branch="b",
+            workflow="w",
+        )
+
+        assert len(ctx["sessions"]) == 2
+        assert ctx["sessions"][0]["state"] == "generate_prd"
+        assert ctx["sessions"][0]["log"] == "/logs/generate_prd-20260402.log"
+        assert ctx["sessions"][0]["duration"] == "6m 14s"
+        assert ctx["sessions"][1]["state"] == "territory_map"
+        assert ctx["sessions"][1]["duration"] == "1m 52s"
+
+    def test_summary_from_event_log(self, tmp_path: _Path) -> None:
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+
+        issue = Issue(
+            type="default",
+            fields={"title": "test"},
+            state="recon_prd",
+            worker_active=False,
+            decomposed_from=None,
+            depends_on=[],
+            event_log=[
+                EventLogEntry(timestamp="t0", type="created", data={"state": "generate_prd"}),
+                EventLogEntry(timestamp="t1", type="worker_dispatched", data={"state": "generate_prd"}),
+                EventLogEntry(timestamp="t2", type="worker_result", data={"outcome": "complete"}),
+                EventLogEntry(timestamp="t3", type="transitioned", data={"from": "generate_prd", "to": "recon_prd"}),
+                EventLogEntry(timestamp="t4", type="worker_dispatched", data={"state": "recon_prd"}),
+                EventLogEntry(timestamp="t5", type="worker_failed", data={"state": "recon_prd", "error": "MCP down"}),
+            ],
+            visit_counts={"generate_prd": 1, "recon_prd": 1},
+        )
+        state = State(issues={"i1": issue}, worker_queues={})
+
+        ctx = build_run_context(
+            state=state,
+            run_dir=run_dir,
+            sessions_dir=sessions_dir,
+            sessions=[
+                {
+                    "state": "generate_prd",
+                    "started_at": "2026-04-02T06:00:00+00:00",
+                    "completed_at": "2026-04-02T06:10:00+00:00",
+                },
+            ],
+            branch="b",
+            workflow="w",
+        )
+
+        summary = ctx["summary"]
+        assert "generate_prd" in summary["states_visited"]
+        assert "recon_prd" in summary["states_visited"]
+        assert summary["current_state"] == "recon_prd"
+        assert summary["outcomes"]["generate_prd"] == "complete"
+        assert "recon_prd" in summary["failures"]
+        assert "MCP down" in summary["failures"]["recon_prd"]
+
+    def test_formats_present(self, tmp_path: _Path) -> None:
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        sessions_dir = tmp_path / "sessions"
+        sessions_dir.mkdir()
+
+        state = State(issues={}, worker_queues={})
+
+        ctx = build_run_context(
+            state=state,
+            run_dir=run_dir,
+            sessions_dir=sessions_dir,
+            sessions=[],
+            branch="b",
+            workflow="w",
+        )
+
+        assert "log" in ctx["formats"]
+        assert "insights" in ctx["formats"]
+        assert "state" in ctx["formats"]
+        assert "sessions" in ctx["formats"]

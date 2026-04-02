@@ -16,7 +16,7 @@ from orca.orchestrator.validation import validate_result
 
 logger = logging.getLogger(__name__)
 
-_PROGRESS_RE = re.compile(r"<!--\s*PROGRESS:\s*(\d{1,3})\s*(?:\|\s*(.*?))?\s*-->")
+_PROGRESS_RE = re.compile(r"PROGRESS:\s*(\d{1,3})\s*\|\s*(.*?)(?:\s*-->)?\s*$", re.MULTILINE)
 
 
 def parse_progress(scrollback: str) -> tuple[int, str | None] | None:
@@ -25,7 +25,8 @@ def parse_progress(scrollback: str) -> tuple[int, str | None] | None:
     Returns (percent, status) or None if no marker found.
     """
     matches = _PROGRESS_RE.findall(scrollback)
-    if not matches:
+    # Skip the first match — it's the example from the injected instruction
+    if len(matches) <= 1:
         return None
     percent_str, status = matches[-1]
     percent = min(int(percent_str), 100)
@@ -70,6 +71,7 @@ class Worker(Protocol):
         extra_args: list[str] | None = None,
         session_manifest: SessionManifest | None = None,
         session_id: str | None = None,
+        run_context: dict[str, Any] | None = None,
     ) -> WorkerOutcome: ...
 
 
@@ -129,6 +131,7 @@ class CliAgentWorker:
         extra_args: list[str] | None = None,
         session_manifest: SessionManifest | None = None,
         session_id: str | None = None,
+        run_context: dict[str, Any] | None = None,
     ) -> WorkerOutcome:
         assert pty_session is not None, "pty_session is required"
 
@@ -144,6 +147,7 @@ class CliAgentWorker:
                 effect.result_format,
                 result_path,
                 progress=effect.progress_enabled,
+                run=run_context,
             )
         else:
             prompt = ""
