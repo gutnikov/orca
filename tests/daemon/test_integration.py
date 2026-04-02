@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from starlette.testclient import TestClient
@@ -65,17 +65,21 @@ class TestDaemonIntegration:
         assert resp.json() == []
 
     @pytest.mark.asyncio()
-    async def test_mcp_status_and_list(self, mock_client: DaemonClient) -> None:
+    async def test_mcp_status_and_list(self, repo: Path, mock_client: DaemonClient) -> None:
         """MCP tools return expected results from DaemonClient."""
-        server = create_mcp_server(mock_client)
+        with (
+            patch("orca.daemon.mcp_tools.check_daemon_running", return_value=True),
+            patch("orca.daemon.mcp_tools.DaemonClient", return_value=mock_client),
+        ):
+            server = create_mcp_server(repo)
 
-        content_blocks, _ = await server.call_tool("orca_daemon_status", {})
-        data = json.loads(content_blocks[0].text)
-        assert data["active_runs"] == 0
+            content_blocks, _ = await server.call_tool("orca_daemon_status", {})
+            data = json.loads(content_blocks[0].text)
+            assert data["active_runs"] == 0
 
-        content_blocks, _ = await server.call_tool("orca_list_runs", {})
-        data = json.loads(content_blocks[0].text)
-        assert data == []
+            content_blocks, _ = await server.call_tool("orca_list_runs", {})
+            data = json.loads(content_blocks[0].text)
+            assert data == []
 
     @pytest.mark.asyncio()
     async def test_http_and_mcp_consistency(self, repo: Path, mock_client: DaemonClient) -> None:
@@ -87,18 +91,22 @@ class TestDaemonIntegration:
         http_status = http_client.get("/api/status").json()
 
         # MCP status (via mocked client returning same empty state)
-        server = create_mcp_server(mock_client)
-        content_blocks, _ = await server.call_tool("orca_daemon_status", {})
-        mcp_status = json.loads(content_blocks[0].text)
+        with (
+            patch("orca.daemon.mcp_tools.check_daemon_running", return_value=True),
+            patch("orca.daemon.mcp_tools.DaemonClient", return_value=mock_client),
+        ):
+            server = create_mcp_server(repo)
+            content_blocks, _ = await server.call_tool("orca_daemon_status", {})
+            mcp_status = json.loads(content_blocks[0].text)
 
-        assert http_status["active_runs"] == mcp_status["active_runs"]
-        assert http_status["total_runs"] == mcp_status["total_runs"]
+            assert http_status["active_runs"] == mcp_status["active_runs"]
+            assert http_status["total_runs"] == mcp_status["total_runs"]
 
-        # HTTP list runs
-        http_runs = http_client.get("/api/runs").json()
+            # HTTP list runs
+            http_runs = http_client.get("/api/runs").json()
 
-        # MCP list runs
-        content_blocks, _ = await server.call_tool("orca_list_runs", {})
-        mcp_runs = json.loads(content_blocks[0].text)
+            # MCP list runs
+            content_blocks, _ = await server.call_tool("orca_list_runs", {})
+            mcp_runs = json.loads(content_blocks[0].text)
 
-        assert http_runs == mcp_runs
+            assert http_runs == mcp_runs
