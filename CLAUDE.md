@@ -41,3 +41,7 @@ Self-hosted GitHub Actions runners. Two jobs: `lint` (ruff) and `type-check` (my
 ## Documentation
 
 Project documentation lives in `docs/`. See `docs/` subdirectories for specific topics.
+
+## Skills
+
+- `skills/orca-manager/` — Autonomous orca workflow management skill. Invoke by asking the agent to manage orca workflows or by reading `skills/orca-manager/SKILL.md`.
