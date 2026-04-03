@@ -67,16 +67,18 @@ def create_mcp_server() -> FastMCP:
         result = await _get_client(root).list_runs()
         return json.dumps(result)
 
-    async def orca_get_run(root: str, run_id: str) -> str:
+    async def orca_get_run(root: str, run_id: str, compact: bool = False) -> str:
         """Get details for a specific run.
 
         Args:
             root: Absolute path to the target project's repo root.
             run_id: The run identifier (format: 'branch:workflow').
+            compact: If true, return a compact summary without event_log, fields,
+                     or completed sessions. Use for polling to save context tokens.
 
         Returns JSON with run_id, status, and state, or an error message.
         """
-        result = await _get_client(root).get_run(run_id)
+        result = await _get_client(root).get_run(run_id, compact=compact)
         return json.dumps(result)
 
     async def orca_get_issue(root: str, run_id: str, issue_id: str) -> str:

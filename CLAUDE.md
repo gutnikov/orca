@@ -44,5 +44,7 @@ Project documentation lives in `docs/`. See `docs/` subdirectories for specific 
 
 ## Skills
 
-- `skills/orca-manager/` — Autonomous orca workflow management skill. Invoke by asking the agent to manage orca workflows or by reading `skills/orca-manager/SKILL.md`.
-- `skills/orca-workflow-builder/` — Orca workflow authoring skill. Invoke when creating, updating, or auditing orca workflows and prompt templates.
+Skills live in `skills/` and are invoked by reading their `SKILL.md` with the Read tool (NOT via the Skill tool — these are project-local skills, not registered slash commands).
+
+- `skills/orca-manager/SKILL.md` — Autonomous orca workflow management. Read this before starting, monitoring, diagnosing, or chaining orca workflow runs.
+- `skills/orca-workflow-builder/SKILL.md` — Orca workflow authoring. Read this when creating, updating, or auditing orca workflows and prompt templates.

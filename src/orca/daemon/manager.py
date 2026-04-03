@@ -413,6 +413,7 @@ class RunManager:
         initial_effects.extend(recovered_effects)
 
         root_issue_id = _find_root_issue(state)
+
         workers = {name: CliAgentWorker(self.repo_root, kc) for name, kc in KIND_REGISTRY.items()}
         session_sync = SessionSync(run_dir=run_dir)
 

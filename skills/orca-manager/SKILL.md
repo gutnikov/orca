@@ -36,7 +36,7 @@ START FLOW ◄──────────────────────
   orca_start_run(root, task_file, workflow, branch)
        │                                   │
        ▼                                   │
-MONITOR (poll orca_get_run every 30-60s)   │
+MONITOR (poll orca_get_run compact every 30-60s)
   Track: issue states, active workers,     │
          terminal_count vs issue_count     │
        │                                   │
@@ -50,6 +50,8 @@ ASSESS                                     │
 ```
 
 **Polling cadence:** 30s base, 60s when stable, 15s when issues detected.
+
+**Use `compact=true` for all polling calls.** This strips event_log, fields, and completed sessions — saving context tokens. Only use full `orca_get_run` (without `compact`) when diagnosing failures and you need the event_log.
 
 **Proactive failure detection:** If any issue's `failure_count > max_worker_retries / 2`, investigate immediately — don't wait for orca to exhaust retries.
 
@@ -82,7 +84,7 @@ When STALLED or FAILED, follow this sequence. **Never remediate without diagnosi
 ### 1. Gather
 
 ```
-orca_get_run(root, run_id)              → status, issue overview
+orca_get_run(root, run_id)              → full state with event_log (use here, not for polling)
 orca_get_issue(root, run_id, issue_id)  → per non-terminal issue
 orca_get_worker_log(root, run_id, id)   → for failed/stalled issues
 orca_get_insights(root, run_id)         → orchestrator-level view
@@ -137,7 +139,7 @@ The orca daemon manages a **target project** identified by its repo root. Daemon
 
 When `orca_daemon_status(root)` fails during prerequisite check:
 
-1. `orca --root <target_project> daemon start`
+1. `orca --root <target_project> daemon start` — **run in background** (use `run_in_background: true` in the Bash tool, since this command blocks)
 2. Wait 3 seconds, verify `orca_daemon_status(root)` succeeds
 3. If still fails, check for stale files in `~/.orca/daemons/` (each subdirectory has a `root` file mapping back to the project)
 4. If stale pidfile exists (process dead): `rm ~/.orca/daemons/<hash>/daemon.pid ~/.orca/daemons/<hash>/daemon.sock`, then retry start
@@ -150,8 +152,8 @@ After fixing orca source code, the running daemon still has the old code. Full r
 1. `cd <orca_repo> && uv sync` — reinstall orca from fixed source
 2. `orca --root <target_project> daemon stop` — stop the running daemon
 3. Wait for process exit (pidfile should disappear within a few seconds)
-4. `orca --root <target_project> daemon start` — start with new code
-5. Verify `orca_daemon_status(root)` succeeds
+4. `orca --root <target_project> daemon start` — start with new code (**run in background**)
+5. Wait 3 seconds, verify `orca_daemon_status(root)` succeeds
 6. `orca_resume_run(root, run_id)` for each affected run
 
 ### Crash recovery
@@ -181,7 +183,7 @@ All tools require `root` — the absolute path to the target project.
 | `orca_daemon_status(root)` | Prereq check, health monitoring |
 | `orca_start_run(root, task_file, workflow?, branch?)` | Start a flow |
 | `orca_list_runs(root)` | Overview of all runs |
-| `orca_get_run(root, run_id)` | Detailed run state + sessions |
+| `orca_get_run(root, run_id, compact?)` | Run state; use `compact=true` for polling, omit for diagnosis |
 | `orca_get_issue(root, run_id, issue_id)` | Issue details, failure_count, event_log |
 | `orca_get_worker_log(root, run_id, issue_id, tail?)` | Worker output (default last 100 lines) |
 | `orca_get_insights(root, run_id)` | Orchestrator insights log |

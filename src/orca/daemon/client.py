@@ -45,8 +45,11 @@ class DaemonClient:
     async def list_runs(self) -> list[dict[str, Any]]:
         return await self._get_json("/api/runs")  # type: ignore[return-value]
 
-    async def get_run(self, run_id: str) -> dict[str, Any]:
-        return await self._get_json(f"/api/runs/{run_id}")
+    async def get_run(self, run_id: str, *, compact: bool = False) -> dict[str, Any]:
+        path = f"/api/runs/{run_id}"
+        if compact:
+            path += "?compact=true"
+        return await self._get_json(path)
 
     async def get_issue(self, run_id: str, issue_id: str) -> dict[str, Any]:
         return await self._get_json(f"/api/runs/{run_id}/issues/{issue_id}")

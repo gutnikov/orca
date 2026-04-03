@@ -61,7 +61,6 @@ class Orchestrator:
         hot_sessions: set[str] | None = None,
         session_log_paths: dict[str, str] | None = None,
         insights_state: dict[str, str] | None = None,
-        slack_mcp_url: str | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -82,7 +81,6 @@ class Orchestrator:
         # Shared with TUI: maps tracking_id -> log file path
         self._session_log_paths: dict[str, str] = session_log_paths if session_log_paths is not None else {}
         # Internal: maps tracking_id -> TmuxSession (orchestrator only)
-        self._slack_mcp_url = slack_mcp_url
         self._tmux_sessions: dict[str, PtySession] = {}
         self._last_save: dict[str, float] = {}
         # Maps asyncio.Task -> (issue_id, tracking_id)
@@ -318,28 +316,11 @@ class Orchestrator:
         )
 
     def _spawn_feedback_worker(self, effect: DispatchFeedbackAgentEffect) -> None:
-        """Spawn a feedback agent to collect user clarification via Slack."""
-        if not self._slack_mcp_url:
-            logger.warning(
-                "Cannot spawn feedback agent for issue %s — Slack HITL not configured",
-                effect.issue_id,
-                extra={"event": "feedback_no_slack", "issue_id": effect.issue_id},
-            )
-            # Fire a WorkerFailedEvent since we can't collect feedback
-            ts = self.now()
-            failed_event = WorkerFailedEvent(
-                issue_id=effect.issue_id,
-                error="needs_feedback requested but Slack HITL integration is not configured",
-                timestamp=ts,
-            )
-            self._state, new_effects = reduce(self._config, self._state, failed_event, self.generate_id, self.now)
-            self.persistence.save(self._state)
-            pending: list[DispatchWorkerEffect] = []
-            self._route_effects(new_effects, pending)
-            for p in pending:
-                self._spawn_worker(p)
-            return
+        """Spawn a feedback agent to collect user clarification.
 
+        The agent discovers MCP tools (e.g. Slack HITL) from the project's
+        .mcp.json — orca does not manage integrations or credentials.
+        """
         worker_kind = "claude-code"
         worker = self.workers.get(worker_kind)
         if worker is None:
@@ -506,10 +487,6 @@ class Orchestrator:
         if self._session_sync is not None:
             self._session_sync.manifest.update_log_path(tracking_id, str(log_path))
 
-        worker_env: dict[str, str] | None = None
-        if self._slack_mcp_url:
-            worker_env = {"SLACK_HITL_MCP_URL": self._slack_mcp_url}
-
         # Build run context for prompt templates
         run_context: dict[str, Any] | None = None
         if self.repo_root is not None and self._session_sync is not None:
@@ -532,7 +509,6 @@ class Orchestrator:
                 prompt_path,
                 inactivity_timeout,
                 pty_session=tmux_session,
-                env=worker_env,
                 model=model,
                 extra_args=list(extra_args) if extra_args else None,
                 session_manifest=self._session_sync.manifest if self._session_sync else None,

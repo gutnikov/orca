@@ -51,11 +51,23 @@ class SlackHitlClient:
 
         return {"text": msg["text"], "user": msg["user"], "ts": msg["ts"]}
 
-    def route_message(self, channel: str, thread_ts: str, message: dict[str, Any]) -> None:
-        """Route an incoming Slack message to the appropriate waiting queue."""
-        key = (channel, thread_ts)
-        queue = self._message_queues.get(key)
-        if queue is None:
-            logger.debug("Ignoring message for untracked thread %s/%s", channel, thread_ts)
-            return
-        queue.put_nowait(message)
+    def route_message(self, channel: str, thread_ts: str | None, message: dict[str, Any]) -> None:
+        """Route an incoming Slack message to the appropriate waiting queue.
+
+        If thread_ts is set, match exactly. If None (top-level DM reply),
+        match any active conversation in the same channel.
+        """
+        if thread_ts:
+            key = (channel, thread_ts)
+            queue = self._message_queues.get(key)
+            if queue is not None:
+                queue.put_nowait(message)
+                return
+
+        # Non-threaded reply — find any active queue for this channel
+        for (ch, _ts), queue in self._message_queues.items():
+            if ch == channel:
+                queue.put_nowait(message)
+                return
+
+        logger.debug("Ignoring message for untracked channel/thread %s/%s", channel, thread_ts)

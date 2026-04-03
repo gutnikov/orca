@@ -70,15 +70,58 @@ async def _start_run(request: Request) -> JSONResponse:
 async def _get_run(request: Request) -> JSONResponse:
     manager: RunManager = request.app.state.manager
     run_id: str = request.path_params["run_id"]
+    compact = request.query_params.get("compact") == "true"
     state = manager.get_run_state(run_id)
     if state is None:
         return JSONResponse({"error": f"run '{run_id}' not found"}, status_code=404)
     run_info = manager.get_run(run_id)
-    sessions = manager.get_sessions(run_id)
-    result: dict[str, Any] = {"run_id": run_id, "state": state, "sessions": sessions}
+    if compact:
+        result = _compact_run(run_id, state, run_info, manager.get_sessions(run_id))
+    else:
+        sessions = manager.get_sessions(run_id)
+        result = {"run_id": run_id, "state": state, "sessions": sessions}
+        if run_info is not None:
+            result["status"] = run_info.status.value
+    return JSONResponse(result)
+
+
+def _compact_run(
+    run_id: str,
+    state: dict[str, Any],
+    run_info: Any,
+    sessions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Build a compact run summary, stripping event_log, fields, and completed sessions."""
+    compact_issues: dict[str, Any] = {}
+    for iid, issue in state.get("issues", {}).items():
+        compact_issues[iid] = {
+            "title": issue.get("fields", {}).get("title", ""),
+            "state": issue["state"],
+            "worker_active": issue["worker_active"],
+            "failure_count": issue.get("failure_count", 0),
+            "hop_count": issue.get("hop_count", 0),
+            "visit_counts": issue.get("visit_counts", {}),
+        }
+    # Keep only the latest active session per issue (or the most recent completed one)
+    latest_sessions: dict[str, dict[str, Any]] = {}
+    for s in sessions:
+        iid = s.get("issue_id", "")
+        keep = {
+            "state": s.get("state"),
+            "progress": s.get("progress"),
+            "status": s.get("status"),
+            "progress_updated_at": s.get("progress_updated_at"),
+        }
+        if s.get("completed_at") is None or iid not in latest_sessions:
+            latest_sessions[iid] = keep
+    result: dict[str, Any] = {
+        "run_id": run_id,
+        "issues": compact_issues,
+        "sessions": latest_sessions,
+    }
     if run_info is not None:
         result["status"] = run_info.status.value
-    return JSONResponse(result)
+    return result
 
 
 async def _get_issue(request: Request) -> JSONResponse:

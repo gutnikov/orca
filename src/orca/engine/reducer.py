@@ -535,6 +535,10 @@ def _apply_transition(
     issue.state = target_state
     target_def = config.get_state(issue.type, target_state)
 
+    # Clear transient feedback fields — they belong to the previous state's feedback loop
+    issue.fields.pop("feedback_context", None)
+    issue.fields.pop("feedback_questions", None)
+
     # Log the transition
     append_log(issue, ts, "transitioned", {"from": old_state_name, "to": target_state})
 
