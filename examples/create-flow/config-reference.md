@@ -166,11 +166,13 @@ Always available. Never define them in `states:`.
 | `done` | Terminal. Issue stays here permanently. Triggers cascading unblock of parents/dependents. |
 | `failed` | Not actually visited. Using `on: { outcome: failed }` triggers worker failure/retry semantics. |
 
-## Reserved Outcomes
+## Built-in Outcomes
+
+Always available. Never declare them in `result_format.outcome.values`.
 
 | Outcome | Behavior |
 |---|---|
-| `needs_feedback` | No `on:` rule needed. Orchestrator spawns Slack feedback agent, re-dispatches worker with `feedback_context` after user answers. Increments `failure_count`. |
+| `waiting` | No `on:` rule needed. Orchestrator pauses the inactivity timer and keeps the tmux session alive. Worker resumes when manually unblocked via `orca unblock <run_id> <issue_id> -m "message"`. The unblock message is pushed into the live session via `tmux send-keys`. Workers can enter `waiting` multiple times in a single session. |
 
 ## Multi-Flow Convention
 
