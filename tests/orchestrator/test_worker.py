@@ -374,7 +374,7 @@ class TestWorkerBlocking:
         type(pty).alive = property(lambda self: True)
 
         async def _spawn(*args: Any, **kwargs: Any) -> None:
-            result_path.write_text(json.dumps({"outcome": "blocked"}))
+            result_path.write_text(json.dumps({"outcome": "waiting"}))
 
         pty.spawn = AsyncMock(side_effect=_spawn)
 
@@ -433,7 +433,7 @@ class TestWorkerBlocking:
         type(pty).alive = property(lambda self: _alive())
 
         async def _spawn(*args: Any, **kwargs: Any) -> None:
-            result_path.write_text(json.dumps({"outcome": "blocked"}))
+            result_path.write_text(json.dumps({"outcome": "waiting"}))
 
         pty.spawn = AsyncMock(side_effect=_spawn)
 
@@ -449,7 +449,7 @@ class TestWorkerBlocking:
         )
 
         assert isinstance(outcome, WorkerFailure)
-        assert "blocked" in outcome.error
+        assert "waiting" in outcome.error
 
     async def test_blocked_without_unblock_event_treated_as_stale(self, tmp_path: Path) -> None:
         """Without unblock_event, blocked outcome is unknown -> stale -> deleted -> timeout."""
@@ -461,7 +461,7 @@ class TestWorkerBlocking:
         pty = _make_polling_pty(alive_count=9999)
 
         async def _spawn(*args: Any, **kwargs: Any) -> None:
-            result_path.write_text(json.dumps({"outcome": "blocked"}))
+            result_path.write_text(json.dumps({"outcome": "waiting"}))
 
         pty.spawn = AsyncMock(side_effect=_spawn)
 
@@ -505,7 +505,7 @@ class TestWorkerBlocking:
         type(pty).alive = property(lambda self: True)
 
         async def _spawn(*args: Any, **kwargs: Any) -> None:
-            result_path.write_text(json.dumps({"outcome": "blocked"}))
+            result_path.write_text(json.dumps({"outcome": "waiting"}))
 
         pty.spawn = AsyncMock(side_effect=_spawn)
 

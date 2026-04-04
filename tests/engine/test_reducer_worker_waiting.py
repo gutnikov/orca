@@ -8,8 +8,8 @@ from orca.engine.types import (
     CreateEvent,
     ErrorEffect,
     State,
-    WorkerBlockedEvent,
-    WorkerUnblockedEvent,
+    WorkerResumedEvent,
+    WorkerWaitingEvent,
 )
 
 
@@ -28,8 +28,8 @@ def _clock(value: str = "2026-01-01T00:00:00Z") -> Callable[[], str]:
     return lambda: value
 
 
-class TestWorkerBlocked:
-    """WorkerBlockedEvent appends event_log entry, no effects."""
+class TestWorkerWaiting:
+    """WorkerWaitingEvent appends event_log entry, no effects."""
 
     def test_happy_path(self, simple_config_yaml: str) -> None:
         config = parse_config(simple_config_yaml)
@@ -48,7 +48,7 @@ class TestWorkerBlocked:
         state, effects = reduce(
             config,
             state,
-            WorkerBlockedEvent(issue_id="A", timestamp="t1"),
+            WorkerWaitingEvent(issue_id="A", timestamp="t1"),
             gen,
             _clock(),
         )
@@ -56,7 +56,7 @@ class TestWorkerBlocked:
         assert effects == []
         assert state.issues["A"].worker_active is True
         log_types = [e.type for e in state.issues["A"].event_log]
-        assert "worker_blocked" in log_types
+        assert "worker_waiting" in log_types
 
     def test_nonexistent_issue(self, simple_config_yaml: str) -> None:
         config = parse_config(simple_config_yaml)
@@ -66,7 +66,7 @@ class TestWorkerBlocked:
         state, effects = reduce(
             config,
             state,
-            WorkerBlockedEvent(issue_id="NOPE", timestamp="t0"),
+            WorkerWaitingEvent(issue_id="NOPE", timestamp="t0"),
             gen,
             _clock(),
         )
@@ -91,7 +91,7 @@ class TestWorkerBlocked:
         state, effects = reduce(
             config,
             state,
-            WorkerBlockedEvent(issue_id="A", timestamp="t1"),
+            WorkerWaitingEvent(issue_id="A", timestamp="t1"),
             gen,
             _clock(),
         )
@@ -116,7 +116,7 @@ class TestWorkerBlocked:
         state, effects = reduce(
             config,
             state,
-            WorkerBlockedEvent(issue_id="A", timestamp="t1"),
+            WorkerWaitingEvent(issue_id="A", timestamp="t1"),
             gen,
             _clock(),
         )
@@ -124,8 +124,8 @@ class TestWorkerBlocked:
         assert isinstance(effects[0], ErrorEffect)
 
 
-class TestWorkerUnblocked:
-    """WorkerUnblockedEvent appends event_log entry with message, no effects."""
+class TestWorkerResumed:
+    """WorkerResumedEvent appends event_log entry with message, no effects."""
 
     def test_happy_path(self, simple_config_yaml: str) -> None:
         config = parse_config(simple_config_yaml)
@@ -144,16 +144,16 @@ class TestWorkerUnblocked:
         state, effects = reduce(
             config,
             state,
-            WorkerUnblockedEvent(issue_id="A", message="PR merged", timestamp="t1"),
+            WorkerResumedEvent(issue_id="A", message="PR merged", timestamp="t1"),
             gen,
             _clock(),
         )
 
         assert effects == []
         assert state.issues["A"].worker_active is True
-        unblocked_entries = [e for e in state.issues["A"].event_log if e.type == "worker_unblocked"]
-        assert len(unblocked_entries) == 1
-        assert unblocked_entries[0].data == {"message": "PR merged"}
+        resumed_entries = [e for e in state.issues["A"].event_log if e.type == "worker_resumed"]
+        assert len(resumed_entries) == 1
+        assert resumed_entries[0].data == {"message": "PR merged"}
 
     def test_nonexistent_issue(self, simple_config_yaml: str) -> None:
         config = parse_config(simple_config_yaml)
@@ -163,7 +163,7 @@ class TestWorkerUnblocked:
         state, effects = reduce(
             config,
             state,
-            WorkerUnblockedEvent(issue_id="NOPE", message="hi", timestamp="t0"),
+            WorkerResumedEvent(issue_id="NOPE", message="hi", timestamp="t0"),
             gen,
             _clock(),
         )
@@ -187,7 +187,7 @@ class TestWorkerUnblocked:
         state, effects = reduce(
             config,
             state,
-            WorkerUnblockedEvent(issue_id="A", message="hi", timestamp="t1"),
+            WorkerResumedEvent(issue_id="A", message="hi", timestamp="t1"),
             gen,
             _clock(),
         )
@@ -212,7 +212,7 @@ class TestWorkerUnblocked:
         state, effects = reduce(
             config,
             state,
-            WorkerUnblockedEvent(issue_id="A", message="hi", timestamp="t1"),
+            WorkerResumedEvent(issue_id="A", message="hi", timestamp="t1"),
             gen,
             _clock(),
         )

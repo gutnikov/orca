@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Allow workers to signal they are blocked via `result.json`, keeping the tmux session alive with paused timers until an explicit unblock command pushes a message into the session.
+**Goal:** Allow workers to signal they are waiting via `result.json`, keeping the tmux session alive with paused timers until an explicit unblock command pushes a message into the session.
 
-**Architecture:** New `WorkerBlockedEvent`/`WorkerUnblockedEvent` in the engine for audit logging only. The orchestrator intercepts `{"outcome": "blocked"}` in `result.json` before validation, pauses the inactivity timer, and waits for an `asyncio.Event` set by the `unblock_worker()` method. Unblocking is exposed via MCP tool, HTTP API, and CLI.
+**Architecture:** New `WorkerWaitingEvent`/`WorkerResumedEvent` in the engine for audit logging only. The orchestrator intercepts `{"outcome": "waiting"}` in `result.json` before validation, pauses the inactivity timer, and waits for an `asyncio.Event` set by the `unblock_worker()` method. Unblocking is exposed via MCP tool, HTTP API, and CLI.
 
 **Tech Stack:** Python 3.12, asyncio, tmux (send-keys), Starlette HTTP, FastMCP, argparse
 
@@ -21,20 +21,20 @@
 In `tests/engine/test_types.py`, add a test verifying the new types exist in the `Event` union:
 
 ```python
-from orca.engine.types import Event, WorkerBlockedEvent, WorkerUnblockedEvent
+from orca.engine.types import Event, WorkerWaitingEvent, WorkerResumedEvent
 
 class TestBlockingEventTypes:
-    def test_worker_blocked_event_in_union(self) -> None:
-        event = WorkerBlockedEvent(issue_id="A", timestamp="2026-01-01T00:00:00Z")
-        assert isinstance(event, WorkerBlockedEvent)
+    def test_worker_waiting_event_in_union(self) -> None:
+        event = WorkerWaitingEvent(issue_id="A", timestamp="2026-01-01T00:00:00Z")
+        assert isinstance(event, WorkerWaitingEvent)
         # Verify it's part of the Event union (type checker enforces this,
         # but runtime check that the module exports it)
         assert event.issue_id == "A"
         assert event.timestamp == "2026-01-01T00:00:00Z"
 
-    def test_worker_unblocked_event_in_union(self) -> None:
-        event = WorkerUnblockedEvent(issue_id="B", message="PR merged", timestamp="2026-01-01T00:00:00Z")
-        assert isinstance(event, WorkerUnblockedEvent)
+    def test_worker_resumed_event_in_union(self) -> None:
+        event = WorkerResumedEvent(issue_id="B", message="PR merged", timestamp="2026-01-01T00:00:00Z")
+        assert isinstance(event, WorkerResumedEvent)
         assert event.issue_id == "B"
         assert event.message == "PR merged"
         assert event.timestamp == "2026-01-01T00:00:00Z"
@@ -43,7 +43,7 @@ class TestBlockingEventTypes:
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/engine/test_types.py::TestBlockingEventTypes -v`
-Expected: FAIL with `ImportError: cannot import name 'WorkerBlockedEvent'`
+Expected: FAIL with `ImportError: cannot import name 'WorkerWaitingEvent'`
 
 - [ ] **Step 3: Add the event types**
 
@@ -51,13 +51,13 @@ In `src/orca/engine/types.py`, after `WorkerFailedEvent` (line ~210), add:
 
 ```python
 @dataclass(frozen=True)
-class WorkerBlockedEvent:
+class WorkerWaitingEvent:
     issue_id: str
     timestamp: str
 
 
 @dataclass(frozen=True)
-class WorkerUnblockedEvent:
+class WorkerResumedEvent:
     issue_id: str
     message: str
     timestamp: str
@@ -66,7 +66,7 @@ class WorkerUnblockedEvent:
 Update the `Event` union (line ~213):
 
 ```python
-Event = CreateEvent | AdvanceEvent | WorkerResultEvent | WorkerFailedEvent | WorkerBlockedEvent | WorkerUnblockedEvent
+Event = CreateEvent | AdvanceEvent | WorkerResultEvent | WorkerFailedEvent | WorkerWaitingEvent | WorkerResumedEvent
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -83,20 +83,20 @@ Expected: clean
 
 ```bash
 git add src/orca/engine/types.py tests/engine/test_types.py
-git commit -m "feat(engine): add WorkerBlockedEvent and WorkerUnblockedEvent types"
+git commit -m "feat(engine): add WorkerWaitingEvent and WorkerResumedEvent types"
 ```
 
 ---
 
-### Task 2: Add reducer handler for WorkerBlockedEvent
+### Task 2: Add reducer handler for WorkerWaitingEvent
 
 **Files:**
 - Modify: `src/orca/engine/reducer.py:1-54` (imports and dispatch)
-- Test: `tests/engine/test_reducer_worker_blocked.py` (new)
+- Test: `tests/engine/test_reducer_worker_waiting.py` (new)
 
 - [ ] **Step 1: Write failing tests**
 
-Create `tests/engine/test_reducer_worker_blocked.py`:
+Create `tests/engine/test_reducer_worker_waiting.py`:
 
 ```python
 from __future__ import annotations
@@ -109,7 +109,7 @@ from orca.engine.types import (
     CreateEvent,
     ErrorEffect,
     State,
-    WorkerBlockedEvent,
+    WorkerWaitingEvent,
 )
 
 
@@ -127,7 +127,7 @@ def _clock(value: str = "2026-01-01T00:00:00Z") -> Callable[[], str]:
 
 
 class TestWorkerBlocked:
-    """WorkerBlockedEvent appends event_log entry, no effects."""
+    """WorkerWaitingEvent appends event_log entry, no effects."""
 
     def test_happy_path(self, simple_config_yaml: str) -> None:
         config = parse_config(simple_config_yaml)
@@ -142,10 +142,10 @@ class TestWorkerBlocked:
         )
         assert state.issues["A"].worker_active is True
 
-        # Worker signals blocked
+        # Worker signals waiting
         state, effects = reduce(
             config, state,
-            WorkerBlockedEvent(issue_id="A", timestamp="t1"),
+            WorkerWaitingEvent(issue_id="A", timestamp="t1"),
             gen, _clock(),
         )
 
@@ -153,9 +153,9 @@ class TestWorkerBlocked:
         assert effects == []
         # worker_active still True
         assert state.issues["A"].worker_active is True
-        # event_log has a worker_blocked entry
+        # event_log has a worker_waiting entry
         log_types = [e.type for e in state.issues["A"].event_log]
-        assert "worker_blocked" in log_types
+        assert "worker_waiting" in log_types
 
     def test_nonexistent_issue(self, simple_config_yaml: str) -> None:
         config = parse_config(simple_config_yaml)
@@ -164,7 +164,7 @@ class TestWorkerBlocked:
 
         state, effects = reduce(
             config, state,
-            WorkerBlockedEvent(issue_id="NOPE", timestamp="t0"),
+            WorkerWaitingEvent(issue_id="NOPE", timestamp="t0"),
             gen, _clock(),
         )
         assert len(effects) == 1
@@ -185,7 +185,7 @@ class TestWorkerBlocked:
 
         state, effects = reduce(
             config, state,
-            WorkerBlockedEvent(issue_id="A", timestamp="t1"),
+            WorkerWaitingEvent(issue_id="A", timestamp="t1"),
             gen, _clock(),
         )
         assert len(effects) == 1
@@ -206,7 +206,7 @@ class TestWorkerBlocked:
 
         state, effects = reduce(
             config, state,
-            WorkerBlockedEvent(issue_id="A", timestamp="t1"),
+            WorkerWaitingEvent(issue_id="A", timestamp="t1"),
             gen, _clock(),
         )
         assert len(effects) == 1
@@ -215,22 +215,22 @@ class TestWorkerBlocked:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest tests/engine/test_reducer_worker_blocked.py -v`
-Expected: FAIL — reducer doesn't handle `WorkerBlockedEvent` yet
+Run: `uv run pytest tests/engine/test_reducer_worker_waiting.py -v`
+Expected: FAIL -- reducer doesn't handle `WorkerWaitingEvent` yet
 
 - [ ] **Step 3: Implement the handler**
 
 In `src/orca/engine/reducer.py`:
 
-1. Add imports — add `WorkerBlockedEvent` and `WorkerUnblockedEvent` to the import from `orca.engine.types`.
+1. Add imports — add `WorkerWaitingEvent` and `WorkerResumedEvent` to the import from `orca.engine.types`.
 
 2. Add the handler function after `_handle_worker_failed`:
 
 ```python
-def _handle_worker_blocked(
+def _handle_worker_waiting(
     config: StateMachineConfig,
     state: State,
-    event: WorkerBlockedEvent,
+    event: WorkerWaitingEvent,
     effects: list[Effect],
     ts: str,
 ) -> None:
@@ -252,19 +252,19 @@ def _handle_worker_blocked(
         )
         return
 
-    append_log(issue, event.timestamp, "worker_blocked", {})
+    append_log(issue, event.timestamp, "worker_waiting", {})
 ```
 
 3. Add dispatch in `reduce()` — after the `elif isinstance(event, WorkerFailedEvent):` block:
 
 ```python
-    elif isinstance(event, WorkerBlockedEvent):
-        _handle_worker_blocked(config, new_state, event, effects, ts)
+    elif isinstance(event, WorkerWaitingEvent):
+        _handle_worker_waiting(config, new_state, event, effects, ts)
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest tests/engine/test_reducer_worker_blocked.py -v`
+Run: `uv run pytest tests/engine/test_reducer_worker_waiting.py -v`
 Expected: PASS
 
 - [ ] **Step 5: Run linting and type checks**
@@ -275,28 +275,28 @@ Expected: clean
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/orca/engine/reducer.py tests/engine/test_reducer_worker_blocked.py
-git commit -m "feat(engine): add WorkerBlockedEvent reducer handler"
+git add src/orca/engine/reducer.py tests/engine/test_reducer_worker_waiting.py
+git commit -m "feat(engine): add WorkerWaitingEvent reducer handler"
 ```
 
 ---
 
-### Task 3: Add reducer handler for WorkerUnblockedEvent
+### Task 3: Add reducer handler for WorkerResumedEvent
 
 **Files:**
 - Modify: `src/orca/engine/reducer.py`
-- Test: `tests/engine/test_reducer_worker_blocked.py` (append to same file)
+- Test: `tests/engine/test_reducer_worker_waiting.py` (append to same file)
 
 - [ ] **Step 1: Write failing tests**
 
-Append to `tests/engine/test_reducer_worker_blocked.py`:
+Append to `tests/engine/test_reducer_worker_waiting.py`:
 
 ```python
-from orca.engine.types import WorkerUnblockedEvent
+from orca.engine.types import WorkerResumedEvent
 
 
-class TestWorkerUnblocked:
-    """WorkerUnblockedEvent appends event_log entry with message, no effects."""
+class TestWorkerResumed:
+    """WorkerResumedEvent appends event_log entry with message, no effects."""
 
     def test_happy_path(self, simple_config_yaml: str) -> None:
         config = parse_config(simple_config_yaml)
@@ -312,16 +312,16 @@ class TestWorkerUnblocked:
 
         state, effects = reduce(
             config, state,
-            WorkerUnblockedEvent(issue_id="A", message="PR merged", timestamp="t1"),
+            WorkerResumedEvent(issue_id="A", message="PR merged", timestamp="t1"),
             gen, _clock(),
         )
 
         assert effects == []
         assert state.issues["A"].worker_active is True
-        # Find the unblocked log entry
-        unblocked_entries = [e for e in state.issues["A"].event_log if e.type == "worker_unblocked"]
-        assert len(unblocked_entries) == 1
-        assert unblocked_entries[0].data == {"message": "PR merged"}
+        # Find the resumed log entry
+        resumed_entries = [e for e in state.issues["A"].event_log if e.type == "worker_resumed"]
+        assert len(resumed_entries) == 1
+        assert resumed_entries[0].data == {"message": "PR merged"}
 
     def test_nonexistent_issue(self, simple_config_yaml: str) -> None:
         config = parse_config(simple_config_yaml)
@@ -330,7 +330,7 @@ class TestWorkerUnblocked:
 
         state, effects = reduce(
             config, state,
-            WorkerUnblockedEvent(issue_id="NOPE", message="hi", timestamp="t0"),
+            WorkerResumedEvent(issue_id="NOPE", message="hi", timestamp="t0"),
             gen, _clock(),
         )
         assert len(effects) == 1
@@ -350,7 +350,7 @@ class TestWorkerUnblocked:
 
         state, effects = reduce(
             config, state,
-            WorkerUnblockedEvent(issue_id="A", message="hi", timestamp="t1"),
+            WorkerResumedEvent(issue_id="A", message="hi", timestamp="t1"),
             gen, _clock(),
         )
         assert len(effects) == 1
@@ -371,7 +371,7 @@ class TestWorkerUnblocked:
 
         state, effects = reduce(
             config, state,
-            WorkerUnblockedEvent(issue_id="A", message="hi", timestamp="t1"),
+            WorkerResumedEvent(issue_id="A", message="hi", timestamp="t1"),
             gen, _clock(),
         )
         assert len(effects) == 1
@@ -380,18 +380,18 @@ class TestWorkerUnblocked:
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `uv run pytest tests/engine/test_reducer_worker_blocked.py::TestWorkerUnblocked -v`
+Run: `uv run pytest tests/engine/test_reducer_worker_waiting.py::TestWorkerResumed -v`
 Expected: FAIL
 
 - [ ] **Step 3: Implement the handler**
 
-In `src/orca/engine/reducer.py`, add after `_handle_worker_blocked`:
+In `src/orca/engine/reducer.py`, add after `_handle_worker_waiting`:
 
 ```python
-def _handle_worker_unblocked(
+def _handle_worker_resumed(
     config: StateMachineConfig,
     state: State,
-    event: WorkerUnblockedEvent,
+    event: WorkerResumedEvent,
     effects: list[Effect],
     ts: str,
 ) -> None:
@@ -413,19 +413,19 @@ def _handle_worker_unblocked(
         )
         return
 
-    append_log(issue, event.timestamp, "worker_unblocked", {"message": event.message})
+    append_log(issue, event.timestamp, "worker_resumed", {"message": event.message})
 ```
 
-Add dispatch in `reduce()` after the `WorkerBlockedEvent` branch:
+Add dispatch in `reduce()` after the `WorkerWaitingEvent` branch:
 
 ```python
-    elif isinstance(event, WorkerUnblockedEvent):
-        _handle_worker_unblocked(config, new_state, event, effects, ts)
+    elif isinstance(event, WorkerResumedEvent):
+        _handle_worker_resumed(config, new_state, event, effects, ts)
 ```
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `uv run pytest tests/engine/test_reducer_worker_blocked.py -v`
+Run: `uv run pytest tests/engine/test_reducer_worker_waiting.py -v`
 Expected: all PASS
 
 - [ ] **Step 5: Run full engine test suite + type checks**
@@ -436,19 +436,19 @@ Expected: all PASS, no type errors
 - [ ] **Step 6: Commit**
 
 ```bash
-git add src/orca/engine/reducer.py tests/engine/test_reducer_worker_blocked.py
-git commit -m "feat(engine): add WorkerUnblockedEvent reducer handler"
+git add src/orca/engine/reducer.py tests/engine/test_reducer_worker_waiting.py
+git commit -m "feat(engine): add WorkerResumedEvent reducer handler"
 ```
 
 ---
 
-### Task 4: Worker polling loop — blocked detection and unblock
+### Task 4: Worker polling loop — waiting detection and unblock
 
 **Files:**
 - Modify: `src/orca/orchestrator/worker.py:60-76,121-304`
 - Test: `tests/orchestrator/test_worker.py`
 
-This is the largest task. The `execute()` method gains two new parameters (`unblock_event`, `unblock_message`) and the polling loop gets a blocked sub-loop.
+This is the largest task. The `execute()` method gains two new parameters (`unblock_event`, `unblock_message`) and the polling loop gets a waiting sub-loop.
 
 - [ ] **Step 1: Write failing tests**
 
@@ -457,10 +457,10 @@ Append to `tests/orchestrator/test_worker.py`:
 ```python
 @pytest.mark.asyncio()
 class TestWorkerBlocking:
-    """Tests for the blocked outcome detection and unblock mechanism."""
+    """Tests for the waiting outcome detection and unblock mechanism."""
 
-    async def test_blocked_outcome_pauses_and_unblocks(self, tmp_path: Path) -> None:
-        """Worker writes blocked, then gets unblocked, then writes real result."""
+    async def test_waiting_outcome_pauses_and_unblocks(self, tmp_path: Path) -> None:
+        """Worker writes waiting, then gets unblocked, then writes real result."""
         effect = _make_effect()
         result_path = tmp_path / "result.json"
         prompt_path = tmp_path / "prompt.md"
@@ -469,10 +469,10 @@ class TestWorkerBlocking:
         unblock_event = asyncio.Event()
         unblock_message: list[str] = []
 
-        # Track what happens: session stays alive, writes blocked first,
+        # Track what happens: session stays alive, writes waiting first,
         # then after unblock writes the real result
         call_count = 0
-        phase = "blocked"  # "blocked" -> "unblocked"
+        phase = "waiting"  # "waiting" -> "resumed"
 
         pty = MagicMock()
         pty.session_name = "mock-session"
@@ -486,9 +486,9 @@ class TestWorkerBlocking:
 
         type(pty).alive = property(lambda self: _alive())
 
-        # Write blocked result on spawn
+        # Write waiting result on spawn
         async def _spawn(*args: Any, **kwargs: Any) -> None:
-            result_path.write_text(json.dumps({"outcome": "blocked"}))
+            result_path.write_text(json.dumps({"outcome": "waiting"}))
 
         pty.spawn = AsyncMock(side_effect=_spawn)
 
@@ -497,7 +497,7 @@ class TestWorkerBlocking:
         # Schedule unblock after a short delay
         async def _delayed_unblock() -> None:
             await asyncio.sleep(0.1)
-            # After blocked is detected, result.json should be deleted
+            # After waiting is detected, result.json should be deleted
             # Write the real result
             result_path.write_text(json.dumps({"outcome": "done", "summary": "Finished"}))
             unblock_message.clear()
@@ -519,8 +519,8 @@ class TestWorkerBlocking:
         # send_keys was called with the unblock message
         pty.send_keys.assert_called_once_with("PR merged, continue")
 
-    async def test_blocked_session_dies_returns_failure(self, tmp_path: Path) -> None:
-        """If session dies while blocked, return WorkerFailure."""
+    async def test_waiting_session_dies_returns_failure(self, tmp_path: Path) -> None:
+        """If session dies while waiting, return WorkerFailure."""
         effect = _make_effect()
         result_path = tmp_path / "result.json"
         prompt_path = tmp_path / "prompt.md"
@@ -540,14 +540,14 @@ class TestWorkerBlocking:
         def _alive() -> bool:
             nonlocal alive_checks
             alive_checks += 1
-            # Alive for first 2 checks (during initial poll + blocked detection),
+            # Alive for first 2 checks (during initial poll + waiting detection),
             # then dies
             return alive_checks <= 2
 
         type(pty).alive = property(lambda self: _alive())
 
         async def _spawn(*args: Any, **kwargs: Any) -> None:
-            result_path.write_text(json.dumps({"outcome": "blocked"}))
+            result_path.write_text(json.dumps({"outcome": "waiting"}))
 
         pty.spawn = AsyncMock(side_effect=_spawn)
 
@@ -580,7 +580,7 @@ class TestWorkerBlocking:
         type(pty).alive = property(lambda self: True)
 
         async def _spawn(*args: Any, **kwargs: Any) -> None:
-            result_path.write_text(json.dumps({"outcome": "blocked"}))
+            result_path.write_text(json.dumps({"outcome": "waiting"}))
 
         pty.spawn = AsyncMock(side_effect=_spawn)
 
@@ -592,8 +592,8 @@ class TestWorkerBlocking:
                 await asyncio.sleep(0.1)
                 cycle += 1
                 if cycle < 2:
-                    # Write blocked again after unblock
-                    result_path.write_text(json.dumps({"outcome": "blocked"}))
+                    # Write waiting again after unblock
+                    result_path.write_text(json.dumps({"outcome": "waiting"}))
                 else:
                     # Final cycle: write real result
                     result_path.write_text(json.dumps({"outcome": "done", "summary": "Finally done"}))
@@ -616,8 +616,8 @@ class TestWorkerBlocking:
         # send_keys called twice (once per unblock)
         assert pty.send_keys.call_count == 2
 
-    async def test_no_unblock_params_blocked_treated_as_stale(self, tmp_path: Path) -> None:
-        """Without unblock_event, blocked outcome is treated like any unknown outcome
+    async def test_no_unblock_params_waiting_treated_as_stale(self, tmp_path: Path) -> None:
+        """Without unblock_event, waiting outcome is treated like any unknown outcome
         (stale result deleted), and session eventually times out."""
         effect = _make_effect()
         result_path = tmp_path / "result.json"
@@ -627,7 +627,7 @@ class TestWorkerBlocking:
         pty = _make_polling_pty(alive_count=9999)
 
         async def _spawn(*args: Any, **kwargs: Any) -> None:
-            result_path.write_text(json.dumps({"outcome": "blocked"}))
+            result_path.write_text(json.dumps({"outcome": "waiting"}))
 
         pty.spawn = AsyncMock(side_effect=_spawn)
 
@@ -638,7 +638,7 @@ class TestWorkerBlocking:
             pty_session=pty,
         )
 
-        # Without unblock support, blocked is just a stale outcome → timeout
+        # Without unblock support, waiting is just a stale outcome -> timeout
         assert isinstance(outcome, WorkerFailure)
 ```
 
@@ -649,7 +649,7 @@ Add `import asyncio` to the test file imports if not already present.
 Run: `uv run pytest tests/orchestrator/test_worker.py::TestWorkerBlocking -v`
 Expected: FAIL — `execute()` doesn't accept `unblock_event`/`unblock_message`
 
-- [ ] **Step 3: Implement blocked detection and unblock in the polling loop**
+- [ ] **Step 3: Implement waiting detection and unblock in the polling loop**
 
 In `src/orca/orchestrator/worker.py`:
 
@@ -702,23 +702,23 @@ class Worker(Protocol):
     ) -> WorkerOutcome:
 ```
 
-3. In the polling loop, after JSON parsing succeeds (around line 203) but **before** calling `validate_result`, add blocked detection:
+3. In the polling loop, after JSON parsing succeeds (around line 203) but **before** calling `validate_result`, add waiting detection:
 
 ```python
             if result_detected_at is None and result_path.exists():
                 try:
                     candidate = json.loads(result_path.read_text())
 
-                    # Check for built-in "blocked" outcome before validation
-                    if candidate.get("outcome") == "blocked" and unblock_event is not None:
-                        # Check session is still alive before entering blocked state
+                    # Check for built-in "waiting" outcome before validation
+                    if candidate.get("outcome") == "waiting" and unblock_event is not None:
+                        # Check session is still alive before entering waiting state
                         if not pty_session.alive:
-                            return WorkerFailure(error="session died while reporting blocked")
+                            return WorkerFailure(error="session died while reporting waiting")
                         result_path.unlink(missing_ok=True)
                         logger.info(
-                            "Worker blocked for issue %s — pausing timer",
+                            "Worker waiting for issue %s — pausing timer",
                             effect.issue_id,
-                            extra={"event": "worker_blocked", "issue_id": effect.issue_id},
+                            extra={"event": "worker_waiting", "issue_id": effect.issue_id},
                         )
                         if on_blocked is not None:
                             on_blocked()
@@ -727,30 +727,30 @@ class Worker(Protocol):
                         while True:
                             await asyncio.sleep(_POLL_INTERVAL)
                             if not pty_session.alive:
-                                return WorkerFailure(error="session died while blocked")
+                                return WorkerFailure(error="session died while waiting")
                             if unblock_event.is_set():
                                 unblock_event.clear()
                                 msg = unblock_message[0] if unblock_message else ""
                                 pty_session.send_keys(msg)
                                 result_path.unlink(missing_ok=True)
                                 logger.info(
-                                    "Worker unblocked for issue %s",
+                                    "Worker resumed for issue %s",
                                     effect.issue_id,
-                                    extra={"event": "worker_unblocked", "issue_id": effect.issue_id},
+                                    extra={"event": "worker_resumed", "issue_id": effect.issue_id},
                                 )
                                 if on_unblocked is not None:
                                     on_unblocked(msg)
                                 break
-                        # Resume normal polling — do NOT increment elapsed for blocked time
+                        # Resume normal polling — do NOT increment elapsed for waiting time
                         continue
 
                     error = validate_result(candidate, effect.result_format)
                     # ... rest of existing validation logic
 ```
 
-Note: the `continue` after the blocked sub-loop skips the rest of the iteration body (grace period check, session exit check, timeout check), restarting the normal poll loop. `elapsed` is not incremented during the blocked sub-loop since the outer loop's `elapsed += _POLL_INTERVAL` is only reached at the top of each outer iteration.
+Note: the `continue` after the waiting sub-loop skips the rest of the iteration body (grace period check, session exit check, timeout check), restarting the normal poll loop. `elapsed` is not incremented during the waiting sub-loop since the outer loop's `elapsed += _POLL_INTERVAL` is only reached at the top of each outer iteration.
 
-4. Also handle the case where `unblock_event is None` and outcome is `"blocked"` — it falls through to the existing stale-result-deletion logic since `"blocked"` won't be in `valid_outcomes`.
+4. Also handle the case where `unblock_event is None` and outcome is `"waiting"` — it falls through to the existing stale-result-deletion logic since `"waiting"` won't be in `valid_outcomes`.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
@@ -771,12 +771,12 @@ Expected: clean
 
 ```bash
 git add src/orca/orchestrator/worker.py tests/orchestrator/test_worker.py
-git commit -m "feat(worker): add blocked outcome detection and unblock mechanism in polling loop"
+git commit -m "feat(worker): add waiting outcome detection and unblock mechanism in polling loop"
 ```
 
 ---
 
-### Task 5: Orchestrator — blocked workers registry and unblock_worker()
+### Task 5: Orchestrator — waiting workers registry and unblock_worker()
 
 **Files:**
 - Modify: `src/orca/orchestrator/orchestrator.py:44-100,344-441,617-655`
@@ -788,25 +788,25 @@ Append to `tests/orchestrator/test_orchestrator.py` (or create a new test file i
 
 ```python
 class TestUnblockWorker:
-    def test_unblock_blocked_worker(self) -> None:
-        """unblock_worker returns True and sets event for a blocked worker."""
+    def test_unblock_waiting_worker(self) -> None:
+        """unblock_worker returns True and sets event for a waiting worker."""
         from orca.orchestrator.orchestrator import Orchestrator
         import asyncio
 
         # Create a minimal orchestrator (mock dependencies as needed)
         # ... (use existing test fixtures/patterns from the file)
-        # Register a blocked worker manually
+        # Register a waiting worker manually
         event = asyncio.Event()
         msg_box: list[str] = []
-        orchestrator._blocked_workers["issue-1"] = (event, msg_box)
+        orchestrator._waiting_workers["issue-1"] = (event, msg_box)
 
         result = orchestrator.unblock_worker("issue-1", "PR merged")
         assert result is True
         assert event.is_set()
         assert msg_box == ["PR merged"]
 
-    def test_unblock_non_blocked_worker(self) -> None:
-        """unblock_worker returns False for a non-blocked worker."""
+    def test_unblock_non_waiting_worker(self) -> None:
+        """unblock_worker returns False for a non-waiting worker."""
         # ... (use existing test fixtures)
         result = orchestrator.unblock_worker("issue-1", "hi")
         assert result is False
@@ -817,7 +817,7 @@ Note: adapt the test to match the existing test patterns in `test_orchestrator.p
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `uv run pytest tests/orchestrator/test_orchestrator.py::TestUnblockWorker -v`
-Expected: FAIL — `_blocked_workers` doesn't exist
+Expected: FAIL — `_waiting_workers` doesn't exist
 
 - [ ] **Step 3: Implement the registry and method**
 
@@ -826,19 +826,19 @@ In `src/orca/orchestrator/orchestrator.py`:
 1. Add to `__init__` (after `self._progress_sessions`, around line 85):
 
 ```python
-        # Maps issue_id -> (unblock_event, message_box) for blocked workers
-        self._blocked_workers: dict[str, tuple[asyncio.Event, list[str]]] = {}
+        # Maps issue_id -> (unblock_event, message_box) for waiting workers
+        self._waiting_workers: dict[str, tuple[asyncio.Event, list[str]]] = {}
 ```
 
 2. Add the `unblock_worker` method (after `set_cold_session`, around line 172):
 
 ```python
     def unblock_worker(self, issue_id: str, message: str) -> bool:
-        """Unblock a blocked worker by setting its event and message.
+        """Unblock a waiting worker by setting its event and message.
 
-        Returns False if the issue is not currently blocked.
+        Returns False if the issue is not currently waiting.
         """
-        entry = self._blocked_workers.get(issue_id)
+        entry = self._waiting_workers.get(issue_id)
         if entry is None:
             return False
         event, msg_box = entry
@@ -876,17 +876,17 @@ In `src/orca/orchestrator/orchestrator.py`:
             )
 ```
 
-5. Register the unblock channel in `_blocked_workers` before execute, remove in `finally`:
+5. Register the unblock channel in `_waiting_workers` before `execute`, remove in `finally`:
 
 ```python
-        self._blocked_workers[effect.issue_id] = (unblock_event, unblock_message)
+        self._waiting_workers[effect.issue_id] = (unblock_event, unblock_message)
 ```
 
 In the `finally` block (after existing cleanup):
 
 ```python
         finally:
-            self._blocked_workers.pop(effect.issue_id, None)
+            self._waiting_workers.pop(effect.issue_id, None)
             # ... existing scrollback save + tmux cleanup
 ```
 
@@ -894,21 +894,21 @@ In the `finally` block (after existing cleanup):
 
 ```python
         def _on_blocked() -> None:
-            from orca.engine.types import WorkerBlockedEvent
+            from orca.engine.types import WorkerWaitingEvent
             ts = self.now()
             self._state, _ = reduce(
                 self._config, self._state,
-                WorkerBlockedEvent(issue_id=effect.issue_id, timestamp=ts),
+                WorkerWaitingEvent(issue_id=effect.issue_id, timestamp=ts),
                 self.generate_id, self.now,
             )
             self.persistence.save(self._state)
 
         def _on_unblocked(message: str) -> None:
-            from orca.engine.types import WorkerUnblockedEvent
+            from orca.engine.types import WorkerResumedEvent
             ts = self.now()
             self._state, _ = reduce(
                 self._config, self._state,
-                WorkerUnblockedEvent(issue_id=effect.issue_id, message=message, timestamp=ts),
+                WorkerResumedEvent(issue_id=effect.issue_id, message=message, timestamp=ts),
                 self.generate_id, self.now,
             )
             self.persistence.save(self._state)
@@ -940,7 +940,7 @@ Expected: all PASS
 
 ```bash
 git add src/orca/orchestrator/orchestrator.py src/orca/orchestrator/worker.py
-git commit -m "feat(orchestrator): add blocked workers registry, unblock_worker, and engine event emission"
+git commit -m "feat(orchestrator): add waiting workers registry, unblock_worker, and engine event emission"
 ```
 
 ---
@@ -981,7 +981,7 @@ In `src/orca/daemon/manager.py`, add after `retry_issue`:
 
 ```python
     def unblock_worker(self, run_id: str, issue_id: str, message: str) -> None:
-        """Unblock a blocked worker in a run."""
+        """Unblock a waiting worker in a run."""
         run_info = self._runs.get(run_id)
         if run_info is None:
             msg = f"Run '{run_id}' not found"
@@ -990,7 +990,7 @@ In `src/orca/daemon/manager.py`, add after `retry_issue`:
             msg = f"Run '{run_id}' has no orchestrator"
             raise ValueError(msg)
         if not run_info.orchestrator.unblock_worker(issue_id, message):
-            msg = f"Issue '{issue_id}' is not blocked in run '{run_id}'"
+            msg = f"Issue '{issue_id}' is not waiting in run '{run_id}'"
             raise ValueError(msg)
 ```
 
@@ -1172,12 +1172,12 @@ In `src/orca/daemon/mcp_tools.py`, add the tool function (after `orca_resume_run
 
 ```python
     async def orca_unblock_worker(root: str, run_id: str, issue_id: str, message: str) -> str:
-        """Unblock a blocked worker by sending it a message.
+        """Unblock a waiting worker by sending it a message.
 
         Args:
             root: Absolute path to the target project's repo root.
             run_id: The run identifier.
-            issue_id: The issue identifier of the blocked worker.
+            issue_id: The issue identifier of the waiting worker.
             message: Message to send to the worker explaining what changed.
 
         Returns JSON with status, or an error message.
@@ -1246,7 +1246,7 @@ In `src/orca/cli/main.py`, add after the `logs_parser` block (around line 78):
 
 ```python
     # orca unblock <run_id> <issue_id> -m "message"
-    unblock_parser = sub.add_parser("unblock", help="Unblock a blocked worker")
+    unblock_parser = sub.add_parser("unblock", help="Unblock a waiting worker")
     unblock_parser.add_argument("run_id", type=str)
     unblock_parser.add_argument("issue_id", type=str)
     unblock_parser.add_argument("-m", "--message", type=str, required=True, help="Message to send to the worker")
@@ -1266,7 +1266,7 @@ Add the dispatch in `main()` (after the `logs` block):
 Create `src/orca/cli/unblock_cmd.py`:
 
 ```python
-"""orca unblock <run_id> <issue_id> -m <message> — unblock a blocked worker."""
+"""orca unblock <run_id> <issue_id> -m <message> — unblock a waiting worker."""
 
 from __future__ import annotations
 

@@ -211,19 +211,19 @@ class WorkerFailedEvent:
 
 
 @dataclass(frozen=True)
-class WorkerBlockedEvent:
+class WorkerWaitingEvent:
     issue_id: str
     timestamp: str
 
 
 @dataclass(frozen=True)
-class WorkerUnblockedEvent:
+class WorkerResumedEvent:
     issue_id: str
     message: str
     timestamp: str
 
 
-Event = CreateEvent | AdvanceEvent | WorkerResultEvent | WorkerFailedEvent | WorkerBlockedEvent | WorkerUnblockedEvent
+Event = CreateEvent | AdvanceEvent | WorkerResultEvent | WorkerFailedEvent | WorkerWaitingEvent | WorkerResumedEvent
 
 
 # --- Effects (frozen) ---

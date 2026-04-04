@@ -168,7 +168,7 @@ def create_mcp_server() -> FastMCP:
         return json.dumps(result)
 
     async def orca_unblock_worker(root: str, run_id: str, issue_id: str, message: str) -> str:
-        """Unblock a blocked worker by sending it a message.
+        """Unblock a waiting worker by sending it a message.
 
         Args:
             root: Absolute path to the target project's repo root.

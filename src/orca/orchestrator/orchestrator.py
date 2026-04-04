@@ -84,8 +84,8 @@ class Orchestrator:
         # Maps asyncio.Task -> (issue_id, tracking_id)
         self._in_flight: dict[asyncio.Task[WorkerOutcome], tuple[str, str]] = {}
         self._progress_sessions: set[str] = set()
-        # Maps issue_id -> (unblock_event, message_box) for blocked workers
-        self._blocked_workers: dict[str, tuple[asyncio.Event, list[str]]] = {}
+        # Maps issue_id -> (unblock_event, message_box) for waiting workers
+        self._waiting_workers: dict[str, tuple[asyncio.Event, list[str]]] = {}
         # Track used branch slugs to avoid collisions
         self._used_slugs: set[str] = set()
         for branch in self.branches.values():
@@ -178,7 +178,7 @@ class Orchestrator:
 
         Returns False if the issue is not currently blocked.
         """
-        entry = self._blocked_workers.get(issue_id)
+        entry = self._waiting_workers.get(issue_id)
         if entry is None:
             return False
         event, msg_box = entry
@@ -431,29 +431,29 @@ class Orchestrator:
         # Create unblock channel for this worker
         unblock_event = asyncio.Event()
         unblock_message: list[str] = []
-        self._blocked_workers[effect.issue_id] = (unblock_event, unblock_message)
+        self._waiting_workers[effect.issue_id] = (unblock_event, unblock_message)
 
         def _on_blocked() -> None:
-            from orca.engine.types import WorkerBlockedEvent
+            from orca.engine.types import WorkerWaitingEvent
 
             ts = self.now()
             self._state, _ = reduce(
                 self._config,
                 self._state,
-                WorkerBlockedEvent(issue_id=effect.issue_id, timestamp=ts),
+                WorkerWaitingEvent(issue_id=effect.issue_id, timestamp=ts),
                 self.generate_id,
                 self.now,
             )
             self.persistence.save(self._state)
 
         def _on_unblocked(message: str) -> None:
-            from orca.engine.types import WorkerUnblockedEvent
+            from orca.engine.types import WorkerResumedEvent
 
             ts = self.now()
             self._state, _ = reduce(
                 self._config,
                 self._state,
-                WorkerUnblockedEvent(issue_id=effect.issue_id, message=message, timestamp=ts),
+                WorkerResumedEvent(issue_id=effect.issue_id, message=message, timestamp=ts),
                 self.generate_id,
                 self.now,
             )
@@ -478,7 +478,7 @@ class Orchestrator:
                 on_unblocked=_on_unblocked,
             )
         finally:
-            self._blocked_workers.pop(effect.issue_id, None)
+            self._waiting_workers.pop(effect.issue_id, None)
             # Final scrollback save before killing the session
             try:
                 raw = tmux_session.capture_scrollback()

@@ -211,16 +211,16 @@ class CliAgentWorker:
                 try:
                     candidate = json.loads(result_path.read_text())
 
-                    # Check for built-in "blocked" outcome before validation
-                    if candidate.get("outcome") == "blocked" and unblock_event is not None:
-                        # Check session is still alive before entering blocked state
+                    # Check for built-in "waiting" outcome before validation
+                    if candidate.get("outcome") == "waiting" and unblock_event is not None:
+                        # Check session is still alive before entering waiting state
                         if not pty_session.alive:
-                            return WorkerFailure(error="session died while reporting blocked")
+                            return WorkerFailure(error="session died while reporting waiting")
                         result_path.unlink(missing_ok=True)
                         logger.info(
-                            "Worker blocked for issue %s — pausing timer",
+                            "Worker waiting for issue %s — pausing timer",
                             effect.issue_id,
-                            extra={"event": "worker_blocked", "issue_id": effect.issue_id},
+                            extra={"event": "worker_waiting", "issue_id": effect.issue_id},
                         )
                         if on_blocked is not None:
                             on_blocked()
@@ -229,15 +229,15 @@ class CliAgentWorker:
                         while True:
                             await asyncio.sleep(_POLL_INTERVAL)
                             if not pty_session.alive:
-                                return WorkerFailure(error="session died while blocked")
+                                return WorkerFailure(error="session died while waiting")
                             if unblock_event.is_set():
                                 unblock_event.clear()
                                 msg = unblock_message[0] if unblock_message else ""
                                 pty_session.send_keys(msg)
                                 logger.info(
-                                    "Worker unblocked for issue %s",
+                                    "Worker resumed for issue %s",
                                     effect.issue_id,
-                                    extra={"event": "worker_unblocked", "issue_id": effect.issue_id},
+                                    extra={"event": "worker_resumed", "issue_id": effect.issue_id},
                                 )
                                 if on_unblocked is not None:
                                     on_unblocked(msg)

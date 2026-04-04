@@ -25,10 +25,10 @@ from orca.engine.types import (
     OnTransition,
     State,
     StateMachineConfig,
-    WorkerBlockedEvent,
     WorkerFailedEvent,
     WorkerResultEvent,
-    WorkerUnblockedEvent,
+    WorkerResumedEvent,
+    WorkerWaitingEvent,
 )
 
 
@@ -52,10 +52,10 @@ def reduce(
         _handle_worker_result(config, new_state, event, effects, generate_id, ts)
     elif isinstance(event, WorkerFailedEvent):
         _handle_worker_failed(config, new_state, event, effects, ts)
-    elif isinstance(event, WorkerBlockedEvent):
-        _handle_worker_blocked(config, new_state, event, effects, ts)
-    elif isinstance(event, WorkerUnblockedEvent):
-        _handle_worker_unblocked(config, new_state, event, effects, ts)
+    elif isinstance(event, WorkerWaitingEvent):
+        _handle_worker_waiting(config, new_state, event, effects, ts)
+    elif isinstance(event, WorkerResumedEvent):
+        _handle_worker_resumed(config, new_state, event, effects, ts)
 
     return new_state, effects
 
@@ -413,10 +413,10 @@ def _handle_worker_failed(
     )
 
 
-def _handle_worker_blocked(
+def _handle_worker_waiting(
     config: StateMachineConfig,
     state: State,
-    event: WorkerBlockedEvent,
+    event: WorkerWaitingEvent,
     effects: list[Effect],
     ts: str,
 ) -> None:
@@ -438,13 +438,13 @@ def _handle_worker_blocked(
         )
         return
 
-    append_log(issue, event.timestamp, "worker_blocked", {})
+    append_log(issue, event.timestamp, "worker_waiting", {})
 
 
-def _handle_worker_unblocked(
+def _handle_worker_resumed(
     config: StateMachineConfig,
     state: State,
-    event: WorkerUnblockedEvent,
+    event: WorkerResumedEvent,
     effects: list[Effect],
     ts: str,
 ) -> None:
@@ -466,7 +466,7 @@ def _handle_worker_unblocked(
         )
         return
 
-    append_log(issue, event.timestamp, "worker_unblocked", {"message": event.message})
+    append_log(issue, event.timestamp, "worker_resumed", {"message": event.message})
 
 
 def _apply_transition(

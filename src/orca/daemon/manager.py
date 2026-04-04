@@ -542,7 +542,7 @@ class RunManager:
             msg = f"Run '{run_id}' has no orchestrator"
             raise ValueError(msg)
         if not run_info.orchestrator.unblock_worker(issue_id, message):
-            msg = f"Issue '{issue_id}' is not blocked in run '{run_id}'"
+            msg = f"Issue '{issue_id}' is not waiting in run '{run_id}'"
             raise ValueError(msg)
 
     def retry_issue(self, run_id: str, issue_id: str) -> None:
