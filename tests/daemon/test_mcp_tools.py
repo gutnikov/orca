@@ -50,6 +50,7 @@ class TestMcpToolRegistration:
             "orca_stop_run",
             "orca_drop_run",
             "orca_resume_run",
+            "orca_unblock_worker",
         }
         assert tool_names == expected
 
