@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -342,3 +343,196 @@ class TestParseProgress:
         scrollback = "\x1b[0m<!-- PROGRESS: 30 | Parsing files -->\x1b[0m"
         result = parse_progress(scrollback)
         assert result == (30, "Parsing files")
+
+
+@pytest.mark.asyncio()
+class TestWorkerBlocking:
+    """Tests for the blocked outcome detection and unblock mechanism."""
+
+    @pytest.fixture(autouse=True)
+    def _fast_poll(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import orca.orchestrator.worker as _mod
+
+        monkeypatch.setattr(_mod, "_POLL_INTERVAL", 0.05)
+        monkeypatch.setattr(_mod, "_RESULT_GRACE_PERIOD", 0.1)
+
+    async def test_blocked_outcome_pauses_and_unblocks(self, tmp_path: Path) -> None:
+        """Worker writes blocked, then gets unblocked, then writes real result."""
+        effect = _make_effect()
+        result_path = tmp_path / "result.json"
+        prompt_path = tmp_path / "prompt.md"
+        prompt_path.write_text("Do the thing")
+
+        unblock_event = asyncio.Event()
+        unblock_message: list[str] = []
+
+        pty = MagicMock()
+        pty.session_name = "mock-session"
+        pty.kill = MagicMock()
+        pty.close = MagicMock()
+        pty.send_keys = MagicMock(return_value=True)
+        type(pty).alive = property(lambda self: True)
+
+        async def _spawn(*args: Any, **kwargs: Any) -> None:
+            result_path.write_text(json.dumps({"outcome": "blocked"}))
+
+        pty.spawn = AsyncMock(side_effect=_spawn)
+
+        worker = CliAgentWorker(repo_root=tmp_path, kind_config=KIND_REGISTRY["claude-code"])
+
+        # Schedule unblock after a short delay
+        async def _delayed_unblock() -> None:
+            await asyncio.sleep(0.1)
+            # Write the real result before setting the event
+            result_path.write_text(json.dumps({"outcome": "done", "summary": "Finished"}))
+            unblock_message.clear()
+            unblock_message.append("PR merged, continue")
+            unblock_event.set()
+
+        task = asyncio.create_task(_delayed_unblock())
+
+        outcome = await worker.execute(
+            effect,
+            tmp_path,
+            result_path,
+            prompt_path,
+            pty_session=pty,
+            unblock_event=unblock_event,
+            unblock_message=unblock_message,
+        )
+
+        await task
+        assert isinstance(outcome, WorkerSuccess)
+        assert outcome.result["outcome"] == "done"
+        pty.send_keys.assert_called_once_with("PR merged, continue")
+
+    async def test_blocked_session_dies_returns_failure(self, tmp_path: Path) -> None:
+        """If session dies while blocked, return WorkerFailure."""
+        effect = _make_effect()
+        result_path = tmp_path / "result.json"
+        prompt_path = tmp_path / "prompt.md"
+        prompt_path.write_text("Do the thing")
+
+        unblock_event = asyncio.Event()
+        unblock_message: list[str] = []
+
+        alive_checks = 0
+
+        pty = MagicMock()
+        pty.session_name = "mock-session"
+        pty.kill = MagicMock()
+        pty.close = MagicMock()
+        pty.send_keys = MagicMock(return_value=True)
+
+        def _alive() -> bool:
+            nonlocal alive_checks
+            alive_checks += 1
+            # Alive for first 2 checks, then dies in blocked sub-loop
+            return alive_checks <= 2
+
+        type(pty).alive = property(lambda self: _alive())
+
+        async def _spawn(*args: Any, **kwargs: Any) -> None:
+            result_path.write_text(json.dumps({"outcome": "blocked"}))
+
+        pty.spawn = AsyncMock(side_effect=_spawn)
+
+        worker = CliAgentWorker(repo_root=tmp_path, kind_config=KIND_REGISTRY["claude-code"])
+        outcome = await worker.execute(
+            effect,
+            tmp_path,
+            result_path,
+            prompt_path,
+            pty_session=pty,
+            unblock_event=unblock_event,
+            unblock_message=unblock_message,
+        )
+
+        assert isinstance(outcome, WorkerFailure)
+        assert "blocked" in outcome.error
+
+    async def test_blocked_without_unblock_event_treated_as_stale(self, tmp_path: Path) -> None:
+        """Without unblock_event, blocked outcome is unknown -> stale -> deleted -> timeout."""
+        effect = _make_effect()
+        result_path = tmp_path / "result.json"
+        prompt_path = tmp_path / "prompt.md"
+        prompt_path.write_text("Do the thing")
+
+        pty = _make_polling_pty(alive_count=9999)
+
+        async def _spawn(*args: Any, **kwargs: Any) -> None:
+            result_path.write_text(json.dumps({"outcome": "blocked"}))
+
+        pty.spawn = AsyncMock(side_effect=_spawn)
+
+        worker = CliAgentWorker(repo_root=tmp_path, kind_config=KIND_REGISTRY["claude-code"])
+        outcome = await worker.execute(
+            effect,
+            tmp_path,
+            result_path,
+            prompt_path,
+            inactivity_timeout=0,
+            pty_session=pty,
+        )
+
+        assert isinstance(outcome, WorkerFailure)
+
+    async def test_on_blocked_callback_called(self, tmp_path: Path) -> None:
+        """on_blocked callback is called when worker enters blocked state."""
+        effect = _make_effect()
+        result_path = tmp_path / "result.json"
+        prompt_path = tmp_path / "prompt.md"
+        prompt_path.write_text("Do the thing")
+
+        unblock_event = asyncio.Event()
+        unblock_message: list[str] = []
+        blocked_called = False
+        unblocked_called_with: str | None = None
+
+        def _on_blocked() -> None:
+            nonlocal blocked_called
+            blocked_called = True
+
+        def _on_unblocked(msg: str) -> None:
+            nonlocal unblocked_called_with
+            unblocked_called_with = msg
+
+        pty = MagicMock()
+        pty.session_name = "mock-session"
+        pty.kill = MagicMock()
+        pty.close = MagicMock()
+        pty.send_keys = MagicMock(return_value=True)
+        type(pty).alive = property(lambda self: True)
+
+        async def _spawn(*args: Any, **kwargs: Any) -> None:
+            result_path.write_text(json.dumps({"outcome": "blocked"}))
+
+        pty.spawn = AsyncMock(side_effect=_spawn)
+
+        worker = CliAgentWorker(repo_root=tmp_path, kind_config=KIND_REGISTRY["claude-code"])
+
+        async def _delayed_unblock() -> None:
+            await asyncio.sleep(0.1)
+            result_path.write_text(json.dumps({"outcome": "done", "summary": "ok"}))
+            unblock_message.clear()
+            unblock_message.append("go")
+            unblock_event.set()
+
+        task = asyncio.create_task(_delayed_unblock())
+
+        outcome = await worker.execute(
+            effect,
+            tmp_path,
+            result_path,
+            prompt_path,
+            pty_session=pty,
+            unblock_event=unblock_event,
+            unblock_message=unblock_message,
+            on_blocked=_on_blocked,
+            on_unblocked=_on_unblocked,
+        )
+
+        await task
+        assert isinstance(outcome, WorkerSuccess)
+        assert blocked_called is True
+        assert unblocked_called_with == "go"

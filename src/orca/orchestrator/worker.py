@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol
@@ -72,6 +73,10 @@ class Worker(Protocol):
         session_manifest: SessionManifest | None = None,
         session_id: str | None = None,
         run_context: dict[str, Any] | None = None,
+        unblock_event: asyncio.Event | None = None,
+        unblock_message: list[str] | None = None,
+        on_blocked: Callable[[], None] | None = None,
+        on_unblocked: Callable[[str], None] | None = None,
     ) -> WorkerOutcome: ...
 
 
@@ -132,6 +137,10 @@ class CliAgentWorker:
         session_manifest: SessionManifest | None = None,
         session_id: str | None = None,
         run_context: dict[str, Any] | None = None,
+        unblock_event: asyncio.Event | None = None,
+        unblock_message: list[str] | None = None,
+        on_blocked: Callable[[], None] | None = None,
+        on_unblocked: Callable[[str], None] | None = None,
     ) -> WorkerOutcome:
         assert pty_session is not None, "pty_session is required"
 
@@ -201,6 +210,41 @@ class CliAgentWorker:
             if result_detected_at is None and result_path.exists():
                 try:
                     candidate = json.loads(result_path.read_text())
+
+                    # Check for built-in "blocked" outcome before validation
+                    if candidate.get("outcome") == "blocked" and unblock_event is not None:
+                        # Check session is still alive before entering blocked state
+                        if not pty_session.alive:
+                            return WorkerFailure(error="session died while reporting blocked")
+                        result_path.unlink(missing_ok=True)
+                        logger.info(
+                            "Worker blocked for issue %s — pausing timer",
+                            effect.issue_id,
+                            extra={"event": "worker_blocked", "issue_id": effect.issue_id},
+                        )
+                        if on_blocked is not None:
+                            on_blocked()
+
+                        # Blocked sub-loop: wait for unblock or session death
+                        while True:
+                            await asyncio.sleep(_POLL_INTERVAL)
+                            if not pty_session.alive:
+                                return WorkerFailure(error="session died while blocked")
+                            if unblock_event.is_set():
+                                unblock_event.clear()
+                                msg = unblock_message[0] if unblock_message else ""
+                                pty_session.send_keys(msg)
+                                logger.info(
+                                    "Worker unblocked for issue %s",
+                                    effect.issue_id,
+                                    extra={"event": "worker_unblocked", "issue_id": effect.issue_id},
+                                )
+                                if on_unblocked is not None:
+                                    on_unblocked(msg)
+                                break
+                        # Resume normal polling — do NOT increment elapsed for blocked time
+                        continue
+
                     error = validate_result(candidate, effect.result_format)
                     if error is None:
                         result_detected_at = elapsed
