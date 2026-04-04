@@ -15,7 +15,7 @@ Orca orchestrates fleets of AI agents that decompose, plan, build, and merge cod
 - **Multiple worker backends** — Claude Code and OpenCode, with per-worker model and args
 - **Typed issue flows** — different issue types with independent state machines
 - **Concurrent runs** — multiple orca processes in the same repo via `-b`/`--base`
-- **Human-in-the-loop** — Slack integration for agent-to-human conversations mid-workflow
+- **Worker blocking** — workers can signal `waiting` to pause their timer until manually unblocked
 - **Live TUI** — progress tree, session terminals, result badges, insights monitoring
 - **Headless mode** — run without TUI for CI or background execution
 
@@ -181,32 +181,28 @@ states:
     max_workers: 1    # one at a time
 ```
 
-**Worker-driven HITL** — any worker can talk to users directly using communication MCP tools (Slack, email, etc.). Instruct the worker in its prompt to ask when blocked, and set a longer timeout to accommodate human response time:
+**Worker blocking** — any worker can write `{"outcome": "waiting"}` to pause its session and inactivity timer until manually unblocked. This is a built-in outcome (like `done` and `failed`) — no need to declare it in the workflow config.
 
-```yaml
-states:
-  implementing:
-    worker:
-      kind: claude-code
-      prompt: prompts/implement.md
-      timeout: 3600                  # 60 min — allows human interaction
-      result_format:
-        outcome:
-          type: enum
-          values: [done, blocked]
-    on:
-      done: applying
-      blocked: planning
+When a worker writes `waiting`, the orchestrator:
+- Keeps the tmux session alive (preserving full conversation context)
+- Pauses the inactivity timer
+- Waits for an explicit unblock command
+
+Unblock via CLI or MCP:
+
+```bash
+orca unblock <run_id> <issue_id> -m "PR merged, you can continue"
 ```
 
-In the worker prompt:
-```
-If you need clarification from the user, use the slack_start_conversation
-and slack_wait_for_reply tools to ask them directly. Do not report blocked
-for questions the user can answer.
-```
+The message is pushed into the worker's live session via `tmux send-keys`, and normal execution resumes. Workers can block and unblock multiple times in a single session.
 
-Workers discover MCP tools from the project's `.mcp.json` — orca doesn't need to know which communication channel is used.
+Instruct workers in their prompts to write `waiting` when they need external input:
+
+```
+If you need something outside your control (e.g., a PR to be merged,
+a dependency to be deployed), write {"outcome": "waiting"} to result.json
+with a clear explanation of what you're waiting for.
+```
 
 **Timeouts and retries:**
 
@@ -283,8 +279,6 @@ types:
 The flat format (`issue:` / `states:` / `initial:` at the top level) is still supported and recommended for single-type workflows.
 
 ## Integrations
-
-**Slack** — Workers can conduct multi-turn Slack DM conversations during execution using the `slack-hitl` MCP server. Configure it in your project's `.mcp.json` and instruct workers in their prompts to use the tools when they need human input.
 
 **Insights** — pass `--insights` to spawn a monitoring agent that watches the pipeline for errors, loops, and slow workers, surfacing findings as interactive entries in the TUI.
 

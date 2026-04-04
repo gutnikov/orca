@@ -32,6 +32,8 @@ Key types: `StateMachineConfig`, `State`, `Event` (Create/Advance/WorkerResult/W
 
 Built-in states: `done` (success terminal) and `failed` (triggers worker failure/retry semantics). Never defined in `states:` block — always available as transition targets.
 
+Built-in outcome: `waiting` — worker writes `{"outcome": "waiting"}` to pause its session and timer until manually unblocked via `orca unblock`. Intercepted by the orchestrator before result validation. Not declared in workflow configs.
+
 Worker config in `orca.yml`: `kind` (only "claude-code"), `prompt` (Jinja2 template path), optional `timeout`.
 
 ## CI
