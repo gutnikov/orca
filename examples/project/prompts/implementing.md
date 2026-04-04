@@ -64,6 +64,18 @@ Before committing:
 If the plan is insufficient or you need files outside your scope, report
 `blocked` with a clear explanation.
 
+### If You Need User Clarification
+
+If you are blocked on a question that only the user can answer:
+
+1. Use the `slack_start_conversation` tool to open a DM with the user
+2. Explain the situation clearly, referencing specific code or decisions
+3. Use `slack_wait_for_reply` to wait for their response
+4. If the answer is unclear, ask follow-up questions
+5. Once you have a clear answer, continue implementing
+
+Do NOT report `blocked` for questions the user can answer — ask them directly.
+
 ## Output
 
 Write the result JSON to `{{ result_path }}`:

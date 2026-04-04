@@ -81,34 +81,26 @@ states:
       needs_rescope: scoping           # loop back if planning discovers the issue is too big
 
   # Stage 3: Implement the feature following the plan, making all tests pass.
-  # The worker can request user clarification via Slack using `needs_feedback`.
+  # If the worker needs user clarification, it uses Slack tools directly.
   implementing:
     worker:
       kind: claude-code
       prompt: prompts/implementing.md
-      timeout: 1200                    # 20 minutes — implementation takes longer
+      timeout: 3600                    # 60 minutes — allows time for human interaction
       result_format:
         outcome:
           type: enum
-          values: [done, blocked, needs_feedback]
+          values: [done, blocked]
           description: "Whether implementation is complete"
           values_description:
             done: "All tests pass, pre-commit hooks pass, changes committed"
             blocked: "Cannot proceed — plan is insufficient or issue is unclear"
-            needs_feedback: "Blocked on a question — need clarification from user via Slack"
         summary:
           type: string
           description: "Brief summary of what was implemented or what is blocking"
-        feedback_questions:
-          type: string
-          description: "Questions for the user (only when requesting feedback)"
-          required_when: [needs_feedback]
     on:
       done: applying
       blocked: planning                # loop back to revise the plan
-      # Note: needs_feedback has no on: rule — it's a reserved outcome.
-      # The orchestrator spawns a feedback agent to talk to the user via
-      # Slack, then re-dispatches this worker with the answers.
 
   # Stage 4: Merge the worktree branch into the base branch.
   # max_workers: 1 ensures merges are serialized (no parallel merges).
