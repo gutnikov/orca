@@ -83,3 +83,9 @@ class DaemonClient:
 
     async def retry_issue(self, run_id: str, issue_id: str) -> dict[str, Any]:
         return await self._post_json(f"/api/runs/{run_id}/retry/{issue_id}")
+
+    async def unblock_worker(self, run_id: str, issue_id: str, message: str) -> dict[str, Any]:
+        return await self._post_json(
+            f"/api/runs/{run_id}/unblock/{issue_id}",
+            {"message": message},
+        )

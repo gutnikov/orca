@@ -194,6 +194,30 @@ async def _retry_issue(request: Request) -> JSONResponse:
     return JSONResponse({"status": "retry requested"})
 
 
+async def _unblock_worker(request: Request) -> JSONResponse:
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    issue_id: str = request.path_params["issue_id"]
+
+    try:
+        body: dict[str, Any] = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+    message = body.get("message")
+    if not message:
+        return JSONResponse({"error": "message is required"}, status_code=400)
+
+    try:
+        manager.unblock_worker(run_id, issue_id, message)
+    except ValueError as exc:
+        error_msg = str(exc)
+        status = 404 if "not found" in error_msg else 400
+        return JSONResponse({"error": error_msg}, status_code=status)
+
+    return JSONResponse({"status": "ok"})
+
+
 async def _hot_session(request: Request) -> JSONResponse:
     manager: RunManager = request.app.state.manager
     run_id: str = request.path_params["run_id"]
@@ -234,6 +258,7 @@ def create_app(manager: RunManager) -> Starlette:
         Route("/api/runs/{run_id:path}/resume", _resume_run, methods=["POST"]),
         Route("/api/runs/{run_id:path}/drop", _drop_run, methods=["POST"]),
         Route("/api/runs/{run_id:path}/retry/{issue_id}", _retry_issue, methods=["POST"]),
+        Route("/api/runs/{run_id:path}/unblock/{issue_id}", _unblock_worker, methods=["POST"]),
         Route("/api/runs/{run_id:path}/hot-session", _hot_session, methods=["POST"]),
         Route("/api/runs/{run_id:path}", _get_run, methods=["GET"]),
     ]

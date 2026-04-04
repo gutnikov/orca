@@ -60,3 +60,20 @@ class TestRetryIssue:
     def test_not_found(self, client: TestClient) -> None:
         resp = client.post("/api/runs/nonexistent:default/retry/abc")
         assert resp.status_code == 404
+
+
+class TestUnblockWorker:
+    def test_run_not_found(self, client: TestClient) -> None:
+        resp = client.post(
+            "/api/runs/nonexistent:default/unblock/issue-1",
+            json={"message": "hello"},
+        )
+        assert resp.status_code == 404
+
+    def test_missing_message(self, client: TestClient) -> None:
+        resp = client.post(
+            "/api/runs/nonexistent:default/unblock/issue-1",
+            json={},
+        )
+        assert resp.status_code == 400
+        assert "message" in resp.json()["error"]

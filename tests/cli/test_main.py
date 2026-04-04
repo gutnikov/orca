@@ -112,3 +112,22 @@ class TestCliDispatch:
         args = parser.parse_args(["--root", "/tmp/myrepo", "daemon", "status"])
         assert args.root == Path("/tmp/myrepo")
         assert args.subcommand == "daemon"
+
+
+class TestUnblockParser:
+    def test_parser_accepts_unblock(self) -> None:
+        from orca.cli.main import build_parser
+
+        parser = build_parser()
+        args = parser.parse_args(["unblock", "my-run:default", "issue-1", "-m", "PR merged"])
+        assert args.subcommand == "unblock"
+        assert args.run_id == "my-run:default"
+        assert args.issue_id == "issue-1"
+        assert args.message == "PR merged"
+
+    def test_parser_requires_message(self) -> None:
+        from orca.cli.main import build_parser
+
+        parser = build_parser()
+        with pytest.raises(SystemExit):
+            parser.parse_args(["unblock", "my-run:default", "issue-1"])

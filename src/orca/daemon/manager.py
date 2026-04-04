@@ -532,6 +532,19 @@ class RunManager:
             return ""
         return run_info.orchestrator.get_session_log(tid)
 
+    def unblock_worker(self, run_id: str, issue_id: str, message: str) -> None:
+        """Unblock a blocked worker in a run."""
+        run_info = self._runs.get(run_id)
+        if run_info is None:
+            msg = f"Run '{run_id}' not found"
+            raise ValueError(msg)
+        if run_info.orchestrator is None:
+            msg = f"Run '{run_id}' has no orchestrator"
+            raise ValueError(msg)
+        if not run_info.orchestrator.unblock_worker(issue_id, message):
+            msg = f"Issue '{issue_id}' is not blocked in run '{run_id}'"
+            raise ValueError(msg)
+
     def retry_issue(self, run_id: str, issue_id: str) -> None:
         """Retry a failed issue. If the orchestrator loop has finished, restart it."""
         run_info = self._runs.get(run_id)

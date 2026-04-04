@@ -167,6 +167,20 @@ def create_mcp_server() -> FastMCP:
         result = await _get_client(root).resume_run(run_id)
         return json.dumps(result)
 
+    async def orca_unblock_worker(root: str, run_id: str, issue_id: str, message: str) -> str:
+        """Unblock a blocked worker by sending it a message.
+
+        Args:
+            root: Absolute path to the target project's repo root.
+            run_id: The run identifier.
+            issue_id: The issue identifier of the blocked worker.
+            message: Message to send to the worker explaining what changed.
+
+        Returns JSON with status, or an error message.
+        """
+        result = await _get_client(root).unblock_worker(run_id, issue_id, message)
+        return json.dumps(result)
+
     server.add_tool(orca_daemon_status, name="orca_daemon_status")
     server.add_tool(orca_start_run, name="orca_start_run")
     server.add_tool(orca_list_runs, name="orca_list_runs")
@@ -178,5 +192,6 @@ def create_mcp_server() -> FastMCP:
     server.add_tool(orca_stop_run, name="orca_stop_run")
     server.add_tool(orca_drop_run, name="orca_drop_run")
     server.add_tool(orca_resume_run, name="orca_resume_run")
+    server.add_tool(orca_unblock_worker, name="orca_unblock_worker")
 
     return server

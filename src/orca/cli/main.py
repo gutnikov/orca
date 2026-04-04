@@ -77,6 +77,12 @@ def build_parser() -> argparse.ArgumentParser:
     logs_parser.add_argument("issue_id", type=str, nargs="?", default=None)
     logs_parser.add_argument("--tail", type=int, default=100)
 
+    # orca unblock <run_id> <issue_id> -m "message"
+    unblock_parser = sub.add_parser("unblock", help="Unblock a blocked worker")
+    unblock_parser.add_argument("run_id", type=str)
+    unblock_parser.add_argument("issue_id", type=str)
+    unblock_parser.add_argument("-m", "--message", type=str, required=True, help="Message to send to the worker")
+
     return parser
 
 
@@ -137,6 +143,11 @@ def main() -> None:
         from orca.cli.list_cmd import logs_command
 
         logs_command(args)  # args.root already in args
+
+    elif args.subcommand == "unblock":
+        from orca.cli.unblock_cmd import unblock_command
+
+        unblock_command(args.run_id, args.issue_id, args.message, root=args.root)
 
     else:
         parser.print_help()
