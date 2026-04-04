@@ -25,8 +25,10 @@ from orca.engine.types import (
     OnTransition,
     State,
     StateMachineConfig,
+    WorkerBlockedEvent,
     WorkerFailedEvent,
     WorkerResultEvent,
+    WorkerUnblockedEvent,
 )
 
 
@@ -50,6 +52,10 @@ def reduce(
         _handle_worker_result(config, new_state, event, effects, generate_id, ts)
     elif isinstance(event, WorkerFailedEvent):
         _handle_worker_failed(config, new_state, event, effects, ts)
+    elif isinstance(event, WorkerBlockedEvent):
+        _handle_worker_blocked(config, new_state, event, effects, ts)
+    elif isinstance(event, WorkerUnblockedEvent):
+        _handle_worker_unblocked(config, new_state, event, effects, ts)
 
     return new_state, effects
 
@@ -405,6 +411,62 @@ def _handle_worker_failed(
             issue=build_issue_context(state, event.issue_id),
         )
     )
+
+
+def _handle_worker_blocked(
+    config: StateMachineConfig,
+    state: State,
+    event: WorkerBlockedEvent,
+    effects: list[Effect],
+    ts: str,
+) -> None:
+    if event.issue_id not in state.issues:
+        effects.append(ErrorEffect(issue_id=event.issue_id, message=f"Issue '{event.issue_id}' does not exist"))
+        return
+
+    issue = state.issues[event.issue_id]
+
+    if issue.state == "done":
+        effects.append(
+            ErrorEffect(issue_id=event.issue_id, message=f"Issue '{event.issue_id}' is in terminal state 'done'")
+        )
+        return
+
+    if not issue.worker_active:
+        effects.append(
+            ErrorEffect(issue_id=event.issue_id, message=f"Issue '{event.issue_id}' has worker_active=False")
+        )
+        return
+
+    append_log(issue, event.timestamp, "worker_blocked", {})
+
+
+def _handle_worker_unblocked(
+    config: StateMachineConfig,
+    state: State,
+    event: WorkerUnblockedEvent,
+    effects: list[Effect],
+    ts: str,
+) -> None:
+    if event.issue_id not in state.issues:
+        effects.append(ErrorEffect(issue_id=event.issue_id, message=f"Issue '{event.issue_id}' does not exist"))
+        return
+
+    issue = state.issues[event.issue_id]
+
+    if issue.state == "done":
+        effects.append(
+            ErrorEffect(issue_id=event.issue_id, message=f"Issue '{event.issue_id}' is in terminal state 'done'")
+        )
+        return
+
+    if not issue.worker_active:
+        effects.append(
+            ErrorEffect(issue_id=event.issue_id, message=f"Issue '{event.issue_id}' has worker_active=False")
+        )
+        return
+
+    append_log(issue, event.timestamp, "worker_unblocked", {"message": event.message})
 
 
 def _apply_transition(
