@@ -181,7 +181,7 @@ states:
     max_workers: 1    # one at a time
 ```
 
-**User feedback via Slack** — any worker can pause and ask the user a question. Add `needs_feedback` to a state's outcome values and the orchestrator handles the rest: it spawns a feedback agent that conducts a multi-turn Slack conversation, then re-dispatches the original worker with the answers. No `on:` rule needed — `needs_feedback` is a reserved outcome.
+**Worker-driven HITL** — any worker can talk to users directly using communication MCP tools (Slack, email, etc.). Instruct the worker in its prompt to ask when blocked, and set a longer timeout to accommodate human response time:
 
 ```yaml
 states:
@@ -189,24 +189,24 @@ states:
     worker:
       kind: claude-code
       prompt: prompts/implement.md
+      timeout: 3600                  # 60 min — allows human interaction
       result_format:
         outcome:
           type: enum
-          values: [done, blocked, needs_feedback]
-          values_description:
-            done: "All tests pass, changes committed"
-            blocked: "Cannot proceed"
-            needs_feedback: "Need clarification from user"
-        feedback_questions:
-          type: string
-          required_when: [needs_feedback]
+          values: [done, blocked]
     on:
       done: applying
       blocked: planning
-      # needs_feedback has no on: rule — handled automatically
 ```
 
-Requires `integrations.slack` in `orca.yml` (see Integrations below). Each feedback round counts toward `max_worker_retries`. The re-dispatched worker sees `{{ issue.feedback_context }}` in its prompt template.
+In the worker prompt:
+```
+If you need clarification from the user, use the slack_start_conversation
+and slack_wait_for_reply tools to ask them directly. Do not report blocked
+for questions the user can answer.
+```
+
+Workers discover MCP tools from the project's `.mcp.json` — orca doesn't need to know which communication channel is used.
 
 **Timeouts and retries:**
 
@@ -284,20 +284,7 @@ The flat format (`issue:` / `states:` / `initial:` at the top level) is still su
 
 ## Integrations
 
-**Slack (Human-in-the-loop)** — Orca includes a built-in MCP server that lets workers conduct multi-turn Slack DM conversations with humans during workflow execution. Add to your `orca.yml`:
-
-```yaml
-integrations:
-  slack:
-    bot_token_env: SLACK_BOT_TOKEN
-    app_token_env: SLACK_APP_TOKEN
-```
-
-Your Slack app needs Bot Token Scopes (`chat:write`, `im:write`) and an App-Level Token with `connections:write` (Socket Mode).
-
-Slack powers two features:
-- **Direct HITL** — workers call `slack_start_conversation` / `slack_wait_for_reply` tools directly in their prompt
-- **`needs_feedback` outcome** — any worker can return `needs_feedback` to pause and trigger an automated feedback agent that talks to the user, then re-dispatches the worker with answers (see Workflow Features above)
+**Slack** — Workers can conduct multi-turn Slack DM conversations during execution using the `slack-hitl` MCP server. Configure it in your project's `.mcp.json` and instruct workers in their prompts to use the tools when they need human input.
 
 **Insights** — pass `--insights` to spawn a monitoring agent that watches the pipeline for errors, loops, and slow workers, surfacing findings as interactive entries in the TUI.
 
