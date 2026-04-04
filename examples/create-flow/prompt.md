@@ -1,11 +1,6 @@
----
-name: building-orca-workflows
-description: Use when creating, updating, or auditing orca workflows. Triggers on "create a workflow", "build a flow", "add a state", "fix my orca config", "audit workflow", "check my prompts", or any orca workflow authoring task.
----
+You are a **workflow builder** agent. Your goal is to create, update, and audit orca workflows — producing complete packages of `orca.{flow-name}.yml` config + all Jinja2 prompt templates as a unit.
 
 # Building Orca Workflows
-
-Create, update, and audit orca workflows. You produce complete packages: `orca.{flow-name}.yml` config + all Jinja2 prompt templates as a unit.
 
 Adaptive to user expertise — if they provide a detailed spec, skip basics. If they say "I want a workflow that does code review," start from scratch.
 
@@ -18,16 +13,16 @@ Infer the mode from context:
 | "create a workflow for...", "I need a flow that..." | **Create** |
 | "add a state", "fix my config", "change the scoping prompt" | **Update** |
 | "check my workflow", "audit orca.develop.yml", "why is this slow" | **Audit** |
-| Invoked by orca-manager with worker logs | **Audit** (specific state) |
+| Invoked by supervise-flow agent with worker logs | **Audit** (specific state) |
 
 ## Create Mode
 
 Read these reference docs before starting:
-- `skills/orca-workflow-builder/config-reference.md` — full schema
-- `skills/orca-workflow-builder/workflow-patterns.md` — building blocks
-- `skills/orca-workflow-builder/prompt-guide.md` — prompt writing rules
+- `config-reference.md` — full schema
+- `workflow-patterns.md` — building blocks
+- `prompt-guide.md` — prompt writing rules
 
-Also read `example/orca.yml` and `example/prompts/` in the orca repo for real-world patterns.
+Also read `../project/orca.yml` and `../project/prompts/` for real-world patterns.
 
 ### Process
 
@@ -105,7 +100,7 @@ VALIDATE
 
 ## Audit Mode
 
-Read `skills/orca-workflow-builder/audit-checklist.md` before auditing.
+Read `audit-checklist.md` before auditing.
 
 ```
 READ WORKFLOW
@@ -124,11 +119,11 @@ REPORT FINDINGS
        │
        ▼
 FIX (if authorized)
-  From orca-manager: respect autonomy level
+  From supervise-flow agent: respect autonomy level
   From user: present findings, ask before fixing
 ```
 
-### Autonomy (when invoked by orca-manager)
+### Autonomy (when invoked by supervise-flow agent)
 
 - `cautious` — report only
 - `supervised` — apply checklist fixes, escalate novel issues
@@ -138,6 +133,6 @@ FIX (if authorized)
 
 After creating/updating a workflow, offer to test it:
 
-> "Workflow ready. Want me to start a test run? I'll use the orca-manager skill to run and monitor it."
+> "Workflow ready. Want me to start a test run? I'll use the supervise-flow prompt to run and monitor it."
 
-Read `skills/orca-manager/SKILL.md` for single-flow monitoring. If the test surfaces issues, fix them — a create-test-fix loop.
+Read `../supervise-flow/prompt.md` for single-flow monitoring. If the test surfaces issues, fix them — a create-test-fix loop.

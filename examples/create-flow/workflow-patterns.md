@@ -2,7 +2,7 @@
 
 Reusable building blocks for orca workflows. Compose these into complete workflows. Each pattern shows when to use it, a config snippet, and notes.
 
-Also read `example/orca.yml` and `example/prompts/` in the orca repo for a complete real-world workflow.
+Also read `../project/orca.yml` and `../project/prompts/` for a complete real-world workflow.
 
 ## Sequential Pipeline
 
