@@ -213,6 +213,7 @@ class WorkerFailedEvent:
 @dataclass(frozen=True)
 class WorkerWaitingEvent:
     issue_id: str
+    reason: str
     timestamp: str
 
 

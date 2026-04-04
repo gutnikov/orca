@@ -438,7 +438,7 @@ def _handle_worker_waiting(
         )
         return
 
-    append_log(issue, event.timestamp, "worker_waiting", {})
+    append_log(issue, event.timestamp, "worker_waiting", {"reason": event.reason})
 
 
 def _handle_worker_resumed(

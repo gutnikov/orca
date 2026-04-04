@@ -75,7 +75,7 @@ class Worker(Protocol):
         run_context: dict[str, Any] | None = None,
         unblock_event: asyncio.Event | None = None,
         unblock_message: list[str] | None = None,
-        on_blocked: Callable[[], None] | None = None,
+        on_blocked: Callable[[str], None] | None = None,
         on_unblocked: Callable[[str], None] | None = None,
     ) -> WorkerOutcome: ...
 
@@ -139,7 +139,7 @@ class CliAgentWorker:
         run_context: dict[str, Any] | None = None,
         unblock_event: asyncio.Event | None = None,
         unblock_message: list[str] | None = None,
-        on_blocked: Callable[[], None] | None = None,
+        on_blocked: Callable[[str], None] | None = None,
         on_unblocked: Callable[[str], None] | None = None,
     ) -> WorkerOutcome:
         assert pty_session is not None, "pty_session is required"
@@ -222,8 +222,9 @@ class CliAgentWorker:
                             effect.issue_id,
                             extra={"event": "worker_waiting", "issue_id": effect.issue_id},
                         )
+                        reason = candidate.get("reason", "")
                         if on_blocked is not None:
-                            on_blocked()
+                            on_blocked(reason)
 
                         # Blocked sub-loop: wait for unblock or session death
                         while True:

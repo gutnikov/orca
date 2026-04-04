@@ -433,14 +433,14 @@ class Orchestrator:
         unblock_message: list[str] = []
         self._waiting_workers[effect.issue_id] = (unblock_event, unblock_message)
 
-        def _on_blocked() -> None:
+        def _on_blocked(reason: str) -> None:
             from orca.engine.types import WorkerWaitingEvent
 
             ts = self.now()
             self._state, _ = reduce(
                 self._config,
                 self._state,
-                WorkerWaitingEvent(issue_id=effect.issue_id, timestamp=ts),
+                WorkerWaitingEvent(issue_id=effect.issue_id, reason=reason, timestamp=ts),
                 self.generate_id,
                 self.now,
             )

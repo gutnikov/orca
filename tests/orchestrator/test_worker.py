@@ -489,7 +489,7 @@ class TestWorkerBlocking:
         blocked_called = False
         unblocked_called_with: str | None = None
 
-        def _on_blocked() -> None:
+        def _on_blocked(reason: str) -> None:
             nonlocal blocked_called
             blocked_called = True
 

@@ -535,12 +535,12 @@ class TestDispatchWorkerEffectIssueType:
 
 class TestBlockingEventTypes:
     def test_worker_waiting_event_fields(self) -> None:
-        e = WorkerWaitingEvent(issue_id="ISS-1", timestamp="2026-04-04T10:00:00Z")
+        e = WorkerWaitingEvent(issue_id="ISS-1", reason="waiting for deploy", timestamp="2026-04-04T10:00:00Z")
         assert e.issue_id == "ISS-1"
         assert e.timestamp == "2026-04-04T10:00:00Z"
 
     def test_worker_waiting_event_is_frozen(self) -> None:
-        e = WorkerWaitingEvent(issue_id="ISS-1", timestamp="2026-04-04T10:00:00Z")
+        e = WorkerWaitingEvent(issue_id="ISS-1", reason="waiting for deploy", timestamp="2026-04-04T10:00:00Z")
         with pytest.raises((AttributeError, TypeError)):
             e.issue_id = "OTHER"  # type: ignore[misc]
 

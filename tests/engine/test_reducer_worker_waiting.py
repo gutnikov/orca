@@ -48,7 +48,7 @@ class TestWorkerWaiting:
         state, effects = reduce(
             config,
             state,
-            WorkerWaitingEvent(issue_id="A", timestamp="t1"),
+            WorkerWaitingEvent(issue_id="A", reason="waiting for deploy", timestamp="t1"),
             gen,
             _clock(),
         )
@@ -66,7 +66,7 @@ class TestWorkerWaiting:
         state, effects = reduce(
             config,
             state,
-            WorkerWaitingEvent(issue_id="NOPE", timestamp="t0"),
+            WorkerWaitingEvent(issue_id="NOPE", reason="", timestamp="t0"),
             gen,
             _clock(),
         )
@@ -91,7 +91,7 @@ class TestWorkerWaiting:
         state, effects = reduce(
             config,
             state,
-            WorkerWaitingEvent(issue_id="A", timestamp="t1"),
+            WorkerWaitingEvent(issue_id="A", reason="waiting for deploy", timestamp="t1"),
             gen,
             _clock(),
         )
@@ -116,7 +116,7 @@ class TestWorkerWaiting:
         state, effects = reduce(
             config,
             state,
-            WorkerWaitingEvent(issue_id="A", timestamp="t1"),
+            WorkerWaitingEvent(issue_id="A", reason="waiting for deploy", timestamp="t1"),
             gen,
             _clock(),
         )
