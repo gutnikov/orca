@@ -528,3 +528,47 @@ class TestDispatchWorkerEffectIssueType:
             issue={},
         )
         assert e.issue_type == "task"
+
+
+class TestBlockingEventTypes:
+    def test_worker_blocked_event_fields(self) -> None:
+        from orca.engine.types import WorkerBlockedEvent
+
+        e = WorkerBlockedEvent(issue_id="ISS-1", timestamp="2026-04-04T10:00:00Z")
+        assert e.issue_id == "ISS-1"
+        assert e.timestamp == "2026-04-04T10:00:00Z"
+
+    def test_worker_blocked_event_is_frozen(self) -> None:
+        import pytest
+
+        from orca.engine.types import WorkerBlockedEvent
+
+        e = WorkerBlockedEvent(issue_id="ISS-1", timestamp="2026-04-04T10:00:00Z")
+        with pytest.raises((AttributeError, TypeError)):
+            e.issue_id = "OTHER"  # type: ignore[misc]
+
+    def test_worker_unblocked_event_fields(self) -> None:
+        from orca.engine.types import WorkerUnblockedEvent
+
+        e = WorkerUnblockedEvent(issue_id="ISS-1", message="ready to proceed", timestamp="2026-04-04T11:00:00Z")
+        assert e.issue_id == "ISS-1"
+        assert e.message == "ready to proceed"
+        assert e.timestamp == "2026-04-04T11:00:00Z"
+
+    def test_worker_unblocked_event_is_frozen(self) -> None:
+        import pytest
+
+        from orca.engine.types import WorkerUnblockedEvent
+
+        e = WorkerUnblockedEvent(issue_id="ISS-1", message="ok", timestamp="2026-04-04T11:00:00Z")
+        with pytest.raises((AttributeError, TypeError)):
+            e.issue_id = "OTHER"  # type: ignore[misc]
+
+    def test_both_types_in_event_union(self) -> None:
+        import typing
+
+        from orca.engine.types import Event, WorkerBlockedEvent, WorkerUnblockedEvent
+
+        args = typing.get_args(Event)
+        assert WorkerBlockedEvent in args
+        assert WorkerUnblockedEvent in args

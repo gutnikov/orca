@@ -210,7 +210,20 @@ class WorkerFailedEvent:
     timestamp: str
 
 
-Event = CreateEvent | AdvanceEvent | WorkerResultEvent | WorkerFailedEvent
+@dataclass(frozen=True)
+class WorkerBlockedEvent:
+    issue_id: str
+    timestamp: str
+
+
+@dataclass(frozen=True)
+class WorkerUnblockedEvent:
+    issue_id: str
+    message: str
+    timestamp: str
+
+
+Event = CreateEvent | AdvanceEvent | WorkerResultEvent | WorkerFailedEvent | WorkerBlockedEvent | WorkerUnblockedEvent
 
 
 # --- Effects (frozen) ---
