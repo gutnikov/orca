@@ -172,37 +172,3 @@ states:
 
 initial: todo
 """
-
-
-@pytest.fixture()
-def feedback_config_yaml() -> str:
-    return """\
-issue:
-  fields:
-    title:
-      type: string
-      description: Issue title
-
-states:
-  implementing:
-    worker:
-      kind: claude-code
-      prompt: prompts/default.md
-      result_format:
-        outcome:
-          type: enum
-          values:
-            - complete
-            - needs_feedback
-          description: Implementation outcome
-        feedback_questions:
-          type: string
-          description: Questions for user
-          required_when: needs_feedback
-    on:
-      complete: done
-
-initial: implementing
-
-max-retries: 3
-"""
