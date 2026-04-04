@@ -84,6 +84,8 @@ class Orchestrator:
         # Maps asyncio.Task -> (issue_id, tracking_id)
         self._in_flight: dict[asyncio.Task[WorkerOutcome], tuple[str, str]] = {}
         self._progress_sessions: set[str] = set()
+        # Maps issue_id -> (unblock_event, message_box) for blocked workers
+        self._blocked_workers: dict[str, tuple[asyncio.Event, list[str]]] = {}
         # Track used branch slugs to avoid collisions
         self._used_slugs: set[str] = set()
         for branch in self.branches.values():
@@ -170,6 +172,20 @@ class Orchestrator:
     def set_cold_session(self, session_id: str) -> None:
         """Mark a session as cold (low-frequency capture)."""
         self._hot_sessions.discard(session_id)
+
+    def unblock_worker(self, issue_id: str, message: str) -> bool:
+        """Unblock a blocked worker by setting its event and message.
+
+        Returns False if the issue is not currently blocked.
+        """
+        entry = self._blocked_workers.get(issue_id)
+        if entry is None:
+            return False
+        event, msg_box = entry
+        msg_box.clear()
+        msg_box.append(message)
+        event.set()
+        return True
 
     def _is_terminal(self, issue_id: str) -> bool:
         """Return True if the issue's current state is terminal in config."""
@@ -412,6 +428,37 @@ class Orchestrator:
                 workflow=run_dir.name,
             )
 
+        # Create unblock channel for this worker
+        unblock_event = asyncio.Event()
+        unblock_message: list[str] = []
+        self._blocked_workers[effect.issue_id] = (unblock_event, unblock_message)
+
+        def _on_blocked() -> None:
+            from orca.engine.types import WorkerBlockedEvent
+
+            ts = self.now()
+            self._state, _ = reduce(
+                self._config,
+                self._state,
+                WorkerBlockedEvent(issue_id=effect.issue_id, timestamp=ts),
+                self.generate_id,
+                self.now,
+            )
+            self.persistence.save(self._state)
+
+        def _on_unblocked(message: str) -> None:
+            from orca.engine.types import WorkerUnblockedEvent
+
+            ts = self.now()
+            self._state, _ = reduce(
+                self._config,
+                self._state,
+                WorkerUnblockedEvent(issue_id=effect.issue_id, message=message, timestamp=ts),
+                self.generate_id,
+                self.now,
+            )
+            self.persistence.save(self._state)
+
         try:
             outcome = await worker.execute(
                 enriched_effect,
@@ -425,8 +472,13 @@ class Orchestrator:
                 session_manifest=self._session_sync.manifest if self._session_sync else None,
                 session_id=tracking_id,
                 run_context=run_context,
+                unblock_event=unblock_event,
+                unblock_message=unblock_message,
+                on_blocked=_on_blocked,
+                on_unblocked=_on_unblocked,
             )
         finally:
+            self._blocked_workers.pop(effect.issue_id, None)
             # Final scrollback save before killing the session
             try:
                 raw = tmux_session.capture_scrollback()

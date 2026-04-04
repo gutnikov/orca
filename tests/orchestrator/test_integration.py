@@ -46,6 +46,11 @@ class ScriptedWorker:
         extra_args: list[str] | None = None,
         session_manifest: Any = None,
         session_id: str | None = None,
+        run_context: Any = None,
+        unblock_event: Any = None,
+        unblock_message: Any = None,
+        on_blocked: Any = None,
+        on_unblocked: Any = None,
     ) -> WorkerOutcome:
         key = (effect.issue_id, effect.state)
         self.calls.append(key)
