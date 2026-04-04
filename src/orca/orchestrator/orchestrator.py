@@ -13,11 +13,9 @@ from uuid import uuid4
 from orca.engine.dispatch import build_run_context
 from orca.engine.reducer import reduce
 from orca.engine.types import (
-    DispatchFeedbackAgentEffect,
     DispatchWorkerEffect,
     Effect,
     ErrorEffect,
-    FeedbackReceivedEvent,
     State,
     StateMachineConfig,
     WorkerFailedEvent,
@@ -85,8 +83,6 @@ class Orchestrator:
         self._last_save: dict[str, float] = {}
         # Maps asyncio.Task -> (issue_id, tracking_id)
         self._in_flight: dict[asyncio.Task[WorkerOutcome], tuple[str, str]] = {}
-        # Track feedback agent tasks by tracking_id
-        self._feedback_tasks: set[str] = set()
         self._progress_sessions: set[str] = set()
         # Track used branch slugs to avoid collisions
         self._used_slugs: set[str] = set()
@@ -315,91 +311,6 @@ class Orchestrator:
             },
         )
 
-    def _spawn_feedback_worker(self, effect: DispatchFeedbackAgentEffect) -> None:
-        """Spawn a feedback agent to collect user clarification.
-
-        The agent discovers MCP tools (e.g. Slack HITL) from the project's
-        .mcp.json — orca does not manage integrations or credentials.
-        """
-        worker_kind = "claude-code"
-        worker = self.workers.get(worker_kind)
-        if worker is None:
-            logger.warning("No claude-code worker registered — cannot spawn feedback agent")
-            return
-
-        feedback_result_format: dict[str, Any] = {
-            "outcome": {
-                "type": "enum",
-                "values": ["resolved", "unresolved"],
-                "description": "",
-                "values_description": {
-                    "resolved": "Got answers from user",
-                    "unresolved": "User unavailable or conversation inconclusive",
-                },
-            },
-            "feedback_context": {
-                "type": "string",
-                "required_when": ["resolved"],
-                "description": "Full Slack conversation text",
-            },
-            "reason": {
-                "type": "string",
-                "required_when": ["unresolved"],
-                "description": "Why feedback could not be obtained",
-            },
-        }
-
-        # Find session log of the worker that requested feedback
-        session_log_path = ""
-        if self._session_sync is not None:
-            for entry in reversed(self._session_sync.manifest.read()):
-                if entry.get("issue_id") == effect.issue_id and entry.get("completed_at") and entry.get("log_path"):
-                    session_log_path = str(entry["log_path"])
-                    break
-
-        # Record in-flight session for TUI
-        tracking_id = str(uuid4())
-        if self._session_sync is not None:
-            workdir = self.repo_root or Path(".")
-            self._session_sync.manifest.append(
-                issue_id=effect.issue_id,
-                state=f"{effect.state}:feedback",
-                session_id=tracking_id,
-                worktree_path=str(workdir),
-                started_at=self.now(),
-            )
-
-        feedback_dispatch = DispatchWorkerEffect(
-            issue_id=effect.issue_id,
-            issue_type=effect.issue_type,
-            state=effect.state,
-            result_format=feedback_result_format,
-            issue={
-                **effect.issue,
-                "feedback_questions": effect.questions,
-                "session_log_path": session_log_path,
-            },
-        )
-
-        prompt_template = str(Path(__file__).parent / "prompts" / "feedback-agent.md")
-
-        task: asyncio.Task[WorkerOutcome] = asyncio.create_task(
-            self._run_worker_with_backoff(
-                feedback_dispatch,
-                worker,
-                prompt_template,
-                0.0,
-                tracking_id,
-            )
-        )
-        self._in_flight[task] = (effect.issue_id, tracking_id)
-        self._feedback_tasks.add(tracking_id)
-        logger.info(
-            "Feedback agent dispatched for issue %s",
-            effect.issue_id,
-            extra={"event": "feedback_agent_dispatched", "issue_id": effect.issue_id},
-        )
-
     def _resolve_base_branch(self, issue_id: str) -> str:
         """Resolve the base branch for an issue (parent's branch or root_branch)."""
         issue = self._state.issues.get(issue_id)
@@ -585,8 +496,6 @@ class Orchestrator:
         for effect in effects:
             if isinstance(effect, DispatchWorkerEffect):
                 pending.append(effect)
-            elif isinstance(effect, DispatchFeedbackAgentEffect):
-                self._spawn_feedback_worker(effect)
             elif isinstance(effect, ErrorEffect):
                 logger.error(
                     "ErrorEffect for issue %r: %s",
@@ -722,32 +631,12 @@ class Orchestrator:
                     self._progress_sessions.discard(tracking_id)
 
                 if isinstance(outcome, WorkerSuccess):
-                    if tracking_id in self._feedback_tasks:
-                        self._feedback_tasks.discard(tracking_id)
-                        feedback_outcome = outcome.result.get("outcome")
-                        if feedback_outcome == "resolved":
-                            event: WorkerResultEvent | WorkerFailedEvent | FeedbackReceivedEvent = (
-                                FeedbackReceivedEvent(
-                                    issue_id=issue_id,
-                                    feedback_context=str(outcome.result.get("feedback_context", "")),
-                                    timestamp=ts,
-                                )
-                            )
-                        else:
-                            event = WorkerFailedEvent(
-                                issue_id=issue_id,
-                                error=str(outcome.result.get("reason", "feedback unresolved")),
-                                timestamp=ts,
-                            )
-                    else:
-                        event = WorkerResultEvent(
-                            issue_id=issue_id,
-                            result=outcome.result,
-                            timestamp=ts,
-                        )
+                    event: WorkerResultEvent | WorkerFailedEvent = WorkerResultEvent(
+                        issue_id=issue_id,
+                        result=outcome.result,
+                        timestamp=ts,
+                    )
                 else:
-                    if tracking_id in self._feedback_tasks:
-                        self._feedback_tasks.discard(tracking_id)
                     event = WorkerFailedEvent(
                         issue_id=issue_id,
                         error=outcome.error,

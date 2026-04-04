@@ -16,12 +16,10 @@ from orca.engine.dispatch import (
 from orca.engine.types import (
     AdvanceEvent,
     CreateEvent,
-    DispatchFeedbackAgentEffect,
     DispatchWorkerEffect,
     Effect,
     ErrorEffect,
     Event,
-    FeedbackReceivedEvent,
     Issue,
     OnDecompose,
     OnTransition,
@@ -52,8 +50,6 @@ def reduce(
         _handle_worker_result(config, new_state, event, effects, generate_id, ts)
     elif isinstance(event, WorkerFailedEvent):
         _handle_worker_failed(config, new_state, event, effects, ts)
-    elif isinstance(event, FeedbackReceivedEvent):
-        _handle_feedback_received(config, new_state, event, effects, ts)
 
     return new_state, effects
 
@@ -221,11 +217,6 @@ def _handle_worker_result(
     # outcome must exist in result and be in state_def.on
     outcome = event.result.get("outcome")
 
-    # Reserved outcome: needs_feedback — handled before on: rule lookup
-    if outcome == "needs_feedback":
-        _handle_needs_feedback(config, state, event, issue, effects, ts)
-        return
-
     if outcome is None or outcome not in state_def.on:
         effects.append(
             ErrorEffect(
@@ -348,108 +339,6 @@ def _handle_worker_result(
     effects.extend(dispatch_effects)
 
 
-def _handle_needs_feedback(
-    config: StateMachineConfig,
-    state: State,
-    event: WorkerResultEvent,
-    issue: Issue,
-    effects: list[Effect],
-    ts: str,
-) -> None:
-    """Handle the reserved needs_feedback outcome: store questions, emit feedback agent dispatch."""
-    questions = str(event.result.get("feedback_questions", ""))
-
-    # Clear worker slot and increment failure count
-    issue.worker_active = False
-    issue.failure_count += 1
-
-    # Log the result
-    append_log(issue, event.timestamp, "worker_result", event.result)
-
-    # Store questions in issue fields
-    issue.fields["feedback_questions"] = questions
-
-    # Check retry limit
-    if config.max_worker_retries is not None and issue.failure_count >= config.max_worker_retries:
-        append_log(
-            issue,
-            ts,
-            "worker_retries_exhausted",
-            {"state": issue.state, "failure_count": issue.failure_count},
-        )
-        effects.append(
-            ErrorEffect(
-                issue_id=event.issue_id,
-                message=f"Issue '{event.issue_id}' requested feedback but retries exhausted "
-                f"({issue.failure_count}/{config.max_worker_retries})",
-            )
-        )
-        return
-
-    # Emit effect to spawn feedback agent
-    effects.append(
-        DispatchFeedbackAgentEffect(
-            issue_id=event.issue_id,
-            issue_type=issue.type,
-            state=issue.state,
-            questions=questions,
-            issue=build_issue_context(state, event.issue_id),
-        )
-    )
-
-
-def _handle_feedback_received(
-    config: StateMachineConfig,
-    state: State,
-    event: FeedbackReceivedEvent,
-    effects: list[Effect],
-    ts: str,
-) -> None:
-    """Handle feedback received from user: store context and re-dispatch worker."""
-    if event.issue_id not in state.issues:
-        effects.append(ErrorEffect(issue_id=event.issue_id, message=f"Issue '{event.issue_id}' does not exist"))
-        return
-
-    issue = state.issues[event.issue_id]
-
-    if issue.worker_active:
-        effects.append(
-            ErrorEffect(
-                issue_id=event.issue_id,
-                message=f"Issue '{event.issue_id}' has worker_active=True — unexpected feedback",
-            )
-        )
-        return
-
-    if issue.state == "done":
-        effects.append(
-            ErrorEffect(
-                issue_id=event.issue_id,
-                message=f"Issue '{event.issue_id}' is in terminal state '{issue.state}'",
-            )
-        )
-        return
-
-    # Store feedback context
-    issue.fields["feedback_context"] = event.feedback_context
-
-    # Log feedback received
-    append_log(issue, event.timestamp, "feedback_received", {"feedback_context": event.feedback_context})
-
-    # Re-dispatch worker for current state
-    issue.worker_active = True
-    append_log(issue, ts, "worker_dispatched", {"state": issue.state})
-    effects.append(
-        DispatchWorkerEffect(
-            issue_id=event.issue_id,
-            issue_type=issue.type,
-            state=issue.state,
-            result_format=build_result_format(config, issue.type, issue.state),
-            issue=build_issue_context(state, event.issue_id),
-        )
-    )
-
-
 def _handle_worker_failed(
     config: StateMachineConfig,
     state: State,
@@ -534,10 +423,6 @@ def _apply_transition(
     # Move issue to target state
     issue.state = target_state
     target_def = config.get_state(issue.type, target_state)
-
-    # Clear transient feedback fields — they belong to the previous state's feedback loop
-    issue.fields.pop("feedback_context", None)
-    issue.fields.pop("feedback_questions", None)
 
     # Log the transition
     append_log(issue, ts, "transitioned", {"from": old_state_name, "to": target_state})
