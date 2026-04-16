@@ -7,8 +7,12 @@ import sys
 from pathlib import Path
 
 
-def _git_short_hash() -> str:
-    """Return the short git commit hash of the orca package source, or 'unknown'."""
+def _version_string() -> str:
+    """Return the package version, with git short hash if available."""
+    from importlib.metadata import version
+
+    v = version("orca")
+
     import subprocess
 
     src_dir = Path(__file__).resolve().parent.parent.parent.parent
@@ -21,10 +25,10 @@ def _git_short_hash() -> str:
             timeout=5,
         )
         if result.returncode == 0:
-            return result.stdout.strip()
+            return f"{v} ({result.stdout.strip()})"
     except Exception:
         pass
-    return "unknown"
+    return v
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -74,6 +78,9 @@ def build_parser() -> argparse.ArgumentParser:
     retry_parser.add_argument("run_id", type=str)
     retry_parser.add_argument("issue_id", type=str, help="Issue ID (find via orca runs, state.json, or MCP)")
 
+    # orca init
+    sub.add_parser("init", help="Copy reference docs into .orca/reference/")
+
     # orca runs
     sub.add_parser("runs", help="List all runs")
 
@@ -98,7 +105,7 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.version:
-        print(f"orca {_git_short_hash()}")
+        print(f"orca {_version_string()}")
         return
 
     if args.subcommand is None:
@@ -144,6 +151,11 @@ def main() -> None:
         from orca.cli.retry_cmd import retry_command
 
         retry_command(args.run_id, args.issue_id, root=args.root)
+
+    elif args.subcommand == "init":
+        from orca.cli.init_cmd import init_command
+
+        init_command(root=args.root)
 
     elif args.subcommand == "runs":
         from orca.cli.list_cmd import runs_command

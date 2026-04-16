@@ -548,6 +548,32 @@ class RunManager:
             return ""
         return run_info.orchestrator.get_session_log_by_issue(issue_id, tail)
 
+    def get_all_worker_logs(self, run_id: str, tail: int = 100) -> str:
+        """Get worker logs for all issues in a run."""
+        run_info = self._runs.get(run_id)
+        if run_info is None:
+            return ""
+        state = None
+        if run_info.orchestrator is not None:
+            state = run_info.orchestrator.state
+        else:
+            persistence = Persistence(self.repo_root, run_info.branch, run_info.workflow)
+            state = persistence.load()
+        if state is None:
+            return ""
+        parts: list[str] = []
+        for issue_id, issue in state.issues.items():
+            header = f"=== {issue_id[:12]} [{issue.state}] ==="
+            if run_info.orchestrator is not None:
+                log = run_info.orchestrator.get_session_log_by_issue(issue_id, tail)
+            else:
+                log = ""
+            if log:
+                parts.append(f"{header}\n{log}")
+            else:
+                parts.append(f"{header}\n(no log)")
+        return "\n\n".join(parts)
+
     def get_insights(self, run_id: str) -> str:
         """Get insights log content for the given run."""
         run_info = self._runs.get(run_id)

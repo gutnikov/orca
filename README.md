@@ -74,18 +74,13 @@ After creating the file, **tell me to reload MCP servers** (e.g. `/mcp` then res
 **5. Set up the `.orca/` directory** with workflow reference docs and a starter workflow:
 
 ```bash
-mkdir -p .orca/prompts .orca/reference
+mkdir -p .orca/prompts
 ```
 
-Download the Orca workflow reference docs into `.orca/reference/` — these teach coding agents how to build and audit workflows:
+Copy the bundled Orca workflow reference docs into `.orca/reference/` — these teach coding agents how to build and audit workflows:
 
 ```bash
-cd .orca/reference
-curl -sO https://raw.githubusercontent.com/gutnikov/orca/main/prompts/create-orca-workflow/config-reference.md
-curl -sO https://raw.githubusercontent.com/gutnikov/orca/main/prompts/create-orca-workflow/workflow-patterns.md
-curl -sO https://raw.githubusercontent.com/gutnikov/orca/main/prompts/create-orca-workflow/prompt-guide.md
-curl -sO https://raw.githubusercontent.com/gutnikov/orca/main/prompts/create-orca-workflow/audit-checklist.md
-cd ../..
+orca init
 ```
 
 Write `.orca/default.yml`:
