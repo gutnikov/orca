@@ -1,0 +1,155 @@
+"""Top-level CLI dispatcher for orca."""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+
+def _git_short_hash() -> str:
+    """Return the short git commit hash of the orca package source, or 'unknown'."""
+    import subprocess
+
+    src_dir = Path(__file__).resolve().parent.parent.parent.parent
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=src_dir,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return "unknown"
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Build the top-level argument parser with subcommands."""
+    parser = argparse.ArgumentParser(prog="orca", description="Orca workflow orchestrator")
+    parser.add_argument("-v", "--version", action="store_true", help="Print version and exit")
+    parser.add_argument("--root", type=Path, default=None, help="Repository root (default: auto-detect via git)")
+    sub = parser.add_subparsers(dest="subcommand")
+
+    # orca daemon start|stop|status
+    daemon_parser = sub.add_parser("daemon", help="Manage the orca daemon")
+    daemon_parser.add_argument("daemon_action", choices=["start", "stop", "status"])
+    daemon_parser.add_argument("--foreground", action="store_true", help="Run in foreground (default: daemonize)")
+
+    # orca run <task.md> [-w workflow] [-b branch] [--base ref] [--max-hops N] [--max-retries N]
+    run_parser = sub.add_parser("run", help="Submit a workflow run")
+    run_parser.add_argument("task_file", type=Path)
+    run_parser.add_argument("-w", "--workflow", type=str, default=None)
+    run_parser.add_argument("-b", "--branch", type=str, default=None)
+    run_parser.add_argument("--base", type=str, default=None)
+    run_parser.add_argument("--headless", action="store_true")
+    run_parser.add_argument("--insights", action="store_true")
+    run_parser.add_argument("--run-id", type=str, default=None)
+    run_parser.add_argument("--max-hops", type=int, default=10)
+    run_parser.add_argument("--max-retries", type=int, default=3)
+
+    # orca tui
+    sub.add_parser("tui", help="Attach TUI to daemon")
+
+    # orca mcp
+    sub.add_parser("mcp", help="MCP stdio bridge")
+
+    # orca stop <run_id>
+    stop_parser = sub.add_parser("stop", help="Stop a running workflow")
+    stop_parser.add_argument("run_id", type=str)
+
+    # orca resume <run_id>
+    resume_parser = sub.add_parser("resume", help="Resume a stopped/failed workflow")
+    resume_parser.add_argument("run_id", type=str)
+
+    # orca drop <run_id>
+    drop_parser = sub.add_parser("drop", help="Drop a run from the daemon")
+    drop_parser.add_argument("run_id", type=str)
+
+    # orca runs
+    sub.add_parser("runs", help="List all runs")
+
+    # orca logs <run_id> [issue_id] [--tail N]
+    logs_parser = sub.add_parser("logs", help="Print worker logs")
+    logs_parser.add_argument("run_id", type=str)
+    logs_parser.add_argument("issue_id", type=str, nargs="?", default=None)
+    logs_parser.add_argument("--tail", type=int, default=100)
+
+    # orca unblock <run_id> <issue_id> -m "message"
+    unblock_parser = sub.add_parser("unblock", help="Unblock a blocked worker")
+    unblock_parser.add_argument("run_id", type=str)
+    unblock_parser.add_argument("issue_id", type=str)
+    unblock_parser.add_argument("-m", "--message", type=str, required=True, help="Message to send to the worker")
+
+    return parser
+
+
+def main() -> None:
+    """CLI entry point: dispatch to subcommand handlers via lazy imports."""
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if args.version:
+        print(f"orca {_git_short_hash()}")
+        return
+
+    if args.subcommand is None:
+        parser.print_help()
+        sys.exit(1)
+
+    if args.subcommand == "daemon":
+        from orca.cli.daemon_cmd import daemon_command
+
+        daemon_command(args.daemon_action, root=args.root, foreground=args.foreground)
+
+    elif args.subcommand == "run":
+        from orca.cli.run_cmd import run_command
+
+        run_command(args)  # args.root already in args
+
+    elif args.subcommand == "tui":
+        from orca.cli.tui_cmd import tui_command
+
+        tui_command(root=args.root)
+
+    elif args.subcommand == "mcp":
+        from orca.cli.mcp_cmd import mcp_command
+
+        mcp_command()
+
+    elif args.subcommand == "stop":
+        from orca.cli.stop_cmd import stop_command
+
+        stop_command(args.run_id, root=args.root)
+
+    elif args.subcommand == "drop":
+        from orca.cli.drop_cmd import drop_command
+
+        drop_command(args.run_id, root=args.root)
+
+    elif args.subcommand == "resume":
+        from orca.cli.resume_cmd import resume_command
+
+        resume_command(args.run_id, root=args.root)
+
+    elif args.subcommand == "runs":
+        from orca.cli.list_cmd import runs_command
+
+        runs_command(root=args.root)
+
+    elif args.subcommand == "logs":
+        from orca.cli.list_cmd import logs_command
+
+        logs_command(args)  # args.root already in args
+
+    elif args.subcommand == "unblock":
+        from orca.cli.unblock_cmd import unblock_command
+
+        unblock_command(args.run_id, args.issue_id, args.message, root=args.root)
+
+    else:
+        parser.print_help()
+        sys.exit(1)
