@@ -2,7 +2,7 @@
 
 Orca is a coding agent orchestrator. Built for harness engineering and long-running flows.
 
-- **Any coding agent** — Claude Code, OpenCode, and any CLI agent that reads a prompt and writes a result
+- **Coding agents** — Claude Code and OpenCode as workers
 - **TUI** — live terminal dashboard with issue trees, worker terminals, progress bars, and session history
 - **MCP** — full API exposed as MCP tools so your coding agent can start, monitor, and control runs
 
