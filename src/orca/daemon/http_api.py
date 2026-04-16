@@ -61,7 +61,7 @@ async def _start_run(request: Request) -> JSONResponse:
             max_retries=body.get("max_retries"),
             insights=bool(body.get("insights", False)),
         )
-    except ValueError as exc:
+    except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
 
     return JSONResponse({"run_id": run_id}, status_code=201)

@@ -69,6 +69,11 @@ def build_parser() -> argparse.ArgumentParser:
     drop_parser = sub.add_parser("drop", help="Drop a run from the daemon")
     drop_parser.add_argument("run_id", type=str)
 
+    # orca retry <run_id> <issue_id>
+    retry_parser = sub.add_parser("retry", help="Retry a failed issue")
+    retry_parser.add_argument("run_id", type=str)
+    retry_parser.add_argument("issue_id", type=str, help="Issue ID (find via orca runs, state.json, or MCP)")
+
     # orca runs
     sub.add_parser("runs", help="List all runs")
 
@@ -134,6 +139,11 @@ def main() -> None:
         from orca.cli.resume_cmd import resume_command
 
         resume_command(args.run_id, root=args.root)
+
+    elif args.subcommand == "retry":
+        from orca.cli.retry_cmd import retry_command
+
+        retry_command(args.run_id, args.issue_id, root=args.root)
 
     elif args.subcommand == "runs":
         from orca.cli.list_cmd import runs_command

@@ -337,8 +337,14 @@ While the TUI is great for watching, the CLI is useful for quick checks and scri
 # List all runs
 orca runs
 
-# Check worker logs for a specific issue
+# Check worker logs (shows all issues for the run)
 orca logs main:default
+
+# Check worker logs for a specific issue (get issue_id from orca runs, state.json, or MCP)
+orca logs main:default abc123
+
+# Retry a failed issue
+orca retry main:default abc123
 
 # Stop a run
 orca stop main:default
@@ -1166,10 +1172,11 @@ orca runs                     # list all runs
 orca stop <run_id>            # stop a run
 orca resume <run_id>          # resume a stopped/failed run
 orca drop <run_id>            # stop + delete run state
+orca retry <run_id> <issue_id>  # retry a failed issue
 
-orca logs <run_id>            # view worker logs
+orca logs <run_id> [issue_id] [--tail N]        # view worker logs
 orca unblock <run_id> <issue_id> -m "message"   # unblock a waiting worker
-orca tui <run_id>             # open TUI for a run
+orca tui                      # open TUI dashboard
 orca mcp                      # start MCP stdio bridge
 ```
 
@@ -1556,7 +1563,7 @@ orca daemon stop               # graceful shutdown (SIGTERM)
 
 **Invalid result file** — the worker wrote `result.json` but it doesn't match the `result_format` schema (missing `outcome` field, unknown outcome value, missing required fields). The orchestrator sends a correction message to the worker's live session: *"URGENT: Your result file is INVALID..."* and gives it another chance. If the session has already exited, it's treated as a failure.
 
-**Max retries exhausted** — the worker crashed or timed out `max_worker_retries` times (default: 3) in the same state. The issue stops, and the run may deadlock. Use `orca retry <run_id> <issue_id>` or the TUI `n` key to reset the failure count and try again.
+**Max retries exhausted** — the worker crashed or timed out `max_worker_retries` times (default: 3) in the same state. The issue stops, and the run may deadlock. Reset the failure count and try again with `orca retry <run_id> <issue_id>`, the TUI `n` key, or the `orca_retry_issue` MCP tool.
 
 **Max hops reached** — the issue transitioned between states `max_hops` times (default: 10). This usually means a loop (e.g., `implementing → planning → implementing` cycling). Check the event log for repeated transitions and fix the workflow or prompts.
 
@@ -1565,17 +1572,17 @@ orca daemon stop               # graceful shutdown (SIGTERM)
 ### Debugging a Failed Run
 
 ```bash
-# 1. Check run status
+# 1. Check run status — note issue IDs in the output
 orca runs
 
-# 2. Look at the issue state
+# 2. View worker logs for the run (or a specific issue)
 orca logs <run_id>
+orca logs <run_id> <issue_id>
 
-# 3. Read the worker's terminal output
-# Session logs are in .orca-state/sessions/ or .orca-state/worktrees/{branch}/.orca-state/sessions/
+# 3. Read the structured event log
 cat .orca-state/runs/{branch}/{workflow}/orca.log.jsonl | python -m json.tool
 
-# 4. Check the full state
+# 4. Check the full state (includes all issue IDs and their current states)
 cat .orca-state/runs/{branch}/{workflow}/state.json | python -m json.tool
 
 # 5. Retry the failed issue
