@@ -1168,6 +1168,7 @@ orca stop <run_id>            # stop a run
 orca resume <run_id>          # resume a stopped/failed run
 orca drop <run_id>            # stop + delete run state
 orca retry <run_id> <issue_id>  # retry a failed issue
+orca clean [--dry-run] [-y]   # drop terminal runs + clean accumulated artifacts
 
 orca logs <run_id> [issue_id] [--tail N]        # view worker logs
 orca unblock <run_id> <issue_id> -m "message"   # unblock a waiting worker

@@ -81,6 +81,11 @@ def build_parser() -> argparse.ArgumentParser:
     # orca init
     sub.add_parser("init", help="Copy reference docs into .orca/reference/")
 
+    # orca clean [--dry-run] [-y]
+    clean_parser = sub.add_parser("clean", help="Remove terminal-state runs and accumulated artifacts")
+    clean_parser.add_argument("--dry-run", action="store_true", help="Show what would be cleaned without removing")
+    clean_parser.add_argument("-y", "--yes", action="store_true", help="Skip the confirmation prompt")
+
     # orca runs
     sub.add_parser("runs", help="List all runs")
 
@@ -156,6 +161,11 @@ def main() -> None:
         from orca.cli.init_cmd import init_command
 
         init_command(root=args.root)
+
+    elif args.subcommand == "clean":
+        from orca.cli.clean_cmd import clean_command
+
+        clean_command(root=args.root, dry_run=args.dry_run, yes=args.yes)
 
     elif args.subcommand == "runs":
         from orca.cli.list_cmd import runs_command

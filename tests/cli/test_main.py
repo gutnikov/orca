@@ -114,6 +114,37 @@ class TestCliDispatch:
         assert args.subcommand == "daemon"
 
 
+class TestCleanParser:
+    def test_clean_default_flags(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["clean"])
+        assert args.subcommand == "clean"
+        assert args.dry_run is False
+        assert args.yes is False
+
+    def test_clean_dry_run(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["clean", "--dry-run"])
+        assert args.dry_run is True
+        assert args.yes is False
+
+    def test_clean_yes_short(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["clean", "-y"])
+        assert args.yes is True
+
+    def test_clean_yes_long(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["clean", "--yes"])
+        assert args.yes is True
+
+    def test_clean_combined_flags(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["clean", "--dry-run", "-y"])
+        assert args.dry_run is True
+        assert args.yes is True
+
+
 class TestUnblockParser:
     def test_parser_accepts_unblock(self) -> None:
         from orca.cli.main import build_parser
