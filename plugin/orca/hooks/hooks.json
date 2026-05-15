@@ -1,0 +1,14 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "MARKER=\"${HOME}/.cache/orca-plugin/nudged\"; if ! command -v orca >/dev/null 2>&1; then if [ -d .orca ] || [ ! -f \"$MARKER\" ]; then mkdir -p \"$(dirname \"$MARKER\")\" 2>/dev/null; touch \"$MARKER\" 2>/dev/null; if [ -d .orca ]; then echo \"[orca plugin] This project has a .orca/ directory but the orca CLI is not installed. Tell the user: run /orca:setup to install it via pipx and start the daemon.\"; else echo \"[orca plugin] The orca CLI is not installed on this system. If the user wants to try Orca, tell them: run /orca:setup in a git repo to install the CLI and bootstrap a starter workflow.\"; fi; fi; elif [ -d .orca ]; then orca daemon start >/dev/null 2>&1 || true; fi; exit 0"
+          }
+        ]
+      }
+    ]
+  }
+}

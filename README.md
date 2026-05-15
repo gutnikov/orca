@@ -8,6 +8,25 @@ Orca is a coding agent orchestrator. Built for harness engineering and long-runn
 
 One YAML config defines the workflow. Orca spawns agents in isolated git worktrees, routes results through a state machine, decomposes large tasks into parallel sub-issues, and handles retries, timeouts, and crash recovery. One spec in, working code out.
 
+## Install as a Claude Code plugin
+
+This repo is also a Claude Code plugin marketplace. Add it once, then install the `orca` plugin to get:
+
+- `/orca:setup` — runs the One-Prompt Setup below for you, end-to-end
+- `/orca:supervisor` — supervise a live run interactively (see `prompts/supervisor.md`)
+- `/orca:create-workflow` — build, update, or audit `.orca/*.yml` workflows
+- MCP server pre-registered (no manual `.mcp.json` needed)
+- SessionStart hook that ensures the daemon is running in any `.orca`-enabled project
+
+In Claude Code:
+
+```
+/plugin marketplace add gutnikov/orca
+/plugin install orca@orca
+```
+
+Then run `/orca:setup` in any repo to bootstrap Orca. You still need the `orca` CLI itself — the `/orca:setup` command will `pipx install` it on first run.
+
 ## One-Prompt Setup
 
 Copy this prompt into your coding agent (Claude Code, Cursor, Windsurf, etc.) to set up Orca in your project end-to-end. Prefer doing it manually? Skip to [Manual Setup](#manual-setup).

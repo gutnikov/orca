@@ -1,0 +1,13 @@
+{
+  "name": "orca",
+  "version": "0.1.0",
+  "description": "Coding agent orchestrator. Spawns Claude Code / OpenCode workers in git worktrees, drives state machines, exposes MCP tools.",
+  "author": {
+    "name": "Alex Gutnikov",
+    "url": "https://github.com/gutnikov"
+  },
+  "homepage": "https://github.com/gutnikov/orca",
+  "repository": "https://github.com/gutnikov/orca",
+  "license": "MIT",
+  "keywords": ["orchestrator", "mcp", "claude-code", "opencode", "agents", "workflow", "tui"]
+}

@@ -1,0 +1,18 @@
+{
+  "name": "orca",
+  "owner": {
+    "name": "Alex Gutnikov",
+    "url": "https://github.com/gutnikov"
+  },
+  "plugins": [
+    {
+      "name": "orca",
+      "source": "./plugin/orca",
+      "description": "Coding agent orchestrator — MCP server + slash commands for setup, workflow authoring, and run supervision",
+      "version": "0.1.0",
+      "homepage": "https://github.com/gutnikov/orca",
+      "license": "MIT",
+      "keywords": ["orchestrator", "mcp", "claude-code", "opencode", "agents", "workflow"]
+    }
+  ]
+}
