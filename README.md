@@ -10,22 +10,45 @@ One YAML config defines the workflow. Orca spawns agents in isolated git worktre
 
 ## Install as a Claude Code plugin
 
-This repo is also a Claude Code plugin marketplace. Add it once, then install the `orca` plugin to get:
+This repo doubles as a Claude Code plugin marketplace. Installing the plugin gives you slash commands, an auto-registered MCP server, and a session hook that keeps the daemon healthy — no manual `.mcp.json` editing.
 
-- `/orca:setup` — runs the One-Prompt Setup below for you, end-to-end
-- `/orca:supervisor` — supervise a live run interactively (see `prompts/supervisor.md`)
-- `/orca:create-workflow` — build, update, or audit `.orca/*.yml` workflows
-- MCP server pre-registered (no manual `.mcp.json` needed)
-- SessionStart hook that ensures the daemon is running in any `.orca`-enabled project
+### What you get
 
-In Claude Code:
+| | |
+|---|---|
+| `/orca:setup` | One-shot bootstrap: installs the `orca` CLI via pipx, starts the daemon, drops a starter workflow into `.orca/`, runs a test task |
+| `/orca:supervisor` | Interactive supervisor for a live run — polls health, surfaces `waiting` outcomes, handles stuck states, asks before merging |
+| `/orca:create-workflow` | Workflow author/auditor — creates, updates, or reviews `.orca/*.yml` config + prompt templates |
+| MCP server | `orca` MCP tools (`orca_start_run`, `orca_get_run`, `orca_unblock_worker`, …) auto-register when the plugin loads |
+| SessionStart hook | In any project with a `.orca/` directory, ensures the daemon is running. If the CLI isn't installed, nudges you to run `/orca:setup` |
+
+### Install (one-time)
+
+In Claude Code, run:
 
 ```
 /plugin marketplace add gutnikov/orca
 /plugin install orca@orca
 ```
 
-Then run `/orca:setup` in any repo to bootstrap Orca. You still need the `orca` CLI itself — the `/orca:setup` command will `pipx install` it on first run.
+Then reload Claude Code so the MCP server registers (`/mcp` → restart, or quit and reopen).
+
+### Quick start (per project)
+
+```bash
+cd your-repo
+```
+
+Then in Claude Code:
+
+1. **Run `/orca:setup`** — Claude will pipx-install the `orca` CLI, start the daemon, add `.orca-state/` to `.gitignore`, scaffold `.orca/default.yml` + `.orca/prompts/implement.md`, and run a test task.
+2. **Reload once more** if Claude prompts you (the MCP server needs to find the freshly-installed `orca` binary on PATH).
+3. **Submit work** — describe a task to Claude and say *"start an orca run for this"*. Claude will write `task.md` and call `orca_start_run` via MCP.
+4. **Watch it work** — open the TUI in a separate terminal with `orca tui`, or ask Claude *"run the orca supervisor"* (which invokes `/orca:supervisor`) to babysit interactively.
+
+Prerequisites: Git, [tmux](https://github.com/tmux/tmux), and at least one agent CLI (`claude` or `opencode`) installed and authenticated. `pipx` is needed for the CLI install — `/orca:setup` will tell you if it's missing.
+
+> Prefer to set up by hand or use a non-Claude-Code agent (Cursor, Windsurf, etc.)? Use the [One-Prompt Setup](#one-prompt-setup) below — it's the same flow as `/orca:setup`, just copy-pasteable.
 
 ## One-Prompt Setup
 
