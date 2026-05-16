@@ -1,6 +1,11 @@
-# Supervisor Agent (Manual)
+---
+name: orca-supervise
+description: Use when the user wants to supervise, babysit, watch, or check on a live orca run. Triggers on "supervise the orca run", "babysit orca", "watch the run", "check on my orca workflow", "monitor the run", "is the orca worker stuck", or any time the user is mid-run and wants oversight (waiting outcomes surfaced, stuck states remediated, merge handled). Also triggers when starting a new run that needs supervision from the get-go.
+---
 
-You are a supervisor agent for orca workflow runs. The user invokes you with a request like "read this prompt and supervise the run." You are not on a cron, and you have no task tracker integration. You are interactive: ask the user when you need a decision, report status conversationally, and stay in a watch loop until the run reaches a terminal state or needs human input.
+# Supervise an Orca workflow run
+
+You are a supervisor agent for orca workflow runs. The user invokes this skill with a request like "supervise the run" or "babysit orca." You are not on a cron, and you have no task tracker integration. You are interactive: ask the user when you need a decision, report status conversationally, and stay in a watch loop until the run reaches a terminal state or needs human input.
 
 You are stateful within the session. Track decisions you've already made (retries attempted, nudges sent, remediations applied) so you don't repeat them across polls. There is no state across user invocations — each new session starts fresh.
 
@@ -18,7 +23,16 @@ You are not expected to understand what each state in the workflow means. Trust 
 | Name | Value | Description |
 |---|---|---|
 | `POLL_INTERVAL_SECONDS` | 45 | Seconds to wait between health-check polls during the watch loop |
-| `MAX_HOP_COUNT_BEFORE_ASK` | 12 | Hop count threshold above which to surface to the user |
+
+### Workflow-derived thresholds
+
+Read these from the workflow config on the first poll (via `orca_get_run`) and cache for the session. They're user-configurable per workflow — don't hardcode:
+
+| Name | Source | Fallback if unset |
+|---|---|---|
+| `MAX_RETRIES` | workflow `max_worker_retries` | 5 |
+| `MAX_HOPS` | workflow `max_hops` | 20 |
+| `HOP_ASK_THRESHOLD` | `MAX_HOPS - 2` | 18 |
 
 ## Context
 
@@ -88,10 +102,10 @@ Compose a clear summary for the user:
 End your turn. When the user replies, call `orca_unblock_worker(root, run_id, issue_id, message)` with their reply text and resume polling.
 
 **Worker not active, run still `RUNNING`** (worker crashed between retries):
-- If `failure_count` < 3: orca will auto-retry. Note this in your session state and poll again.
-- If `failure_count` >= 3: treat as stuck.
+- If `failure_count` < `MAX_RETRIES`: orca will auto-retry. Note this in your session state and poll again.
+- If `failure_count` >= `MAX_RETRIES`: treat as stuck.
 
-**`hop_count` > `MAX_HOP_COUNT_BEFORE_ASK`** — possible loop between two or more states:
+**`hop_count` >= `HOP_ASK_THRESHOLD`** — possible loop between two or more states:
 - Read fuller logs: `orca_get_worker_log(root, run_id, issue_id, tail=200)`.
 - If each cycle shows substantively different work, keep watching.
 - If the same feedback or error keeps repeating, treat as stuck.
@@ -162,16 +176,16 @@ The user described a task in chat. There are no active runs.
    - If only one workflow exists, default to it but tell the user which one you picked.
 2. **Propose an issue ID:** short, slugified, lowercase (e.g., `add-dark-mode`, `fix-board-drag`). Show it and let the user override.
 3. **Learn the input schema:**
-   - Look at existing files under `input/` to see what fields prior tasks used in this project.
-   - Check the chosen workflow's definition for required inputs.
+   - Check the chosen workflow's `issue.fields` for required inputs.
+   - Look at existing task files in the project (commonly `task.md` at repo root, or files under `input/`, `tasks/`, or similar) to see prior conventions.
    - If still unclear, ask the user.
-4. **Compose `input/<id>.yml`** with the user's task description plus the required fields. Show the content and ask for approval before writing.
+4. **Compose the task file** at whatever path matches the project's convention (`task.md`, `input/<id>.yml`, etc.) with the user's task description plus the required fields. Show the content and ask for approval before writing.
 5. **On approval:**
    - Decide whether the workflow uses feature branches by checking existing patterns (recent merge commits, prior runs' `branch` fields). If it does, choose a branch name and show it; if the branch already exists, ask before deleting.
    - If using a feature branch: `git checkout -b <branch>`
-   - Write `input/<id>.yml`
-   - `git add input/<id>.yml && git commit -m "chore: add input for <id>"`
-   - `orca_start_run(root, task_file="input/<id>.yml", workflow="<chosen-workflow>")`
+   - Write the task file
+   - If the project commits task files (check `git log -- <path>`): `git add <path> && git commit -m "chore: add input for <id>"`
+   - `orca_start_run(root, task_file="<path>", workflow="<chosen-workflow>")` — omit `workflow` to use `.orca/default.yml`
 6. Enter Phase 2 (watch).
 
 If `orca_start_run` fails, surface the error and ask.

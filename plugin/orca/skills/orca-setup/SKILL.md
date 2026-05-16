@@ -1,10 +1,13 @@
 ---
-description: Set up Orca in the current project end-to-end (install, daemon, MCP, starter workflow, test run)
+name: orca-setup
+description: Use when the user wants to install, set up, bootstrap, or add Orca to a project. Triggers on "set up orca", "install orca", "bootstrap orca", "add orca to this repo", or any first-time orca onboarding. Handles pipx install, daemon start, .gitignore, .orca scaffolding, and a smoke-test run.
 ---
 
 # Set up Orca in this project
 
-Follow these steps in order. Stop and tell the user if any step fails.
+End-to-end bootstrap: install the CLI, start the daemon, scaffold a starter workflow under `.orca/`, run a test task to confirm everything works.
+
+Follow these steps in order. If any step fails, stop and tell the user what went wrong — do not try to silently work around it.
 
 ## 1. Install Orca
 
@@ -14,7 +17,9 @@ Skip if already installed — check with `which orca`. Otherwise:
 pipx install "git+ssh://git@github.com/gutnikov/orca.git"
 ```
 
-Verify: `orca -v` should print a version hash.
+Verify: `orca -v` should print a version hash. If `which orca` doesn't resolve afterwards, `pipx` likely needs `pipx ensurepath` followed by a shell restart — tell the user.
+
+For the full prereq checklist (pipx, git, tmux, an agent CLI, GitHub SSH), see [`orca-install.md`](../../../src/orca/playbooks/orca-install.md) in the bundled playbooks.
 
 ## 2. Start the daemon
 
@@ -60,7 +65,7 @@ mkdir -p .orca/prompts
 orca init
 ```
 
-`orca init` copies the bundled workflow reference docs into `.orca/reference/` — these teach coding agents how to build and audit workflows.
+`orca init` copies the bundled playbooks into `.orca/playbooks/` — these teach coding agents how to build, audit, and run workflows.
 
 ## 6. Write a starter workflow
 
@@ -145,4 +150,4 @@ Monitor with `orca_get_run`. If anything fails, check `orca_get_worker_log`, fix
 
 ## After setup
 
-Manage runs from the CLI (`orca tui`, `orca runs`, `orca logs`) or keep using MCP through your coding agent. The `.orca/reference/` directory stays in the repo — whenever the workflow needs to evolve, tell your agent to read those docs and make the change.
+Manage runs from the CLI (`orca tui`, `orca runs`, `orca logs`) or keep using MCP through your coding agent. The `.orca/playbooks/` directory stays in the repo — whenever the workflow needs to evolve, tell your agent to read those playbooks and make the change.

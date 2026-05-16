@@ -1,8 +1,10 @@
-# Workflow Patterns
+# Orca Workflow Patterns
 
 Reusable building blocks for orca workflows. Compose these into complete workflows. Each pattern shows when to use it, a config snippet, and notes.
 
-Also read `../../examples/project/orca.yml` and `../../examples/project/prompts/` for a complete real-world workflow.
+For a complete worked example combining several of these patterns, fetch `examples/project/orca.yml` and `examples/project/prompts/` from the orca repo at https://github.com/gutnikov/orca/tree/main/examples/project.
+
+For schema-level details on any field shown below, see [`orca-config-reference.md`](orca-config-reference.md). For term definitions (`outcome` vs `target`, `blocked` vs `failed` vs `waiting`, etc.), see [`orca-glossary.md`](orca-glossary.md).
 
 ## Sequential Pipeline
 
@@ -99,17 +101,18 @@ types:
           result_format:
             outcome:
               type: enum
-              values: [applied, failed]
-        on:
-          applied: done
-          failed: implementing
+              values: [applied, conflict]   # use a domain-specific name; avoid `failed`
+        on:                                  # to keep it visibly distinct from the built-in
+          applied: done                      # `failed` target (which triggers retry semantics)
+          conflict: implementing
 ```
 
 **Notes:**
 - Epic scoping creates child tasks with clear scope boundaries
-- Tasks run in parallel (no max_workers on implementing)
+- Tasks run in parallel (no `max_workers` on implementing)
 - Applying serialized with `max_workers: 1` to prevent merge conflicts
 - Epic auto-unblocks when all tasks reach `done`
+- `conflict` here is a user-defined outcome value, not the built-in `failed` target. If you want a conflict to count toward worker-failure retries (and stop after `max_worker_retries`), route it to `failed` instead of `implementing`. See *Built-in Transition Targets* in `orca-config-reference.md`.
 
 ## Serialized Merge
 
@@ -128,7 +131,7 @@ applying:
         values: [applied, conflict]
   on:
     applied: done
-    conflict: implementing
+    conflict: implementing                 # or `failed` to trigger retry semantics
 ```
 
 **Notes:**
@@ -300,6 +303,80 @@ states:
 - Issue is advanced manually (via API, TUI, or CLI)
 - Use for: code review gates, deployment approval, manual QA sign-off
 - Passive states are exempt from the "unreachable states" validation (they can be targets of on: rules)
+
+## Failure-Context Propagation
+
+**When:** A state should retry with awareness of what went wrong last time — typing errors, test failures, lint output.
+
+```yaml
+types:
+  task:
+    fields:
+      title: { type: string }
+      scope_boundary: { type: string }
+      failure_context:                   # auto-populated by orca
+        type: string
+        description: "Error message from the last failure (set by the orchestrator)"
+    initial: implementing
+    states:
+      implementing:
+        worker:
+          kind: claude-code
+          prompt: prompts/implementing.md
+          result_format:
+            outcome:
+              type: enum
+              values: [done, blocked]
+        on:
+          done: done
+          blocked: implementing
+```
+
+In `prompts/implementing.md`:
+
+```jinja2
+{% if issue.fields.failure_context %}
+## Previous attempt failed with:
+
+{{ issue.fields.failure_context }}
+
+Read this carefully — don't repeat the same mistake.
+{% endif %}
+```
+
+**Notes:**
+- `failure_context` is set by the orchestrator on worker failure or when targeting the built-in `failed` state — see *Auto-Populated Fields* in `orca-config-reference.md`.
+- Declare it in `fields:` only so prompts can reference it via Jinja; you don't write to it.
+- Combine with `max_worker_retries` to bound how long this retry loop runs.
+
+## Dependency-Ordered Sub-Issues
+
+**When:** Decomposition produces sub-issues that must run in a specific order — e.g., a database migration before the code that uses it.
+
+The decomposing prompt emits each child issue with a `depends_on` list referencing other children by id:
+
+```json
+{
+  "outcome": "decompose",
+  "sub_issues": [
+    {
+      "id": "001-migration",
+      "fields": { "title": "Add column", "scope_boundary": "migrations/" }
+    },
+    {
+      "id": "002-code",
+      "fields": { "title": "Use column", "scope_boundary": "src/users/" },
+      "depends_on": ["001-migration"]
+    }
+  ]
+}
+```
+
+**Notes:**
+- An issue with `depends_on` waits until every listed issue reaches `done` before its initial state runs.
+- Within a type, `depends_on` is the only ordering mechanism — sibling issues without dependencies run in parallel up to `max_workers`.
+- A prompt that needs to know its predecessors can read `{{ issue.depends_on }}` and `{{ issue.event_log }}`.
+- If the parent decomposer can't guarantee non-overlapping `scope_boundary` between children, dependency-order them so they don't stomp on each other.
 
 ## Iterative Refinement
 

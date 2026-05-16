@@ -79,7 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     retry_parser.add_argument("issue_id", type=str, help="Issue ID (find via orca runs, state.json, or MCP)")
 
     # orca init
-    sub.add_parser("init", help="Copy reference docs into .orca/reference/")
+    sub.add_parser("init", help="Copy playbooks into .orca/playbooks/")
 
     # orca clean [--dry-run] [-y]
     clean_parser = sub.add_parser("clean", help="Remove terminal-state runs and accumulated artifacts")

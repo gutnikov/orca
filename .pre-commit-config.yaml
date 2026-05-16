@@ -15,3 +15,12 @@ repos:
           - pytest>=9.0.2
           - jinja2>=3.0.0
           - textual>=1.0
+
+  - repo: local
+    hooks:
+      - id: check-playbooks
+        name: Check playbook link integrity
+        entry: tools/check_playbooks.py
+        language: script
+        files: ^(src/orca/playbooks/.*\.md|tools/check_playbooks\.py)$
+        pass_filenames: false
