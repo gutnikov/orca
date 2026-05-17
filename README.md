@@ -8,474 +8,79 @@ Orca is a coding agent orchestrator. Built for harness engineering and long-runn
 
 One YAML config defines the workflow. Orca spawns agents in isolated git worktrees, routes results through a state machine, decomposes large tasks into parallel sub-issues, and handles retries, timeouts, and crash recovery. One spec in, working code out.
 
-## Install as a Claude Code plugin
+## Installation
 
-This repo doubles as a Claude Code plugin marketplace. Installing the plugin gives you slash commands, an auto-registered MCP server, and a session hook that keeps the daemon healthy — no manual `.mcp.json` editing.
+Orca is installed through your coding agent's plugin marketplace. The plugin adds the Orca setup, supervision, and workflow-authoring skills, registers the Orca MCP server, and keeps the daemon available in Orca-enabled projects.
 
-### What you get
+Prerequisites for both flows:
 
-| | |
-|---|---|
-| `orca-setup` skill | Auto-triggers on "set up orca" / "install orca" / "bootstrap orca". Installs the CLI via pipx, starts the daemon, drops a starter workflow into `.orca/`, runs a test task. |
-| `orca-supervise` skill | Auto-triggers on "supervise the run" / "babysit orca" / "watch the orca run". Polls health, surfaces `waiting` outcomes, handles stuck states, asks before merging. |
-| `orca-create-workflow` skill | Auto-triggers on "create an orca workflow" / "add a state to my workflow" / "audit .orca/". Creates, updates, or reviews `.orca/*.yml` config + prompt templates. |
-| MCP server | `orca` MCP tools (`orca_start_run`, `orca_get_run`, `orca_unblock_worker`, …) auto-register when the plugin loads. |
-| SessionStart hook | In any project with a `.orca/` directory, ensures the daemon is running. If the CLI isn't installed, nudges the agent to invoke the `orca-setup` skill. |
+- Git
+- tmux
+- pipx
+- An authenticated worker CLI on PATH: `claude`, `codex`, or `opencode`
+- A Git repository for the project you want Orca to manage
 
-### Install (one-time)
+### Claude Code Marketplace
 
-In Claude Code, run:
+Install once in Claude Code:
 
-```
+```text
 /plugin marketplace add gutnikov/orca
 /plugin install orca@orca
 ```
 
-Then reload Claude Code so the MCP server registers (`/mcp` → restart, or quit and reopen).
+Reload Claude Code so the MCP server registers.
 
-### Quick start (per project)
+Set up a project:
 
 ```bash
 cd your-repo
 ```
 
-Then in Claude Code:
+Then ask Claude Code:
 
-1. **Tell Claude "set up orca in this project"** — the `orca-setup` skill triggers and Claude will pipx-install the `orca` CLI, start the daemon, add `.orca-state/` to `.gitignore`, scaffold `.orca/default.yml` + `.orca/prompts/implement.md`, and run a test task.
-2. **Reload once more** if Claude prompts you (the MCP server needs to find the freshly-installed `orca` binary on PATH).
-3. **Submit work** — describe a task to Claude and say *"start an orca run for this"*. Claude will write `task.md` and call `orca_start_run` via MCP.
-4. **Watch it work** — open the TUI in a separate terminal with `orca tui`, or say *"supervise the orca run"* to invoke the `orca-supervise` skill and babysit interactively.
+```text
+set up orca in this project
+```
 
-Prerequisites: Git, [tmux](https://github.com/tmux/tmux), and at least one agent CLI (`claude`, `codex`, or `opencode`) installed and authenticated. `pipx` is needed for the CLI install — the setup skill will tell you if it's missing.
+The `orca-setup` skill installs or verifies the Orca CLI, starts the daemon, adds `.orca-state/` to `.gitignore`, creates `.orca/default.yml` and `.orca/prompts/implement.md`, copies playbooks into `.orca/playbooks/`, and runs a smoke task.
 
-## Install as a Codex plugin
+### Codex Marketplace
 
-This repo also ships a Codex plugin marketplace at `.agents/plugins/marketplace.json`. The Codex plugin package lives at `plugins/orca/` and includes the same setup, supervision, workflow-authoring skills, MCP server registration, and session hook as the Claude Code plugin. Its starter workflow uses `kind: codex`.
-
-In Codex, run:
+Install once with the Codex CLI:
 
 ```bash
 codex plugin marketplace add gutnikov/orca
 ```
 
-For local testing from a checkout, use the repository path instead:
+If you previously added the marketplace, update it:
 
 ```bash
-codex plugin marketplace add /path/to/orca
+codex plugin marketplace upgrade orca
 ```
 
-Then install or enable the `orca` plugin from Codex's plugin UI and restart/reload Codex so the MCP server registers.
+Restart Codex so the plugin skills and MCP server are loaded.
 
-### Quick start (per project)
-
-```bash
-cd your-repo
-```
-
-Then in Codex:
-
-1. **Tell Codex "set up orca in this project"** — the `orca-setup` skill triggers and Codex will pipx-install the `orca` CLI, start the daemon, add `.orca-state/` to `.gitignore`, scaffold `.orca/default.yml` + `.orca/prompts/implement.md`, and run a test task.
-2. **Reload once more** if Codex prompts you (the MCP server needs to find the freshly-installed `orca` binary on PATH).
-3. **Submit work** — describe a task to Codex and say *"start an orca run for this"*. Codex will write `task.md` and call `orca_start_run` via MCP.
-4. **Watch it work** — open the TUI in a separate terminal with `orca tui`, or say *"supervise the orca run"* to invoke the `orca-supervise` skill and babysit interactively.
-
-Prerequisites are the same as above: Git, tmux, `pipx`, and at least one authenticated worker CLI. For Codex-first projects, make sure `codex` is installed and authenticated.
-
-> Prefer to set up by hand or use another agent (Cursor, Windsurf, etc.)? Use the [One-Prompt Setup](#one-prompt-setup) below — it's the same flow as the `orca-setup` skill, just copy-pasteable.
-
-## One-Prompt Setup
-
-Copy this prompt into your coding agent (Claude Code, Cursor, Windsurf, etc.) to set up Orca in your project end-to-end. Prefer doing it manually? Skip to [Manual Setup](#manual-setup).
-
-The prompt will:
-
-1. Install orca via pipx
-2. Start the daemon
-3. Add `.orca-state/` to `.gitignore`
-4. Create `.mcp.json` for MCP access
-5. Download workflow playbooks into `.orca/playbooks/`
-6. Create a starter workflow (`.orca/default.yml`) and prompt (`.orca/prompts/implement.md`)
-7. Create a test task and run it
-
-```
-task.md ──► .orca/default.yml ──► implementing ──► done
-                                       │
-                                       ▼
-                                  claude-code
-                              (prompts/implement.md)
-```
-
-<blockquote>
-
-**Set up Orca in this project.** Follow these steps in order:
-
-**1. Install Orca** (skip if already installed — check with `which orca`):
-
-```bash
-pipx install "git+ssh://git@github.com/gutnikov/orca.git"
-```
-
-Verify: `orca -v` should print a version hash.
-
-**2. Start the daemon** in this repo:
-
-```bash
-orca daemon start
-```
-
-Verify: `orca daemon status` should show it running.
-
-**3. Add `.orca-state/` to `.gitignore`** (if not already there) — this is where Orca stores runtime data, logs, and worktrees:
-
-```bash
-echo '.orca-state/' >> .gitignore
-```
-
-**4. Create `.mcp.json`** in the project root to manage Orca runs via MCP:
-
-```json
-{
-  "mcpServers": {
-    "orca": {
-      "command": "orca",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-After creating the file, **tell me to reload MCP servers** (e.g. `/mcp` then restart, or `reload-plugins` depending on the client). Then verify the orca tools are available by calling `orca_daemon_status` with `root` set to this project's absolute path.
-
-**5. Set up the `.orca/` directory** with workflow reference docs and a starter workflow:
-
-```bash
-mkdir -p .orca/prompts
-```
-
-Copy the bundled Orca playbooks into `.orca/playbooks/` — these teach coding agents how to build, audit, and run workflows:
-
-```bash
-orca init
-```
-
-Write `.orca/default.yml`:
-
-```yaml
-issue:
-  fields:
-    title:
-      type: string
-      description: "What to build"
-    description:
-      type: string
-      description: "Detailed requirements"
-
-initial: implementing
-
-states:
-  implementing:
-    worker:
-      kind: claude-code
-      prompt: prompts/implement.md
-      timeout: 600
-      result_format:
-        outcome:
-          type: enum
-          values: [done]
-          description: "Implementation result"
-    on:
-      done: done
-```
-
-Write `.orca/prompts/implement.md`:
-
-````markdown
-# Implementing Agent
-
-You are an implementation agent working in an isolated git worktree.
-
-## Task
-
-**{{ issue.fields.title }}**
-
-{{ issue.fields.description }}
-
-## Instructions
-
-1. Read and understand the requirements
-2. Implement the changes
-3. Run any existing tests to make sure nothing is broken
-4. Commit your changes with a descriptive message
-
-## Output
-
-When you are finished, write a result file to `{{ result_path }}` with this exact shape:
-
-```json
-{
-  "outcome": "done"
-}
-```
-
-The `outcome` field must be the literal string `"done"`. Do not copy a schema definition into the file.
-````
-
-**6. Create a task file** `task.md`:
-
-```yaml
----
-title: Add a hello endpoint
-description: |
-  Create a file called hello.py with a function greet(name)
-  that returns "Hello, {name}!". Include a test in test_hello.py.
----
-```
-
-**7. Start a test run** using the MCP tools:
-
-```
-orca_start_run(root="<absolute path to this repo>", task_file="task.md")
-```
-
-Monitor it with `orca_get_run`. If anything fails, check `orca_get_worker_log`, fix the workflow or prompts, `orca_drop_run` the failed run, and retry.
-
-</blockquote>
-
-After the agent completes the setup, you can manage runs from the CLI (`orca tui`, `orca runs`, `orca logs`) or keep using MCP through your coding agent.
-
-The `.orca/playbooks/` directory stays in your repo — whenever you need to evolve your workflow, just tell your agent: *"Read `.orca/playbooks/` and then [add a review stage / split implementing into plan+implement / audit my workflow]."* The playbooks teach the agent the full Orca config schema, prompt patterns, audit checklist, and run/supervise procedure.
-
-See the rest of this README for the full reference.
-
----
-
-## Manual Setup
-
-Already set up with the [One-Prompt Setup](#one-prompt-setup)? Skip to [How It Works](#how-it-works).
-
-### 1. Install
-
-```bash
-pipx install "git+ssh://git@github.com/gutnikov/orca.git"
-```
-
-Verify it works:
-
-```bash
-orca -v
-```
-
-Update to latest:
-
-```bash
-pipx install --force "git+ssh://git@github.com/gutnikov/orca.git"
-```
-
-> **Prerequisites:** Git, tmux, and at least one AI agent CLI — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`), OpenAI Codex CLI (`codex`), or [OpenCode](https://github.com/opencode-ai/opencode) (`opencode`) — must be installed and authenticated.
-
-### 2. Create a Hello World Workflow
-
-Navigate to any git repo and set up the Orca directory structure:
+Set up a project:
 
 ```bash
 cd your-repo
-
-# Create the workflow config directory with a prompts subdirectory
-mkdir -p .orca/prompts
+codex
 ```
 
-Create the workflow config — a single state that implements whatever the task describes:
+Then ask Codex:
 
-```yaml
-# .orca/default.yml
-
-issue:
-  fields:
-    title:
-      type: string
-      description: "What to build"
-    description:
-      type: string
-      description: "Detailed requirements"
-
-initial: implementing
-
-states:
-  implementing:
-    worker:
-      kind: claude-code
-      prompt: prompts/implement.md
-      timeout: 600
-      result_format:
-        outcome:
-          type: enum
-          values: [done, retry]
-          description: "Whether the implementation is complete"
-          values_description:
-            done: "All changes committed, tests pass"
-            retry: "Something went wrong, try again"
-        summary:
-          type: string
-          description: "What was done or what went wrong"
-    on:
-      done: done
-      retry: implementing
+```text
+Use the orca-setup skill to set up Orca in this project end-to-end.
 ```
 
-Create the prompt template:
+The `orca-setup` skill installs or verifies the Orca CLI, starts the daemon, adds `.orca-state/` to `.gitignore`, creates a starter workflow using `kind: codex`, copies playbooks into `.orca/playbooks/`, and runs a smoke task.
 
-```markdown
-<!-- .orca/prompts/implement.md -->
-
-# Implementing Agent
-
-You are an implementation agent working in an isolated git worktree.
-
-## Task
-
-**{{ issue.fields.title }}**
-
-{{ issue.fields.description }}
-
-## Instructions
-
-1. Read and understand the requirements above
-2. Implement the changes
-3. Run any existing tests to make sure nothing is broken
-4. Commit your changes with a descriptive message
-
-## Output
-
-When finished, write your result to `{{ result_path }}`:
-
-\`\`\`json
-{{ result_example | tojson(indent=2) }}
-\`\`\`
-```
-
-Create a task file:
-
-```yaml
-# task.md
----
-title: Add a hello endpoint
-description: |
-  Create a file called hello.py with a function greet(name)
-  that returns "Hello, {name}!". Include a test in test_hello.py.
----
-```
-
-### 3. Start the Daemon and Run
-
-Orca uses a background daemon to manage runs. Start it, then submit your task:
-
-```bash
-# Start the daemon (runs in background)
-orca daemon start
-
-# Submit the task
-orca run task.md
-```
-
-The daemon picks up the task, creates a worktree, spawns an agent, and drives the state machine. You'll see output like:
-
-```
-Run started: main:default
-```
-
-The run ID format is `branch:workflow` — here it's branch `main` with the `default` workflow.
-
-### 4. Watch It Work in the TUI
-
-Open the live terminal dashboard:
+After setup, start work by asking your agent to create a task and start an Orca run. Watch active work with:
 
 ```bash
 orca tui
 ```
-
-The TUI shows:
-
-- **Left panel** — issue tree with state labels and progress bars
-- **Right panel** — live terminal output from the active worker, issue details, or session history
-- **Header bar** — branch name, active worker count, failure count, elapsed time
-
-Navigate with `j`/`k` (up/down), `h`/`l` (left panel/right panel), and `q` to quit. Press `n` to retry a failed issue.
-
-The TUI connects to the daemon — you can close and reopen it anytime without interrupting the run.
-
-### 5. Monitor and Manage from the CLI
-
-While the TUI is great for watching, the CLI is useful for quick checks and scripting:
-
-```bash
-# List all runs
-orca runs
-
-# Check worker logs (shows all issues for the run)
-orca logs main:default
-
-# Check worker logs for a specific issue (get issue_id from orca runs, state.json, or MCP)
-orca logs main:default abc123
-
-# Retry a failed issue
-orca retry main:default abc123
-
-# Stop a run
-orca stop main:default
-
-# Resume a stopped or failed run
-orca resume main:default
-
-# Delete a run and its state
-orca drop main:default
-```
-
-### 6. Set Up MCP for Your Coding Agent
-
-Add Orca as an MCP server so your coding agent can start, monitor, and control runs directly.
-
-**Claude Code** — add to `.mcp.json` (or `~/.claude/settings.json` for global access):
-
-```json
-{
-  "mcpServers": {
-    "orca": {
-      "command": "orca",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-**Cursor** — add to `.cursor/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "orca": {
-      "command": "orca",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-**VS Code (Copilot)** — add to `.vscode/mcp.json`:
-
-```json
-{
-  "servers": {
-    "orca": {
-      "command": "orca",
-      "args": ["mcp"]
-    }
-  }
-}
-```
-
-Any MCP client that supports stdio transport can use `orca mcp` as the command. See the [MCP Integration](#mcp-integration) section for the full tool reference.
-
----
 
 ## How It Works
 
@@ -1230,7 +835,7 @@ The `run` variable is available in all prompts and contains:
 | `run.insights` | Path to insights file (JSON), if insights are enabled |
 | `run.state` | Path to the state snapshot (JSON) |
 
-Orca automatically appends a result-file warning to every rendered prompt. The [One-Prompt Setup](#one-prompt-setup) copies the bundled playbooks into `.orca/playbooks/` in your project — these include [`orca-create-state-prompt.md`](playbooks/orca-create-state-prompt.md) (writing principles, pitfalls, template anatomy), [`reference/orca-config-reference.md`](playbooks/reference/orca-config-reference.md), [`reference/orca-workflow-patterns.md`](playbooks/reference/orca-workflow-patterns.md), and [`orca-review-workflow.md`](playbooks/orca-review-workflow.md). When creating or modifying workflows, tell your coding agent: *"Read `.orca/playbooks/` and then update my workflow."*
+The setup flow copies the bundled playbooks into `.orca/playbooks/` in your project — these include [`orca-create-state-prompt.md`](playbooks/orca-create-state-prompt.md) (writing principles, pitfalls, template anatomy), [`reference/orca-config-reference.md`](playbooks/reference/orca-config-reference.md), [`reference/orca-workflow-patterns.md`](playbooks/reference/orca-workflow-patterns.md), and [`orca-review-workflow.md`](playbooks/orca-review-workflow.md). When creating or modifying workflows, tell your coding agent: *"Read `.orca/playbooks/` and then update my workflow."*
 
 See [`examples/project/prompts/`](examples/project/prompts/) for complete prompt templates.
 
@@ -1432,7 +1037,7 @@ The config parser validates on load. These are the most common errors and what t
 
 ## Workflow Patterns
 
-Orca workflows are composable — mix and match these patterns to build your pipeline. Full config snippets for each pattern are in `.orca/playbooks/reference/orca-workflow-patterns.md` (copied during [setup](#one-prompt-setup)) or in the [source repo](playbooks/reference/orca-workflow-patterns.md).
+Orca workflows are composable — mix and match these patterns to build your pipeline. Full config snippets for each pattern are in `.orca/playbooks/reference/orca-workflow-patterns.md` (copied during [setup](#installation)) or in the [source repo](playbooks/reference/orca-workflow-patterns.md).
 
 ### Sequential Pipeline
 
