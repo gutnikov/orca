@@ -20,7 +20,7 @@ from orca.engine.types import (
     WorkerDef,
 )
 
-_ALLOWED_WORKER_KINDS = {"claude-code", "opencode"}
+_ALLOWED_WORKER_KINDS = {"claude-code", "codex", "opencode"}
 
 
 class ConfigValidationError(Exception):

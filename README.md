@@ -2,7 +2,7 @@
 
 Orca is a coding agent orchestrator. Built for harness engineering and long-running flows.
 
-- **Coding agents** — Claude Code and OpenCode as workers
+- **Coding agents** — Claude Code, OpenAI Codex CLI, and OpenCode as workers
 - **TUI** — live terminal dashboard with issue trees, worker terminals, progress bars, and session history
 - **MCP** — full API exposed as MCP tools so your coding agent can start, monitor, and control runs
 
@@ -46,7 +46,7 @@ Then in Claude Code:
 3. **Submit work** — describe a task to Claude and say *"start an orca run for this"*. Claude will write `task.md` and call `orca_start_run` via MCP.
 4. **Watch it work** — open the TUI in a separate terminal with `orca tui`, or say *"supervise the orca run"* to invoke the `orca-supervise` skill and babysit interactively.
 
-Prerequisites: Git, [tmux](https://github.com/tmux/tmux), and at least one agent CLI (`claude` or `opencode`) installed and authenticated. `pipx` is needed for the CLI install — the setup skill will tell you if it's missing.
+Prerequisites: Git, [tmux](https://github.com/tmux/tmux), and at least one agent CLI (`claude`, `codex`, or `opencode`) installed and authenticated. `pipx` is needed for the CLI install — the setup skill will tell you if it's missing.
 
 > Prefer to set up by hand or use a non-Claude-Code agent (Cursor, Windsurf, etc.)? Use the [One-Prompt Setup](#one-prompt-setup) below — it's the same flow as the `orca-setup` skill, just copy-pasteable.
 
@@ -234,7 +234,7 @@ Update to latest:
 pipx install --force "git+ssh://git@github.com/gutnikov/orca.git"
 ```
 
-> **Prerequisites:** Git, tmux, and at least one AI agent CLI — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`) or [OpenCode](https://github.com/opencode-ai/opencode) (`opencode`) — must be installed and authenticated.
+> **Prerequisites:** Git, tmux, and at least one AI agent CLI — [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude`), OpenAI Codex CLI (`codex`), or [OpenCode](https://github.com/opencode-ai/opencode) (`opencode`) — must be installed and authenticated.
 
 ### 2. Create a Hello World Workflow
 
@@ -527,7 +527,7 @@ implementing:
 
 ### Workers
 
-A **worker** is a CLI coding agent that runs inside a tmux session with its own git worktree. Orca ships with built-in support for Claude Code and OpenCode, but the worker protocol works with any CLI agent that can read a prompt and write a JSON result file. Workers are:
+A **worker** is a CLI coding agent that runs inside a tmux session with its own git worktree. Orca ships with built-in support for Claude Code, OpenAI Codex CLI, and OpenCode, but the worker protocol works with any CLI agent that can read a prompt and write a JSON result file. Workers are:
 
 - **Isolated** — each worker gets its own copy of the repo via `git worktree`. Workers can commit, branch, and edit files without interfering with each other.
 - **Prompted** — the worker receives a Jinja2-rendered prompt with issue context, the expected result schema, and the path to write `result.json`.
@@ -546,7 +546,7 @@ create git worktree (if needed)
 render prompt template with issue context
     │
     ▼
-start CLI agent (claude / opencode) with prompt
+start CLI agent (claude / codex / opencode) with prompt
     │
     ▼
 poll for result.json ◄──── invalid? send correction message
@@ -944,11 +944,11 @@ worker:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `kind` | string | *required* | `"claude-code"` or `"opencode"`. |
+| `kind` | string | *required* | `"claude-code"`, `"codex"`, or `"opencode"`. |
 | `prompt` | string | *required* | Path to Jinja2 template, relative to the `.orca/` directory (the directory containing the `.yml` file). |
 | `timeout` | int | none | Hard timeout in seconds. Worker is killed after this duration. |
 | `inactivity_timeout` | int | 300 | Seconds without a valid `result.json` before the worker is killed. |
-| `model` | string | none | Override the AI model (passed to the CLI agent). |
+| `model` | string | none | Override the AI model, passed to the CLI agent as `-m <model>`. Values are accepted by the selected CLI. |
 | `args` | list | none | Extra CLI arguments appended to the worker command. |
 | `progress` | bool | `false` | When `true`, workers emit `PROGRESS: <percent> \| <status>` lines shown in the TUI. |
 | `result_format` | mapping | *required** | JSON schema the worker must write to `result.json`. *Required for active states (states with both `worker` and `on`). |
@@ -958,6 +958,7 @@ worker:
 | Kind | Binary | Prompt delivery | Default args |
 |------|--------|-----------------|--------------|
 | `claude-code` | `claude` | stdin | `--dangerously-skip-permissions --max-turns 50` |
+| `codex` | `codex` | CLI argument | `exec` |
 | `opencode` | `opencode` | CLI argument | `run` |
 
 #### Result Format
@@ -1377,7 +1378,7 @@ The config parser validates on load. These are the most common errors and what t
 | Root type must exist | `root_type 'X' does not exist in types` |
 | Initial state must exist | `initial state 'X' does not exist in states` |
 | `done`/`failed` are reserved | `states ['done'] are built-in and must not be defined explicitly` |
-| Worker kind must be valid | `kind must be one of ['claude-code', 'opencode']` |
+| Worker kind must be valid | `kind must be one of ['claude-code', 'codex', 'opencode']` |
 | Worker prompt must be non-empty | `worker prompt for state 'X' must be a non-empty string` |
 | Active states need outcome enum | `active state 'X' must have 'outcome' of type enum in result_format` |
 | `on` keys must match outcomes | `on key 'Y' in state 'X' does not match any outcome value` |

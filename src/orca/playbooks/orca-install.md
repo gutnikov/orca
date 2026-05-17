@@ -21,7 +21,7 @@ Run these checks. If any fail, stop and tell the user what's missing — do **no
 | `pipx` shims are on `PATH` | `case ":$PATH:" in *":$(pipx environment --value PIPX_BIN_DIR):"*) echo ok;; esac` | prints `ok` |
 | `git` is installed | `which git` | prints a path |
 | `tmux` is installed | `which tmux` | prints a path |
-| At least one agent CLI present | `which claude \|\| which opencode` | prints a path |
+| At least one agent CLI present | `which claude \|\| which codex \|\| which opencode` | prints a path |
 | SSH access to GitHub works | `ssh -T git@github.com` (non-fatal banner) | doesn't error on auth |
 
 If `pipx` is missing, suggest `brew install pipx && pipx ensurepath` (macOS) or the platform-appropriate equivalent. Do not run it without confirmation.

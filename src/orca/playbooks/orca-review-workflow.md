@@ -54,7 +54,7 @@ Run every item below. These catch config errors that cause runtime failures.
 - [ ] **Decompose `child_type` exists** — if `child_type: task` is specified, `task` must be a key in `types:`.
 - [ ] **No reserved state names** — no states named `done` or `failed` in `states:`.
 - [ ] **All states reachable** — every non-initial, non-passive state is reachable from `initial` via `on:` rules. Passive states (no worker, no `on:`) are exempt.
-- [ ] **Worker `kind` valid** — `claude-code` or `opencode`.
+- [ ] **Worker `kind` valid** — `claude-code`, `codex`, or `opencode`.
 - [ ] **Worker `prompt` non-empty** — `prompt` field present and non-empty.
 - [ ] **Prompt files exist** — every `worker.prompt` path resolves to a real file. Verify with the filesystem, not trust.
 

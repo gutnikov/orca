@@ -153,6 +153,17 @@ class TestCommandAssembly:
         assert "anthropic/claude-sonnet-4-5" in args
         assert stdin_data is None
 
+    async def test_codex_command(self, tmp_path: Path) -> None:
+        kind_config = KIND_REGISTRY["codex"]
+        cmd, args, stdin_data = await self._spawn_and_capture(kind_config, tmp_path, model="gpt-5.4")
+        assert cmd == "codex"
+        assert args[0] == "exec"
+        # Prompt is the second arg (positional after subcommand).
+        assert len(args[1]) > 0
+        assert "-m" in args
+        assert "gpt-5.4" in args
+        assert stdin_data is None
+
     async def test_extra_args_appended(self, tmp_path: Path) -> None:
         kind_config = KIND_REGISTRY["claude-code"]
         cmd, args, stdin_data = await self._spawn_and_capture(

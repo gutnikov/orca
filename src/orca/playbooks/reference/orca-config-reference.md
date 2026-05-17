@@ -138,11 +138,11 @@ states:
 
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `kind` | `claude-code` \| `opencode` | yes | — | Which agent CLI orca spawns the worker as. |
+| `kind` | `claude-code` \| `codex` \| `opencode` | yes | — | Which agent CLI orca spawns the worker as. |
 | `prompt` | string (path) | yes | — | Jinja2 template path, relative to `.orca/`. Rendered with the issue context before dispatch. |
 | `timeout` | positive int (seconds) | no | none | Hard wall-clock kill. Use for worst-case bounding; the worker is terminated regardless of activity. |
 | `inactivity_timeout` | positive int (seconds) | no | 300 | Kill the worker if no progress for this many seconds. **Paused while the worker's last outcome is `waiting`** (so HITL doesn't trip the timer). |
-| `model` | string | no | inherits from the agent CLI | Passed to the worker CLI as `-m <model>`. Accepted values are whatever the CLI supports — for `claude-code`, a Claude model id like `claude-sonnet-4-6`; for `opencode`, its provider/model scheme. |
+| `model` | string | no | inherits from the agent CLI | Passed to the worker CLI as `-m <model>`. Accepted values are whatever the CLI supports — for `claude-code`, a Claude model id like `claude-sonnet-4-6`; for `codex`, an OpenAI model id like `gpt-5.4`; for `opencode`, its provider/model scheme. |
 | `args` | list of strings | no | — | Extra CLI args appended to the worker invocation. Use sparingly — most knobs have dedicated fields. |
 | `progress` | bool | no | `false` | When `true`, the orchestrator injects a "Progress Reporting" preamble into the rendered prompt asking the worker to emit `PROGRESS: <pct> \| <status>` lines as it works. The orchestrator parses these lines and surfaces them in the TUI and session manifest. Cheap to enable; useful when a state's wall-clock is long. |
 | `result_format` | dict | yes (if worker present) | — | Output schema; see *Result Format* below. |
@@ -211,7 +211,7 @@ The config parser enforces all of these. A workflow that violates any rule will 
 | Outcomes match | Every `on:` key must be a value in `result_format.outcome.values` |
 | Active state routing | States with worker + on: must have `outcome` enum in result_format |
 | At least one routable outcome | State must have ≥1 non-reserved outcome with an `on:` rule |
-| Valid worker kind | Must be `claude-code` or `opencode` |
+| Valid worker kind | Must be `claude-code`, `codex`, or `opencode` |
 | Non-empty prompt | `worker.prompt` required if worker defined |
 | Positive timeouts | `timeout`, `inactivity_timeout` must be positive integers |
 | Positive max_workers | `max_workers` must be positive integer |

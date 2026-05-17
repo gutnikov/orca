@@ -102,6 +102,12 @@ KIND_REGISTRY: dict[str, KindConfig] = {
         subcommand="run",
         default_args=(),
     ),
+    "codex": KindConfig(
+        bin="codex",
+        prompt_via="arg",
+        subcommand="exec",
+        default_args=(),
+    ),
 }
 
 

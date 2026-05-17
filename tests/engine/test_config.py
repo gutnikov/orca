@@ -557,6 +557,31 @@ initial: todo
         assert worker is not None
         assert worker.kind == "opencode"
 
+    def test_codex_kind_accepted(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      kind: codex
+      prompt: prompts/work.md
+      model: gpt-5.4
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+initial: todo
+"""
+        cfg = parse_config(yaml_str)
+        worker = cfg.types["default"].states["todo"].worker
+        assert worker is not None
+        assert worker.kind == "codex"
+        assert worker.model == "gpt-5.4"
+
 
 class TestParseTypedConfig:
     TYPED_YAML = """\
