@@ -54,7 +54,7 @@ def test_codex_marketplace_points_to_plugin() -> None:
     [entry] = marketplace["plugins"]
     assert entry["name"] == "orca"
     assert entry["source"] == {"source": "local", "path": "./plugins/orca"}
-    assert entry["policy"] == {"installation": "AVAILABLE", "authentication": "ON_INSTALL"}
+    assert entry["policy"] == {"installation": "INSTALLED_BY_DEFAULT", "authentication": "ON_INSTALL"}
     assert (ROOT / entry["source"]["path"]).exists()
 
 
