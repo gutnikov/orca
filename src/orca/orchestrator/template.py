@@ -19,6 +19,10 @@ class AbsolutePathLoader(BaseLoader):
         return source, str(path), lambda: True
 
 
+class TemplateRenderError(Exception):
+    pass
+
+
 _RESULT_FILE_WARNING = """
 
 ---
@@ -41,6 +45,27 @@ PROGRESS: <percent> | <status>
 - `<status>` is a short description of what you're currently doing
 - Emit this after completing meaningful milestones, not on every action
 - Example: PROGRESS: 25 | Exploring codebase structure"""
+
+
+def _build_result_example(result_format: dict[str, Any]) -> dict[str, Any]:
+    """Build a worker-facing example result from a result_format schema."""
+    example: dict[str, Any] = {}
+    for name, field in result_format.items():
+        if not isinstance(field, dict):
+            example[name] = None
+            continue
+
+        field_type = field.get("type")
+        if field_type == "enum":
+            values = field.get("values", [])
+            example[name] = values[0] if values else ""
+        elif field_type == "string":
+            example[name] = f"<{name}>"
+        elif field_type == "list":
+            example[name] = []
+        else:
+            example[name] = None
+    return example
 
 
 def render_prompt(
@@ -81,11 +106,20 @@ def render_prompt(
     context = {
         "issue": issue,
         "result_format": result_format,
+        "result_example": _build_result_example(result_format),
         "result_path": str(result_path),
         "run": run,
     }
 
-    rendered = template.render(context)
+    try:
+        rendered = template.render(context)
+    except Exception as exc:
+        msg = (
+            f"Failed to render prompt template {template_path}: {exc}. "
+            "If you are accessing dict keys that may shadow Python methods, "
+            "use bracket syntax such as result_format['outcome']['values']."
+        )
+        raise TemplateRenderError(msg) from exc
     if progress:
         rendered = _PROGRESS_INSTRUCTION + "\n\n---\n\n" + rendered
     return rendered + _RESULT_FILE_WARNING

@@ -65,5 +65,5 @@ git push origin {{ issue.base_branch }}
 Write the result JSON to `{{ result_path }}`:
 
 ```json
-{{ result_format | tojson(indent=2) }}
+{{ result_example | tojson(indent=2) }}
 ```

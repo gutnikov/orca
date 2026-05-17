@@ -5,12 +5,20 @@ from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from mcp.types import TextContent
 from starlette.testclient import TestClient
 
 from orca.daemon.client import DaemonClient
 from orca.daemon.http_api import create_app
 from orca.daemon.manager import RunManager
 from orca.daemon.mcp_tools import create_mcp_server
+
+
+def _first_text(content_blocks: object) -> str:
+    assert isinstance(content_blocks, list)
+    first_block = content_blocks[0]
+    assert isinstance(first_block, TextContent)
+    return str(first_block.text)
 
 
 @pytest.fixture()
@@ -75,11 +83,11 @@ class TestDaemonIntegration:
             server = create_mcp_server()
 
             content_blocks, _ = await server.call_tool("orca_daemon_status", {"root": root})
-            data = json.loads(content_blocks[0].text)
+            data = json.loads(_first_text(content_blocks))
             assert data["active_runs"] == 0
 
             content_blocks, _ = await server.call_tool("orca_list_runs", {"root": root})
-            data = json.loads(content_blocks[0].text)
+            data = json.loads(_first_text(content_blocks))
             assert data == []
 
     @pytest.mark.asyncio()
@@ -99,7 +107,7 @@ class TestDaemonIntegration:
         ):
             server = create_mcp_server()
             content_blocks, _ = await server.call_tool("orca_daemon_status", {"root": root})
-            mcp_status = json.loads(content_blocks[0].text)
+            mcp_status = json.loads(_first_text(content_blocks))
 
             assert http_status["active_runs"] == mcp_status["active_runs"]
             assert http_status["total_runs"] == mcp_status["total_runs"]
@@ -109,6 +117,6 @@ class TestDaemonIntegration:
 
             # MCP list runs
             content_blocks, _ = await server.call_tool("orca_list_runs", {"root": root})
-            mcp_runs = json.loads(content_blocks[0].text)
+            mcp_runs = json.loads(_first_text(content_blocks))
 
             assert http_runs == mcp_runs

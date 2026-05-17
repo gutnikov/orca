@@ -47,7 +47,7 @@ Learn from what went wrong:
 Write the result JSON to `{{ result_path }}`:
 
 ```json
-{{ result_format | tojson(indent=2) }}
+{{ result_example | tojson(indent=2) }}
 ```
 
 Each sub-issue in `sub_issues` must have:

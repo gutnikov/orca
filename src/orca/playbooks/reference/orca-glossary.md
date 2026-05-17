@@ -70,7 +70,8 @@ Worker activity is reported separately: `worker_active: bool` indicates whether 
 ## Common abbreviations / Jinja conventions
 
 - **`{{ issue.fields.X }}`** — user-defined or auto-populated field `X` on the current issue.
-- **`{{ result_format | tojson(indent=2) }}`** — pretty-prints the state's declared `result_format` directly into the prompt so the worker copies an exact JSON shape. Always use this in the output contract; never hand-write the shape (it drifts).
+- **`{{ result_format | tojson(indent=2) }}`** — pretty-prints the state's validation schema. Use this only when explaining the schema; it is not a valid result file.
+- **`{{ result_example | tojson(indent=2) }}`** — pretty-prints a concrete example result for the current state. Use this in the output contract so the worker copies a valid shape.
 - **`{{ result_path }}`** — absolute path where the worker writes its result file. The orchestrator polls for this file and terminates the session ~30 seconds after it appears. Don't perform work *after* the result write.
 - **`{{ issue.event_log }}`** — chronological list of events on this issue. Useful in retry prompts to see what the previous attempt did.
 - **`{{ run.* }}`** — see [`orca-create-state-prompt.md`](../orca-create-state-prompt.md) Step 2 for the full table.

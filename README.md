@@ -48,7 +48,40 @@ Then in Claude Code:
 
 Prerequisites: Git, [tmux](https://github.com/tmux/tmux), and at least one agent CLI (`claude`, `codex`, or `opencode`) installed and authenticated. `pipx` is needed for the CLI install — the setup skill will tell you if it's missing.
 
-> Prefer to set up by hand or use a non-Claude-Code agent (Cursor, Windsurf, etc.)? Use the [One-Prompt Setup](#one-prompt-setup) below — it's the same flow as the `orca-setup` skill, just copy-pasteable.
+## Install as a Codex plugin
+
+This repo also ships a Codex plugin marketplace at `.agents/plugins/marketplace.json`. The Codex plugin package lives at `plugins/orca/` and includes the same setup, supervision, workflow-authoring skills, MCP server registration, and session hook as the Claude Code plugin. Its starter workflow uses `kind: codex`.
+
+In Codex, run:
+
+```bash
+codex plugin marketplace add gutnikov/orca
+```
+
+For local testing from a checkout, use the repository path instead:
+
+```bash
+codex plugin marketplace add /path/to/orca
+```
+
+Then install or enable the `orca` plugin from Codex's plugin UI and restart/reload Codex so the MCP server registers.
+
+### Quick start (per project)
+
+```bash
+cd your-repo
+```
+
+Then in Codex:
+
+1. **Tell Codex "set up orca in this project"** — the `orca-setup` skill triggers and Codex will pipx-install the `orca` CLI, start the daemon, add `.orca-state/` to `.gitignore`, scaffold `.orca/default.yml` + `.orca/prompts/implement.md`, and run a test task.
+2. **Reload once more** if Codex prompts you (the MCP server needs to find the freshly-installed `orca` binary on PATH).
+3. **Submit work** — describe a task to Codex and say *"start an orca run for this"*. Codex will write `task.md` and call `orca_start_run` via MCP.
+4. **Watch it work** — open the TUI in a separate terminal with `orca tui`, or say *"supervise the orca run"* to invoke the `orca-supervise` skill and babysit interactively.
+
+Prerequisites are the same as above: Git, tmux, `pipx`, and at least one authenticated worker CLI. For Codex-first projects, make sure `codex` is installed and authenticated.
+
+> Prefer to set up by hand or use another agent (Cursor, Windsurf, etc.)? Use the [One-Prompt Setup](#one-prompt-setup) below — it's the same flow as the `orca-setup` skill, just copy-pasteable.
 
 ## One-Prompt Setup
 
@@ -176,11 +209,15 @@ You are an implementation agent working in an isolated git worktree.
 
 ## Output
 
-Write your result to `{{ result_path }}`:
+When you are finished, write a result file to `{{ result_path }}` with this exact shape:
 
 ```json
-{{ result_format | tojson(indent=2) }}
+{
+  "outcome": "done"
+}
 ```
+
+The `outcome` field must be the literal string `"done"`. Do not copy a schema definition into the file.
 ````
 
 **6. Create a task file** `task.md`:
@@ -312,7 +349,7 @@ You are an implementation agent working in an isolated git worktree.
 When finished, write your result to `{{ result_path }}`:
 
 \`\`\`json
-{{ result_format | tojson(indent=2) }}
+{{ result_example | tojson(indent=2) }}
 \`\`\`
 ```
 
@@ -951,7 +988,7 @@ worker:
 | `model` | string | none | Override the AI model, passed to the CLI agent as `-m <model>`. Values are accepted by the selected CLI. |
 | `args` | list | none | Extra CLI arguments appended to the worker command. |
 | `progress` | bool | `false` | When `true`, workers emit `PROGRESS: <percent> \| <status>` lines shown in the TUI. |
-| `result_format` | mapping | *required** | JSON schema the worker must write to `result.json`. *Required for active states (states with both `worker` and `on`). |
+| `result_format` | mapping | *required** | JSON schema Orca uses to validate `result.json`. *Required for active states (states with both `worker` and `on`). |
 
 **Worker kinds:**
 
@@ -1173,7 +1210,8 @@ Prompts are Jinja2 markdown templates. The following variables are available:
 | `{{ issue.children }}` | Child issues from a previous decomposition attempt |
 | `{{ issue.depends_on }}` | IDs of issues this one depends on |
 | `{{ issue.decomposed_from }}` | Parent issue ID (if this is a child issue) |
-| `{{ result_format \| tojson(indent=2) }}` | The output JSON schema the worker must produce |
+| `{{ result_format \| tojson(indent=2) }}` | The output JSON schema used by Orca for validation |
+| `{{ result_example \| tojson(indent=2) }}` | A concrete example result the worker can copy and fill in |
 | `{{ result_path }}` | Path where the worker writes `result.json` |
 | `{{ run }}` | Run context — session logs, insights, state paths, summary (see below) |
 

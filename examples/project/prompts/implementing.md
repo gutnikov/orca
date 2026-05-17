@@ -76,5 +76,5 @@ and keeps you alive until an operator unblocks you with a message.
 Write the result JSON to `{{ result_path }}`:
 
 ```json
-{{ result_format | tojson(indent=2) }}
+{{ result_example | tojson(indent=2) }}
 ```

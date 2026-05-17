@@ -4,10 +4,18 @@ import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from mcp.types import TextContent
 
 from orca.daemon.mcp_tools import create_mcp_server
 
 FAKE_ROOT = "/tmp/test-repo"
+
+
+def _first_text(content_blocks: object) -> str:
+    assert isinstance(content_blocks, list)
+    first_block = content_blocks[0]
+    assert isinstance(first_block, TextContent)
+    return str(first_block.text)
 
 
 @pytest.fixture()
@@ -64,7 +72,7 @@ class TestDaemonStatusTool:
             patch("orca.daemon.mcp_tools.DaemonClient", return_value=mock_client),
         ):
             content_blocks, _ = await server.call_tool("orca_daemon_status", {"root": FAKE_ROOT})
-        data = json.loads(content_blocks[0].text)
+        data = json.loads(_first_text(content_blocks))
         assert data["active_runs"] == 0
         assert data["total_runs"] == 0
         assert "uptime" in data
@@ -79,7 +87,7 @@ class TestListRunsTool:
             patch("orca.daemon.mcp_tools.DaemonClient", return_value=mock_client),
         ):
             content_blocks, _ = await server.call_tool("orca_list_runs", {"root": FAKE_ROOT})
-        data = json.loads(content_blocks[0].text)
+        data = json.loads(_first_text(content_blocks))
         assert data == []
 
 
@@ -92,7 +100,7 @@ class TestGetRunTool:
             patch("orca.daemon.mcp_tools.DaemonClient", return_value=mock_client),
         ):
             content_blocks, _ = await server.call_tool("orca_get_run", {"root": FAKE_ROOT, "run_id": "nope:default"})
-        data = json.loads(content_blocks[0].text)
+        data = json.loads(_first_text(content_blocks))
         assert "error" in data
 
     async def test_not_found_message(self, mock_client: MagicMock) -> None:
@@ -102,7 +110,7 @@ class TestGetRunTool:
             patch("orca.daemon.mcp_tools.DaemonClient", return_value=mock_client),
         ):
             content_blocks, _ = await server.call_tool("orca_get_run", {"root": FAKE_ROOT, "run_id": "nope:default"})
-        data = json.loads(content_blocks[0].text)
+        data = json.loads(_first_text(content_blocks))
         assert "nope:default" in data["error"]
 
 
@@ -117,7 +125,7 @@ class TestGetIssueTool:
             content_blocks, _ = await server.call_tool(
                 "orca_get_issue", {"root": FAKE_ROOT, "run_id": "nope:default", "issue_id": "iss-1"}
             )
-        data = json.loads(content_blocks[0].text)
+        data = json.loads(_first_text(content_blocks))
         assert "error" in data
 
 
@@ -132,7 +140,7 @@ class TestGetInsightsTool:
             content_blocks, _ = await server.call_tool(
                 "orca_get_insights", {"root": FAKE_ROOT, "run_id": "nope:default"}
             )
-        assert content_blocks[0].text == ""
+        assert _first_text(content_blocks) == ""
 
 
 @pytest.mark.asyncio()
@@ -146,7 +154,7 @@ class TestGetWorkerLogTool:
             content_blocks, _ = await server.call_tool(
                 "orca_get_worker_log", {"root": FAKE_ROOT, "run_id": "nope:default", "issue_id": "iss-1"}
             )
-        assert content_blocks[0].text == ""
+        assert _first_text(content_blocks) == ""
 
 
 @pytest.mark.asyncio()
@@ -160,7 +168,7 @@ class TestRetryIssueTool:
             content_blocks, _ = await server.call_tool(
                 "orca_retry_issue", {"root": FAKE_ROOT, "run_id": "nope:default", "issue_id": "iss-1"}
             )
-        data = json.loads(content_blocks[0].text)
+        data = json.loads(_first_text(content_blocks))
         assert "error" in data
 
 
@@ -173,5 +181,5 @@ class TestStopRunTool:
             patch("orca.daemon.mcp_tools.DaemonClient", return_value=mock_client),
         ):
             content_blocks, _ = await server.call_tool("orca_stop_run", {"root": FAKE_ROOT, "run_id": "nope:default"})
-        data = json.loads(content_blocks[0].text)
+        data = json.loads(_first_text(content_blocks))
         assert "error" in data

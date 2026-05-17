@@ -1,0 +1,47 @@
+{
+  "name": "orca",
+  "version": "0.1.0",
+  "description": "Coding agent orchestrator with MCP tools, workflow setup, and run supervision for Codex.",
+  "author": {
+    "name": "Alex Gutnikov",
+    "url": "https://github.com/gutnikov"
+  },
+  "homepage": "https://github.com/gutnikov/orca",
+  "repository": "https://github.com/gutnikov/orca",
+  "license": "MIT",
+  "keywords": [
+    "orchestrator",
+    "mcp",
+    "codex",
+    "claude-code",
+    "opencode",
+    "agents",
+    "workflow",
+    "tui"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks.json",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "Orca",
+    "shortDescription": "Set up, run, and supervise Orca coding-agent workflows from Codex.",
+    "longDescription": "Use Orca to install the CLI, scaffold workflow configs and prompts, expose the daemon through MCP tools, and supervise long-running coding-agent workflows with worker logs, retries, and unblock handling.",
+    "developerName": "Alex Gutnikov",
+    "category": "Coding",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://github.com/gutnikov/orca",
+    "privacyPolicyURL": "https://github.com/gutnikov/orca",
+    "termsOfServiceURL": "https://github.com/gutnikov/orca",
+    "defaultPrompt": [
+      "Set up Orca in this project.",
+      "Create an Orca workflow for this repo.",
+      "Supervise the current Orca run."
+    ],
+    "brandColor": "#111111",
+    "screenshots": []
+  }
+}

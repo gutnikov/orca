@@ -256,6 +256,71 @@ class TestCliAgentWorker:
         assert isinstance(outcome, WorkerFailure)
         assert "summary" in outcome.error
 
+    async def test_non_string_outcome_gets_correction_not_stale_delete(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Schema-shaped outcome is malformed, not a stale result from another state."""
+        import orca.orchestrator.worker as _mod
+
+        monkeypatch.setattr(_mod, "_POLL_INTERVAL", 0.05)
+
+        effect = _make_effect()
+        result_path = tmp_path / "result.json"
+        prompt_path = tmp_path / "prompt.md"
+        prompt_path.write_text("Do the thing")
+
+        schema_shaped_result = {
+            "outcome": {
+                "description": "Outcome",
+                "type": "enum",
+                "values": ["done"],
+            }
+        }
+
+        pty = MagicMock()
+        pty.session_name = "mock-session"
+        pty.kill = MagicMock()
+        pty.close = MagicMock()
+        pty.send_keys = MagicMock(return_value=True)
+        type(pty).alive = property(lambda self: True)
+
+        async def _spawn(*args: Any, **kwargs: Any) -> None:
+            result_path.write_text(json.dumps(schema_shaped_result))
+
+        pty.spawn = AsyncMock(side_effect=_spawn)
+
+        worker = CliAgentWorker(repo_root=tmp_path, kind_config=KIND_REGISTRY["claude-code"])
+        outcome = await worker.execute(
+            effect,
+            tmp_path,
+            result_path,
+            prompt_path,
+            inactivity_timeout=0,
+            pty_session=pty,
+        )
+
+        assert isinstance(outcome, WorkerFailure)
+        assert result_path.exists()
+        pty.send_keys.assert_called_once()
+        assert "INVALID" in pty.send_keys.call_args[0][0]
+
+    async def test_template_render_error_returns_worker_failure(self, tmp_path: Path) -> None:
+        """Prompt render failures should not escape as raw task exceptions."""
+        effect = _make_effect()
+        result_path = tmp_path / "result.json"
+        prompt_path = tmp_path / "prompt.md"
+        prompt_path.write_text("{{ result_format.outcome.values | tojson }}")
+
+        pty = _make_mock_pty()
+
+        worker = CliAgentWorker(repo_root=tmp_path, kind_config=KIND_REGISTRY["claude-code"])
+        outcome = await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty)
+
+        assert isinstance(outcome, WorkerFailure)
+        assert "Failed to render prompt template" in outcome.error
+        assert "result_format['outcome']['values']" in outcome.error
+        pty.spawn.assert_not_called()
+
     async def test_previous_result_file_deleted(self, tmp_path: Path) -> None:
         """Stale result deleted, session exits with no new result -> WorkerFailure."""
         effect = _make_effect()

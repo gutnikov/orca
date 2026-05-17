@@ -77,7 +77,7 @@ Items here are usually **Important**, sometimes **Minor** depending on impact.
 
 For each prompt file, verify:
 
-- [ ] **`result_format` embedded** — prompt contains `{{ result_format | tojson(indent=2) }}` or the exact JSON schema. Workers that guess the format produce invalid results.
+- [ ] **Concrete result example embedded** — prompt contains `{{ result_example | tojson(indent=2) }}` or a hand-written valid result example. Workers that copy the schema produce invalid results.
 - [ ] **`result_path` referenced** — prompt contains `{{ result_path }}` telling the worker where to write the result file.
 - [ ] **Constraints near end** — constraints are in a dedicated `## Constraints` section in the bottom half. Workers forget early constraints.
 - [ ] **No hardcoded values** — issue-derived values use `{{ issue.fields.* }}` template variables. Especially scope boundaries, branch names, file paths.
@@ -128,7 +128,7 @@ Stop after Phase 5. Print the report. Done.
 
 ### `supervised`
 - Apply fixes for items that are a direct violation of a checklist rule **and** have an unambiguous remediation:
-  - Add missing `{{ result_format | tojson(indent=2) }}` / `{{ result_path }}` blocks
+  - Add missing `{{ result_example | tojson(indent=2) }}` / `{{ result_path }}` blocks
   - Add missing `blocked` outcome and a corresponding `on:` rule (with `then: failed` or a sensible target — but **ask the user** what the target should be)
   - Add `max_workers: 1` to a state the user named as a merge/apply state
   - Wrap conditional sections in `{% if %}` guards

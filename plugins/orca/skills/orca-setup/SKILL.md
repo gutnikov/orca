@@ -41,7 +41,7 @@ Skip if already present.
 
 ## 4. MCP server registration
 
-If this project was set up via the Claude Code Orca plugin, the MCP server is already registered automatically — skip to step 5.
+If this project was set up via the Codex Orca plugin, the MCP server is already registered automatically — skip to step 5.
 
 Otherwise, create `.mcp.json` in the project root:
 
@@ -56,7 +56,7 @@ Otherwise, create `.mcp.json` in the project root:
 }
 ```
 
-Then tell the user to reload MCP servers (e.g. `/mcp` then restart). Verify the orca tools are available by calling `orca_daemon_status` with `root` set to this project's absolute path.
+Then tell the user to restart or reload their MCP-capable client. Verify the orca tools are available by calling `orca_daemon_status` with `root` set to this project's absolute path.
 
 ## 5. Set up the `.orca/` directory
 
@@ -86,7 +86,7 @@ initial: implementing
 states:
   implementing:
     worker:
-      kind: claude-code
+      kind: codex
       prompt: prompts/implement.md
       timeout: 600
       result_format:

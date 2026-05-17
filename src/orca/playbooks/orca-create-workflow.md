@@ -109,7 +109,7 @@ For each active state, create `.orca/prompts/{state}.md`. Follow [`orca-create-s
   Write your result to `{{ result_path }}`:
 
   ```json
-  {{ result_format | tojson(indent=2) }}
+  {{ result_example | tojson(indent=2) }}
   ```
   ````
 

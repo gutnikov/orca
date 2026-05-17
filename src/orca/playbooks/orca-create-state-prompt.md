@@ -41,7 +41,8 @@ The full set of variables exposed to a prompt template:
 | `{{ issue.event_log }}` | list | Event history (timestamps, types, data) | Retry-aware prompts that need past failures |
 | `{{ issue.base_branch }}` | string | Git branch for merging | If the worker needs to know the merge target |
 | `{{ issue.decomposed_from }}` | string | Parent issue ID (if child) | When a child task needs parent context |
-| `{{ result_format }}` | dict | Schema the worker must produce | **Always** — embed via `tojson(indent=2)` |
+| `{{ result_format }}` | dict | Schema Orca validates against | Advanced prompts that explain allowed outcomes |
+| `{{ result_example }}` | dict | Concrete result JSON the worker can copy and fill in | **Always** — embed via `tojson(indent=2)` |
 | `{{ result_path }}` | string | Path to write result.json | **Always** — tell the worker where to write |
 | `{{ run.branch }}` | string | Git branch name | Prompts that orchestrate their own filesystem |
 | `{{ run.workflow }}` | string | Workflow name | Same as above (rare) |
@@ -55,11 +56,14 @@ Anything optional (`depends_on`, `children`, `event_log`) must be wrapped in `{%
 
 Filters you'll commonly use inside a prompt template:
 
-- `{{ x | tojson(indent=2) }}` — serialize to pretty-printed JSON. **Always use this for `result_format`**: it renders the state's declared output schema (from the YAML) directly into the prompt, so the worker copies an exact shape rather than guessing. Hand-writing the JSON shape risks drifting from the config.
+- `{{ x | tojson(indent=2) }}` — serialize to pretty-printed JSON. **Always use this for `result_example`** in the output contract. `result_format` is the validation schema; do not ask the worker to copy it as the result file.
 - `{{ x | length }}` — string/list length
 - `{{ items | join(", ") }}` — join list with separator
 - `{{ x | upper }}`, `{{ x | lower }}` — case conversion
 - `{{ x | replace(old, new) }}` — string replacement
+
+When accessing dict keys that may shadow Python methods, use bracket syntax. For example, use
+`{{ result_format['outcome']['values'] | tojson }}` instead of `{{ result_format.outcome.values | tojson }}`.
 
 Conditionals (always use these to avoid empty sections):
 
@@ -140,7 +144,7 @@ The orchestrator pauses the inactivity timer; a human will reply via `orca unblo
 Write your result to `{{ result_path }}`:
 
 ```json
-{{ result_format | tojson(indent=2) }}
+{{ result_example | tojson(indent=2) }}
 ```
 
 IMPORTANT: Writing the result file is the FINAL action. Complete ALL work and commits first.
@@ -165,7 +169,7 @@ Run through every item below against your draft. These are the most common failu
 
 **Good:** Split into a `planning` state and an `implementing` state. One job each.
 
-#### P2. Not embedding `result_format`
+#### P2. Not embedding a concrete result example
 
 **Bad:** "Write the result as JSON" — worker guesses the shape.
 
@@ -174,7 +178,7 @@ Run through every item below against your draft. These are the most common failu
 Write your result to `{{ result_path }}`:
 
 ```json
-{{ result_format | tojson(indent=2) }}
+{{ result_example | tojson(indent=2) }}
 ```
 ````
 
@@ -290,7 +294,7 @@ If you're inside the larger [orca-create-workflow.md](orca-create-workflow.md) f
 - **Prose dump of "everything the worker should know".** Workers follow numbered steps; long paragraphs are skimmed.
 - **Generic verification.** "Run tests" without naming the test runner. Workers will pick the wrong one or skip it.
 - **Constraints buried in the introduction.** Workers forget early constraints. They belong near the end.
-- **Hand-written JSON schema instead of `{{ result_format | tojson(indent=2) }}`.** The template ensures the schema stays in sync with the YAML. Hand-written copies drift.
+- **Embedding `{{ result_format | tojson(indent=2) }}` as the result file.** That is the validation schema, not a valid worker result. Use `{{ result_example | tojson(indent=2) }}` or a concrete hand-written result example.
 - **Mentioning what to do *after* writing the result file.** The orchestrator kills the session ~30s after detecting a valid result. Anything after the result write won't run.
 
 ## Done

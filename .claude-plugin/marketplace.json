@@ -12,7 +12,7 @@
       "version": "0.1.0",
       "homepage": "https://github.com/gutnikov/orca",
       "license": "MIT",
-      "keywords": ["orchestrator", "mcp", "claude-code", "opencode", "agents", "workflow"]
+      "keywords": ["orchestrator", "mcp", "claude-code", "codex", "opencode", "agents", "workflow"]
     }
   ]
 }

@@ -12,7 +12,7 @@ from typing import Any, Protocol
 from orca.engine.types import DispatchWorkerEffect
 from orca.orchestrator.pty_session import PtySession
 from orca.orchestrator.session_sync import SessionManifest
-from orca.orchestrator.template import render_prompt
+from orca.orchestrator.template import TemplateRenderError, render_prompt
 from orca.orchestrator.validation import validate_result
 
 logger = logging.getLogger(__name__)
@@ -155,15 +155,18 @@ class CliAgentWorker:
 
         # b. Render prompt
         if prompt_path is not None:
-            prompt = render_prompt(
-                prompt_path,
-                self._repo_root,
-                effect.issue,
-                effect.result_format,
-                result_path,
-                progress=effect.progress_enabled,
-                run=run_context,
-            )
+            try:
+                prompt = render_prompt(
+                    prompt_path,
+                    self._repo_root,
+                    effect.issue,
+                    effect.result_format,
+                    result_path,
+                    progress=effect.progress_enabled,
+                    run=run_context,
+                )
+            except TemplateRenderError as exc:
+                return WorkerFailure(error=str(exc))
         else:
             prompt = ""
 
@@ -272,7 +275,11 @@ class CliAgentWorker:
                         outcome_def = effect.result_format.get("outcome", {})
                         valid_outcomes = outcome_def.get("values", [])
                         candidate_outcome = candidate.get("outcome")
-                        if candidate_outcome is not None and candidate_outcome not in valid_outcomes:
+                        if (
+                            isinstance(candidate_outcome, str)
+                            and candidate_outcome
+                            and candidate_outcome not in valid_outcomes
+                        ):
                             result_path.unlink(missing_ok=True)
                             logger.info(
                                 "Deleted stale result.json for issue %s (outcome '%s' not in %s)",

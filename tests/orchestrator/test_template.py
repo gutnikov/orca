@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from orca.orchestrator.template import render_prompt
+from orca.orchestrator.template import TemplateRenderError, render_prompt
 
 
 class TestRenderPrompt:
@@ -68,6 +68,55 @@ class TestRenderPrompt:
 
         assert "status" in output
         assert "Success or failure" in output
+
+    def test_result_example_rendering(self, tmp_path: Path) -> None:
+        """Prompts can render a concrete result example separate from the schema."""
+        template_content = "{{ result_example | tojson(indent=2) }}"
+        template_file = tmp_path / "template.md"
+        template_file.write_text(template_content)
+
+        issue: dict[str, Any] = {
+            "fields": {"title": "Fix bug"},
+            "event_log": [],
+            "decomposed_from": None,
+            "depends_on": [],
+            "children": [],
+        }
+        result_format: dict[str, Any] = {
+            "outcome": {"type": "enum", "values": ["done"], "description": "Outcome"},
+            "summary": {"type": "string", "description": "Summary"},
+            "changed_files": {"type": "list", "items": "string", "description": "Files"},
+        }
+        result_path = Path("/tmp/result.txt")
+
+        output = render_prompt(template_file, tmp_path, issue, result_format, result_path)
+
+        assert '"outcome": "done"' in output
+        assert '"summary": "\\u003csummary\\u003e"' in output
+        assert '"changed_files": []' in output
+
+    def test_render_error_includes_template_path_and_dict_guidance(self, tmp_path: Path) -> None:
+        """Dict method/key shadowing failures should be actionable."""
+        template_file = tmp_path / "template.md"
+        template_file.write_text("{{ result_format.outcome.values | tojson }}")
+
+        issue: dict[str, Any] = {
+            "fields": {"title": "Fix bug"},
+            "event_log": [],
+            "decomposed_from": None,
+            "depends_on": [],
+            "children": [],
+        }
+        result_format: dict[str, Any] = {
+            "outcome": {"type": "enum", "values": ["done"], "description": "Outcome"},
+        }
+
+        with pytest.raises(TemplateRenderError) as exc_info:
+            render_prompt(template_file, tmp_path, issue, result_format, Path("/tmp/result.txt"))
+
+        message = str(exc_info.value)
+        assert str(template_file) in message
+        assert "result_format['outcome']['values']" in message
 
     def test_missing_template_raises(self, tmp_path: Path) -> None:
         """Test that missing template raises FileNotFoundError."""
