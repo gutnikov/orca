@@ -15,25 +15,28 @@ Write or update a single `.orca/prompts/{state}.md` template — the instruction
 - During **[orca-workflow-create.md](orca-workflow-create.md)** step 5 (writing prompt templates).
 - When adding a new state to an existing workflow.
 - When **[orca-workflow-review.md](orca-workflow-review.md)** flags a prompt-quality issue you need to rewrite.
-- When a worker keeps producing wrong-shape output or ignoring scope — usually a prompt bug.
+- When a worker keeps producing wrong-shape output or ignoring scope — *sometimes* a prompt bug, but walk the failure-attribution taxonomy in [`reference/prompt-design.md`](reference/prompt-design.md) §4 before editing. Five of the six failure modes are not prompt bugs.
 
 ## Prerequisites
 
 - `.orca/{flow}.yml` exists and the target state is defined in it.
 - You know which state you're writing the prompt for (e.g., `implementing`, `reviewing`, `scoping`).
-- You've read the `result_format` for this state from the YAML — the prompt must produce that exact shape.
+- You've read [`reference/prompt-design.md`](reference/prompt-design.md). Under the evaluations-first paradigm, `evaluations.md` and `result_format` are drafted in Step 1 below — *before* any prompt prose. If a `result_format` already exists in the YAML, you'll reconcile against it in Step 1; if not, you'll design it.
 
 ## Step 1 — Pin down the state's contract
 
-Before writing prose, extract these from `.orca/{flow}.yml`:
+The contract is `evaluations.md` + `result_format`. Both are drafted before any prompt prose — that is the evaluations-first paradigm. See [`reference/prompt-design.md`](reference/prompt-design.md) §3 for the *why* and §4 for the bootstrap question set.
 
-1. **Single responsibility.** What is this state's *one* job? Write it as one sentence. If you can't, the state needs to be split — go back to [orca-workflow-create.md](orca-workflow-create.md) and split it before writing this prompt.
-2. **Inputs.** Which `issue.fields.*` does the worker need? (Usually `title`, `description`, plus state-specific fields like `scope_boundary`, `plan`, `acceptance_criteria`.)
-3. **Outputs.** Read the state's `result_format`. List every key, its type, and (for enum outcomes) every legal value. Cross-reference every value against the state's `on:` map — they must match.
-4. **Branch behaviour.** Does this state expect to be on a feature branch? Does it commit? Does it merge? Note this — the constraints section will need to reflect it.
-5. **Verification.** What does "done correctly" mean in this project? (Tests pass? Lint clean? Types check? Specific command? Match the project's actual conventions, not a generic list.)
+Settle these six points before drafting the prompt:
 
-Write these five answers down before drafting the prompt. If anything is unclear, ask the user.
+1. **Draft `evaluations.md` first.** Run the 3-question bootstrap (one-sentence success / obvious failure / shape of result). Write 3–5 objective, gradable criteria. Save them under `.orca/tests/<scenario>/evaluations.md` per [`orca-test-create.md`](orca-test-create.md). If a scenario directory already exists, edit in place.
+2. **Sketch `result_format` from the criteria.** Every field a criterion references must be emitted. If the state already has a `result_format` in `.orca/{flow}.yml`, reconcile against it (add missing fields, flag judgment-heavy criteria that depend on prose-shape evidence). If not, design one and add it to the YAML. Cross-reference every enum value against the state's `on:` map — they must match.
+3. **Single responsibility.** What is this state's *one* job? Write it as one sentence. If you can't, the state needs to be split — go back to [orca-workflow-create.md](orca-workflow-create.md) and split it before writing this prompt.
+4. **Inputs.** Which `issue.fields.*` does the worker need? (Usually `title`, `description`, plus state-specific fields like `scope_boundary`, `plan`, `acceptance_criteria`.)
+5. **Branch behaviour.** Does this state expect to be on a feature branch? Does it commit? Does it merge? Note this — the constraints section will need to reflect it.
+6. **Verification.** What does "done correctly" mean in this project? (Tests pass? Lint clean? Types check? Specific command? Match the project's actual conventions, not a generic list.)
+
+Write these six answers down before drafting the prompt. If anything is unclear, ask the user. The prompt you draft in Step 3 has one job: make the worker emit a result that passes the criteria in (1) and matches the schema in (2).
 
 ## Step 2 — Pick the right template variables
 
@@ -278,15 +281,15 @@ Before committing:
 
 If your editor supports it, render the Jinja template with a sample issue and read the output — many bugs only show up post-render (orphan headers, missing fields, wrong indentation in the JSON block).
 
-## Step 6 — Show the user, then write the file
+## Step 6 — Show the user the evaluations, then write the file
 
 For any non-trivial prompt:
-1. Print the draft.
-2. Ask: "Does this match what you want this state to do?"
-3. Adjust based on feedback.
+1. Print the draft prompt *alongside* the `evaluations.md` it is supposed to satisfy.
+2. Ask the user to verify the **evaluations** capture what they want — not whether the prompt prose reads well. The prompt is whatever passes the evaluations; the evaluations are the durable spec. See [`reference/prompt-design.md`](reference/prompt-design.md) §1.
+3. Adjust evaluations if needed; adjust the prompt only as a downstream consequence.
 4. Write to `.orca/prompts/{state}.md`.
 
-Skipping the show-and-confirm step is the most common way to produce a prompt the user later has to rewrite.
+Skipping the show-the-evaluations step is the most common way to produce a prompt the user later has to rewrite from scratch. The user reviewing the prompt directly is a fallback, not the default — at 200+ lines, prompts are not designed to be read.
 
 ## Step 7 — Trigger a re-audit
 
@@ -294,22 +297,23 @@ If you're editing an existing workflow, run **[orca-workflow-review.md](orca-wor
 
 If you're inside the larger [orca-workflow-create.md](orca-workflow-create.md) flow, the audit is already part of step 6 there; don't double-run it.
 
-## Step 8 — Verify against the evaluations
+## Step 8 — Run the test and iterate
 
-Under the evaluations-first paradigm (see [`reference/prompt-design.md`](reference/prompt-design.md)), this step is not optional for non-trivial prompts — and it is not the *last* step in spirit. The evaluations should have been drafted *before* the prompt; this step verifies the prompt converges on them.
+By Step 1 you drafted `evaluations.md` and a matching `result_format`. By Steps 3–6 you wrote the prompt. Now run the test that exercises this prompt and iterate per the loop in [`reference/prompt-design.md`](reference/prompt-design.md) §4:
 
-If you wrote the prompt without evaluations first, stop and treat this as a bootstrap step:
+1. Run the test scaffolded under `.orca/tests/<scenario>/` (see [`orca-test-create.md`](orca-test-create.md) for `orca test` invocation). Read `report.md`.
+2. For every failing criterion, walk the failure-attribution taxonomy **before** editing anything. The taxonomy distinguishes Prompt / Evaluation / Scenario / `result_format` / Model / Flow failures; each gets a different fix.
+3. Apply the **minimal** edit — one sentence in the prompt, one field in the schema, one rewrite of the criterion, depending on the attribution. Resist broad rewrites.
+4. Re-run. Repeat until all criteria pass, or the user explicitly accepts the remaining gaps.
 
-1. Draft `evaluations.md` per Section 4 of [`reference/prompt-design.md`](reference/prompt-design.md) — 3–5 objective criteria covering the most important guarantees (expected `outcome` value, presence of required result fields, any constraint the prompt enforces).
-2. Follow [`orca-test-create.md`](orca-test-create.md) to scaffold a single-state slice that exercises this prompt.
-3. Run the test. Read the report.
-4. Walk the failure-attribution taxonomy before editing anything.
-5. Apply the minimal edit; re-run.
+If a new kind of bad output surfaces later (drift), the first move is **not** editing the prompt. Write a criterion that catches the new output, confirm it fails, then attribute and apply the minimal edit. Never grow the prompt without a failing criterion that justifies it.
 
-Skip only for genuinely trivial prompts (one-line decision states with no constraints worth grading).
+Skip this step only for genuinely trivial prompts (one-line decision states with no constraints worth grading).
 
 ## Anti-patterns to refuse
 
+- **Drafting the prompt before drafting evaluations and `result_format`.** The prompt has nothing to converge on. The paradigm requires Step 1 first — see [`reference/prompt-design.md`](reference/prompt-design.md). Refuse and bootstrap.
+- **Adding prompt prose to fix drift without a failing evaluation.** Drift = write a new criterion first, confirm it fails, then minimal-edit. "Just in case" prose is how prompts grow from 100 to 500 lines.
 - **Two-job prompts.** "First plan, then implement" in one prompt — refuse, ask to split states.
 - **Prose dump of "everything the worker should know".** Workers follow numbered steps; long paragraphs are skimmed.
 - **Generic verification.** "Run tests" without naming the test runner. Workers will pick the wrong one or skip it.
@@ -321,7 +325,10 @@ Skip only for genuinely trivial prompts (one-line decision states with no constr
 
 Report:
 - File written or updated: `.orca/prompts/{state}.md`
+- Evaluations drafted and where: `.orca/tests/<scenario>/evaluations.md` (criteria count)
+- `result_format` design — added, reconciled, or unchanged
 - Single-responsibility sentence (the one you wrote in Step 1)
 - Whether all variables resolve against the current issue schema
-- Whether a re-audit was run and its result
-- Next step (test run, commit, or continue with the next state's prompt)
+- Whether a workflow re-audit was run and its result
+- Whether the test was run and the criteria-pass count
+- Next step (continue iterating, commit, or move to the next state's prompt)

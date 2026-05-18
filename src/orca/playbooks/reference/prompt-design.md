@@ -18,7 +18,7 @@ The paradigm has three consequences the agent must internalize:
 2. **When the result is wrong, the first move is reading the report — not editing the prompt.** The report names the failing criterion. The criterion points at the cause. Editing without reading presumes a cause.
 3. **"Looks fine to me" is not a valid state.** Either the result passes the evaluations, or it doesn't. If you find yourself eyeballing output to judge quality, you are missing a criterion — write it.
 
-This paradigm overrides [`orca-prompt-create.md`](../orca-prompt-create.md) Step 8 ("Consider a unit test"). Under this paradigm, tests do not come last. They come *first*, in stub form, and evolve alongside the prompt.
+Under this paradigm, tests do not come last. They come *first*, in stub form, and evolve alongside the prompt — see [`orca-prompt-create.md`](../orca-prompt-create.md) Step 1, where `evaluations.md` and `result_format` are drafted before any prompt prose.
 
 ## 2. Anatomy of a good evaluation
 
@@ -128,7 +128,7 @@ Now the constraint is double-bound: stated in the prompt, checked by the test.
 
 While drafting each criterion, ask: *what field does this read?* If the answer is "I don't know yet", add the field to a running `result_format` sketch. The two artifacts grow together. By the time evaluations are complete, the schema is already designed — and the prompt has a concrete output contract to converge on.
 
-Cross-reference: [`orca-prompt-create.md`](../orca-prompt-create.md) Step 1 ("Pin down the state's contract") tells you to read `result_format` before drafting the prompt. Under this paradigm, you *design* `result_format` while drafting the evaluations — so by the time that step runs, the contract is already pinned.
+Cross-reference: [`orca-prompt-create.md`](../orca-prompt-create.md) Step 1 ("Pin down the state's contract") drafts `evaluations.md` and sketches `result_format` in its first two sub-items — the contract is pinned before any prompt prose.
 
 ## 4. The iteration loop & failure attribution
 
