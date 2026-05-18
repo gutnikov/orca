@@ -3,8 +3,8 @@
 Full `.orca/{flow-name}.yml` schema. Lookup document, not a procedure — read the section relevant to the field you're touching.
 
 For procedure-style playbooks, see:
-- [`../orca-create-workflow.md`](../orca-create-workflow.md) — author a new workflow end-to-end
-- [`../orca-review-workflow.md`](../orca-review-workflow.md) — audit an existing workflow
+- [`../orca-workflow-create.md`](../orca-workflow-create.md) — author a new workflow end-to-end
+- [`../orca-workflow-review.md`](../orca-workflow-review.md) — audit an existing workflow
 - [`orca-workflow-patterns.md`](orca-workflow-patterns.md) — reusable building blocks (sibling reference doc)
 - [`orca-glossary.md`](orca-glossary.md) — one-line definitions for terms used below
 

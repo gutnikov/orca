@@ -25,9 +25,9 @@ Read these before doing anything. They live under `.orca/playbooks/` (created by
 - `reference/orca-glossary.md` — terms used below (outcome vs target, `failed` ambiguity, bounds and timers)
 - `reference/orca-config-reference.md` — full schema, validation rules, recommended defaults
 - `reference/orca-workflow-patterns.md` — reusable building blocks
-- `orca-create-state-prompt.md` — prompt-writing rules
-- `orca-create-workflow.md` — end-to-end procedure for **Create** mode
-- `orca-review-workflow.md` — three-layer audit procedure for **Audit** mode
+- `orca-prompt-create.md` — prompt-writing rules
+- `orca-workflow-create.md` — end-to-end procedure for **Create** mode
+- `orca-workflow-review.md` — three-layer audit procedure for **Audit** mode
 
 If `.orca/playbooks/` isn't present, the user hasn't run `orca init` — suggest they do, then re-trigger this skill.
 
@@ -35,7 +35,7 @@ For a complete worked example, fetch `examples/project/orca.yml` and `examples/p
 
 ## Create mode
 
-Follow the procedure in `.orca/playbooks/orca-create-workflow.md` end-to-end. The shape:
+Follow the procedure in `.orca/playbooks/orca-workflow-create.md` end-to-end. The shape:
 
 ```
 UNDERSTAND GOAL → DESIGN STATE MACHINE → DEFINE ISSUE FIELDS → WRITE YAML → WRITE PROMPTS → VALIDATE
@@ -64,7 +64,7 @@ Impact-assessment checklist:
 
 ## Audit mode
 
-Follow `.orca/playbooks/orca-review-workflow.md`. Three layers:
+Follow `.orca/playbooks/orca-workflow-review.md`. Three layers:
 
 1. **Structural** — will it break? (broken transitions, unreachable states, outcome/on: mismatches)
 2. **Efficiency** — anti-patterns? (no fail-safe, wrong `max_workers`, missing bounds)
@@ -87,4 +87,4 @@ After creating or updating a workflow, offer to test it:
 
 > "Workflow ready. Want me to start a test run with a small `task.md`?"
 
-If yes, follow the supervise skill (or the `orca-run-workflow.md` playbook) — the create-test-fix loop is the fastest way to catch a workflow bug.
+If yes, follow the supervise skill (or the `orca-workflow-run.md` playbook) — the create-test-fix loop is the fastest way to catch a workflow bug.

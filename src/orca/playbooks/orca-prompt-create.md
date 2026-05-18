@@ -4,11 +4,13 @@ Write or update a single `.orca/prompts/{state}.md` template — the instruction
 
 > **Passive states have no prompt.** A passive state is one with no `worker:` block — it waits for a manual `AdvanceEvent` (CLI / TUI / API). If the state you're writing for has no worker, you don't need this playbook; see the *Gate State* pattern in [`orca-workflow-patterns.md`](reference/orca-workflow-patterns.md).
 
+> **Inline vs file prompts.** The `worker.prompt` field also accepts inline Jinja directly in the YAML — `prompt: { text: "..." }` — for very short single-state flows where a separate file is overhead. The structure and pitfalls in this playbook still apply; the prompt source just lives in the YAML instead of in `.orca/prompts/{state}.md`. Default to a file: it's easier to review, diff, and reuse. Use inline only when the prompt is small enough to skim without scrolling.
+
 ## When to use this
 
-- During **[orca-create-workflow.md](orca-create-workflow.md)** step 5 (writing prompt templates).
+- During **[orca-workflow-create.md](orca-workflow-create.md)** step 5 (writing prompt templates).
 - When adding a new state to an existing workflow.
-- When **[orca-review-workflow.md](orca-review-workflow.md)** flags a prompt-quality issue you need to rewrite.
+- When **[orca-workflow-review.md](orca-workflow-review.md)** flags a prompt-quality issue you need to rewrite.
 - When a worker keeps producing wrong-shape output or ignoring scope — usually a prompt bug.
 
 ## Prerequisites
@@ -21,7 +23,7 @@ Write or update a single `.orca/prompts/{state}.md` template — the instruction
 
 Before writing prose, extract these from `.orca/{flow}.yml`:
 
-1. **Single responsibility.** What is this state's *one* job? Write it as one sentence. If you can't, the state needs to be split — go back to [orca-create-workflow.md](orca-create-workflow.md) and split it before writing this prompt.
+1. **Single responsibility.** What is this state's *one* job? Write it as one sentence. If you can't, the state needs to be split — go back to [orca-workflow-create.md](orca-workflow-create.md) and split it before writing this prompt.
 2. **Inputs.** Which `issue.fields.*` does the worker need? (Usually `title`, `description`, plus state-specific fields like `scope_boundary`, `plan`, `acceptance_criteria`.)
 3. **Outputs.** Read the state's `result_format`. List every key, its type, and (for enum outcomes) every legal value. Cross-reference every value against the state's `on:` map — they must match.
 4. **Branch behaviour.** Does this state expect to be on a feature branch? Does it commit? Does it merge? Note this — the constraints section will need to reflect it.
@@ -159,7 +161,7 @@ Why this structure:
 
 ## Step 4 — Cross-check against the pitfalls
 
-Run through every item below against your draft. These are the most common failure modes; each has bitten real workflows. The first group is prompt-level — fix in the `.md` file you're writing. The second group is workflow-level — fix in `.orca/{flow}.yml`. If you encounter a workflow-level issue while editing a prompt, hand it back to [`orca-create-workflow.md`](orca-create-workflow.md) rather than papering over it in the prompt.
+Run through every item below against your draft. These are the most common failure modes; each has bitten real workflows. The first group is prompt-level — fix in the `.md` file you're writing. The second group is workflow-level — fix in `.orca/{flow}.yml`. If you encounter a workflow-level issue while editing a prompt, hand it back to [`orca-workflow-create.md`](orca-workflow-create.md) rather than papering over it in the prompt.
 
 ### Prompt-level pitfalls
 
@@ -284,9 +286,9 @@ Skipping the show-and-confirm step is the most common way to produce a prompt th
 
 ## Step 7 — Trigger a re-audit
 
-If you're editing an existing workflow, run **[orca-review-workflow.md](orca-review-workflow.md)** afterwards to confirm the change didn't break structural or efficiency rules. A single prompt edit can ripple — e.g., adding a new `{{ issue.fields.X }}` reference requires that field to exist in the schema.
+If you're editing an existing workflow, run **[orca-workflow-review.md](orca-workflow-review.md)** afterwards to confirm the change didn't break structural or efficiency rules. A single prompt edit can ripple — e.g., adding a new `{{ issue.fields.X }}` reference requires that field to exist in the schema.
 
-If you're inside the larger [orca-create-workflow.md](orca-create-workflow.md) flow, the audit is already part of step 6 there; don't double-run it.
+If you're inside the larger [orca-workflow-create.md](orca-workflow-create.md) flow, the audit is already part of step 6 there; don't double-run it.
 
 ## Anti-patterns to refuse
 

@@ -5,7 +5,7 @@ Start an orca run from a task description, then supervise it through to a termin
 ## Prerequisites
 
 - Orca CLI installed ([orca-install.md](orca-install.md)).
-- A `.orca/{flow}.yml` exists in the current project. If not, follow [orca-create-workflow.md](orca-create-workflow.md) first.
+- A `.orca/{flow}.yml` exists in the current project. If not, follow [orca-workflow-create.md](orca-workflow-create.md) first.
 - Working directory is the project root.
 - Git tree is clean — or, if dirty, you've confirmed with the user that the dirty state is expected (e.g., a running worker mid-work).
 

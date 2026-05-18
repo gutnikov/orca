@@ -17,8 +17,8 @@ Before you ask the user anything, read these:
 - [`orca-glossary.md`](reference/orca-glossary.md) — definitions for terms used below (outcome vs target, `failed` ambiguity, bounds and timers)
 - [`orca-config-reference.md`](reference/orca-config-reference.md) — full schema, validation rules, recommended defaults
 - [`orca-workflow-patterns.md`](reference/orca-workflow-patterns.md) — single-type vs multi-type, decomposition, parallel fan-out, HITL
-- [`orca-create-state-prompt.md`](orca-create-state-prompt.md) — prompt template structure, Jinja conventions, output contracts
-- [`orca-review-workflow.md`](orca-review-workflow.md) — what to verify at the end
+- [`orca-prompt-create.md`](orca-prompt-create.md) — prompt template structure, Jinja conventions, output contracts
+- [`orca-workflow-review.md`](orca-workflow-review.md) — what to verify at the end
 
 For a complete worked example to mirror, fetch `examples/project/orca.yml` and `examples/project/prompts/` from the orca repo (https://github.com/gutnikov/orca/tree/main/examples/project). If you can't fetch, the patterns reference doc has compositional snippets covering every shape used in that example.
 
@@ -98,7 +98,7 @@ Show the file to the user and ask: *"Does this match what you described?"* Don't
 
 ### Step 5 — Write prompt templates
 
-For each active state, create `.orca/prompts/{state}.md`. Follow [`orca-create-state-prompt.md`](orca-create-state-prompt.md) exactly:
+For each active state, create `.orca/prompts/{state}.md`. Follow [`orca-prompt-create.md`](orca-prompt-create.md) exactly:
 
 - Lead with role and task context (`{{ issue.fields.title }}`, `{{ issue.fields.description }}`, etc.)
 - Spell out scope boundaries — what the worker is **not** allowed to do
@@ -119,7 +119,7 @@ Show each prompt to the user. Adjust per their feedback before writing the next 
 
 ### Step 6 — Validate
 
-Run through the three-layer audit from [`orca-review-workflow.md`](orca-review-workflow.md):
+Run through the three-layer audit from [`orca-workflow-review.md`](orca-workflow-review.md):
 
 1. **Structural** — no broken transitions, no unreachable states, all outcomes routed, every active state has an escape hatch.
 2. **Efficiency** — `max_workers` correct on merge/apply states, no unnecessary serialization, decomposition placed sensibly.
@@ -133,7 +133,7 @@ Once the workflow validates:
 
 > "Workflow is ready. Want me to write a small `task.md` and run it as a smoke test?"
 
-If yes, follow [orca-run-workflow.md](orca-run-workflow.md) with a tiny test task scoped to surface workflow bugs (not production work). If the test surfaces issues, loop back to step 4 or 5 — fix the config/prompts and rerun.
+If yes, follow [orca-workflow-run.md](orca-workflow-run.md) with a tiny test task scoped to surface workflow bugs (not production work). If the test surfaces issues, loop back to step 4 or 5 — fix the config/prompts and rerun.
 
 ## Anti-patterns to refuse (or push back on)
 
@@ -149,4 +149,4 @@ Report to the user:
 - File paths written (`.orca/{flow}.yml`, `.orca/prompts/*.md`)
 - The final state-machine diagram
 - Whether a test run was performed and its outcome
-- What to do next: either run a real task ([orca-run-workflow.md](orca-run-workflow.md)) or commit the workflow files
+- What to do next: either run a real task ([orca-workflow-run.md](orca-workflow-run.md)) or commit the workflow files

@@ -835,7 +835,7 @@ The `run` variable is available in all prompts and contains:
 | `run.insights` | Path to insights file (JSON), if insights are enabled |
 | `run.state` | Path to the state snapshot (JSON) |
 
-The setup flow copies the bundled playbooks into `.orca/playbooks/` in your project — these include [`orca-create-state-prompt.md`](playbooks/orca-create-state-prompt.md) (writing principles, pitfalls, template anatomy), [`reference/orca-config-reference.md`](playbooks/reference/orca-config-reference.md), [`reference/orca-workflow-patterns.md`](playbooks/reference/orca-workflow-patterns.md), and [`orca-review-workflow.md`](playbooks/orca-review-workflow.md). When creating or modifying workflows, tell your coding agent: *"Read `.orca/playbooks/` and then update my workflow."*
+The setup flow copies the bundled playbooks into `.orca/playbooks/` in your project — these include [`orca-prompt-create.md`](playbooks/orca-prompt-create.md) (writing principles, pitfalls, template anatomy), [`reference/orca-config-reference.md`](playbooks/reference/orca-config-reference.md), [`reference/orca-workflow-patterns.md`](playbooks/reference/orca-workflow-patterns.md), and [`orca-workflow-review.md`](playbooks/orca-workflow-review.md). When creating or modifying workflows, tell your coding agent: *"Read `.orca/playbooks/` and then update my workflow."*
 
 See [`examples/project/prompts/`](examples/project/prompts/) for complete prompt templates.
 

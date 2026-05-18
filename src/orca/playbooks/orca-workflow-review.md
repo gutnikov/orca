@@ -4,7 +4,7 @@ Audit `.orca/{flow}.yml` and its prompt templates against the three-layer checkl
 
 ## When to run this
 
-- After **[orca-create-workflow.md](orca-create-workflow.md)** — as the validation step before a test run.
+- After **[orca-workflow-create.md](orca-workflow-create.md)** — as the validation step before a test run.
 - After a workflow change — adding a state, changing a `result_format`, renaming an outcome.
 - After a run surfaces a bug — to figure out whether the config or the prompts are at fault.
 - Periodically, as workflows accumulate edits and drift.
@@ -14,7 +14,7 @@ Audit `.orca/{flow}.yml` and its prompt templates against the three-layer checkl
 - Working directory has `.orca/{flow}.yml` plus `prompts/*.md` referenced by its `worker.prompt` fields.
 - You (the agent) have read these once before auditing:
   - [`reference/orca-config-reference.md`](reference/orca-config-reference.md) — what valid config looks like
-  - [`orca-create-state-prompt.md`](orca-create-state-prompt.md) — what good prompts look like
+  - [`orca-prompt-create.md`](orca-prompt-create.md) — what good prompts look like
 
 ## Autonomy mode — establish this first
 
@@ -147,7 +147,7 @@ After applying fixes, **rerun phases 2–4** to verify nothing regressed. Report
 
 If the audit produced fixes (or even if it didn't and the user wants confidence):
 
-> "Audit complete. Want me to run a small smoke test via [orca-run-workflow.md](orca-run-workflow.md) to confirm nothing regressed?"
+> "Audit complete. Want me to run a small smoke test via [orca-workflow-run.md](orca-workflow-run.md) to confirm nothing regressed?"
 
 If a test run surfaces new issues, loop back to the relevant phase — don't patch ad-hoc.
 
