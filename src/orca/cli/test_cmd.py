@@ -111,8 +111,7 @@ def scaffold_test(repo_root: Path, name: str) -> Path:
         msg = f"test directory already exists: {test_dir}"
         raise FileExistsError(msg)
 
-    fixtures_dir = test_dir / "fixtures"
-    fixtures_dir.mkdir(parents=True)
+    test_dir.mkdir(parents=True)
     (test_dir / "test-flow.yml").write_text(_SKELETON_TEST_FLOW)
     (test_dir / "input.md").write_text(_SKELETON_INPUT)
     (test_dir / "evaluations.md").write_text(_SKELETON_EVALUATIONS)
