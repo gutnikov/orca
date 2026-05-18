@@ -83,18 +83,31 @@ These are the standard workflow-level checks, scoped to the test file.
 - [ ] **Prose under each heading is non-empty.** A heading with no prose is unparseable — flag.
 - [ ] **Criterion count is reasonable.** Aim for 3–7 per test. Fewer than 3 → the test probably under-asserts. More than 10 → the test is doing too much; consider splitting.
 - [ ] **No judgment-heavy criteria.** Flag criteria that ask qualitative questions ("is this prose well-written?", "does this look good?"). Suggest objective rewrites.
-- [ ] **References to result fields exist in `result_format`.** If a criterion talks about `sub_issues` or `outcome` values, those must appear in some body state's `result_format`. Mismatch means the criterion is ungradeable.
+- [ ] **References to result fields exist in `result_format`.** If a criterion talks about `findings`, `outcome` values, or any other field, those must appear in some body state's `result_format`. Mismatch means the criterion is ungradeable.
 
 **Severity:** unparseable headings → **Critical**. Judgment-heavy criteria → **Important** (flake-prone). Reference mismatch → **Important** (silent fail-by-default).
 
 ## Phase 6 — Setup contract
+
+### Routing & schema
 
 - [ ] **Setup's `result_format` covers the slice entry state's input fields.** Cross-reference setup's emitted fields with the `issue.fields.*` references in the entry state's prompt (or in its `result_format` derivations).
 - [ ] **Fields seeded by `input.md` frontmatter don't require re-emission.** If `description` is in the frontmatter, setup doesn't need to emit `description` unless it overrides. Flag re-emission of unchanged fields as redundant (Minor) but not wrong.
 - [ ] **Setup's success outcome routes to the slice's entry state.** Not to a body state in the middle of the slice.
 - [ ] **Setup's failure outcome (`setup_failed` or equivalent) routes to `failed`.** Not to `evaluate`.
 
-**Severity:** missing-field coverage → **Critical** (slice will crash trying to read a field that isn't there). Routing errors → **Critical**.
+### Determinism (the setup-fixture contract)
+
+The contract: setup is a mechanical transport. Every byte in the worktree must come from a fixture or a literal in the prompt. See `orca-test-create.md` ("The setup-fixture contract") for the full rules.
+
+- [ ] **Setup prompt is ≤ 30 lines.** Longer setup prompts almost always hide content generation. Flag as Important and inspect line-by-line.
+- [ ] **No content-generation verbs in the setup prompt.** Scan for "write a file", "create a file that…", "generate", "draft" applied to file content. Any hit is an Important finding — convert to a fixture.
+- [ ] **Every worktree path setup produces is sourced from `fixtures/` or `input.md` frontmatter.** No invented paths. Grep the prompt for path strings and verify each is either a `fixtures/` source, a target named in the prompt verbatim, or a frontmatter value.
+- [ ] **Setup git commands use literal arguments.** No "commit with a descriptive message" — the message is a literal string in the prompt. Same for branch names, paths.
+- [ ] **No templated fixtures.** Fixtures don't contain `{{ placeholders }}` that setup substitutes. If you find any, flag as Important.
+- [ ] **Evaluation-anchored facts match fixture contents.** For every criterion that references a literal file path, line number, function name, or fixed string, verify that the corresponding fixture is laid out that way. Cross-check against the fixture's `# Fact:` header comments — they should declare exactly what the evaluations cite.
+
+**Severity:** missing-field coverage → **Critical** (slice will crash). Routing errors → **Critical**. Content generation in setup → **Important** (silent flake source). Anchor mismatch between evaluations and fixture facts → **Critical** (evaluation passes or fails for wrong reasons).
 
 ## Phase 7 — Drift report
 
@@ -103,8 +116,8 @@ For each body state, produce a comparison table:
 ```
 | State | Prod result_format | Test result_format | Status |
 |---|---|---|---|
-| scoping | <hash or summary> | <hash or summary> | match |
-| planning | outcome.values=[done, blocked] | outcome.values=[done, blocked, waiting] | drift: waiting outcome added in test |
+| review | <hash or summary> | <hash or summary> | match |
+| implementing | outcome.values=[done, blocked] | outcome.values=[done, blocked, waiting] | drift: waiting outcome added in test |
 ```
 
 For each `drift` entry, suggest the fix: either update the test (most common — production is the source of truth) or update production (rare — only if the test caught a real prod bug).
@@ -119,12 +132,12 @@ Use the same format as [`orca-workflow-review.md`](orca-workflow-review.md) so o
 ## Test audit: .orca/tests/<name>/
 
 ### Critical
-- [structural] test-flow.yml — initial: is `planning`, not `setup`. Tests must start with setup.
-- [evaluations] evaluations.md:L24 — duplicate id `outcome-is-decompose`.
+- [structural] test-flow.yml — initial: is `review`, not `setup`. Tests must start with setup.
+- [evaluations] evaluations.md:L24 — duplicate id `outcome-is-request-changes`.
 
 ### Important
-- [drift] scoping — result_format diverges from .orca/develop.yml#scoping: test adds `waiting` to outcome.values. Re-copy from prod.
-- [evaluations] evaluations.md:L34 — criterion "titles-are-actionable" asks a judgment question. Rewrite as a regex check (e.g., title starts with a verb from a fixed list).
+- [drift] review — result_format diverges from .orca/review.yml#review: test adds `waiting` to outcome.values. Re-copy from prod.
+- [evaluations] evaluations.md:L34 — criterion "messages-are-actionable" asks a judgment question. Rewrite as a regex check (e.g., message starts with a verb from a fixed list).
 
 ### Minor
 - [setup] test-flow.yml:L18 — setup re-emits `description` unchanged from frontmatter. Remove from result_format to keep setup small.

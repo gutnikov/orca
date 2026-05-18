@@ -33,6 +33,20 @@ Before asking the user anything:
 
 Every test run costs **N + 2 LLM invocations** (1 setup, N body states, 1 evaluate). A 5-state slice = 7 worker sessions per run. Tell the user this up front so they aren't surprised. Prefer **single-state slices** for first tests — they're the cheapest way to start and the easiest to debug.
 
+## The setup-fixture contract
+
+Read this **before drafting any of the steps below**. It is the load-bearing discipline that keeps tests deterministic. Three roles, sharp boundaries:
+
+- **Fixtures** are checked-in artefacts under `fixtures/`. They contain every byte of the scenario the worker will read. **Creativity lives here, and only here.**
+- **Setup** is a mechanical transport. It moves fixtures to worktree paths, runs git commands with literal strings, and emits frontmatter. **It does not invent content.**
+- **Evaluations** anchor on stable fixture facts — literal line numbers, paths, function names. **They reference what the fixture contains, not what setup might produce.**
+
+The non-negotiable rule: every byte the slice's body state will read came from a fixture, not from a setup-agent decision. If a criterion says `line within 5 of 42`, then line 42 is where the *fixture* puts the bug — not where the setup agent chose to put it.
+
+Why this is the rule: setup is itself an LLM agent reading an inline prompt. Anything you ask it to invent will vary run-to-run; criteria that depend on those varying outputs become flaky. The cure is to drain creativity out of setup and into fixtures — fixtures are stable bytes on disk; the LLM doesn't reinterpret them.
+
+The steps that follow operationalise this contract: Step 5 copies the slice; Step 6 writes the (mechanical) setup prompt; Step 8 writes evaluations that cite fixture facts; Step 9 designs the fixtures themselves. Step 6 has a full MAY / MAY NOT list for setup operations; Step 9 has the fixture rules including the `# Fact:` header convention.
+
 ## Interactive process
 
 Run the steps in order. After each, show what you produced and ask the user to confirm before moving on.
@@ -43,14 +57,14 @@ Ask the user, in plain language:
 
 1. **Which workflow?** `ls .orca/*.yml` and list candidates. If there's only one, name it; otherwise ask.
 2. **Which states?** One of:
-   - **Single state** (unit test of one prompt — e.g. just `scoping`). Default suggestion.
+   - **Single state** (unit test of one prompt — e.g. just `review`). Default suggestion.
    - **Subgraph** (integration test of a slice — e.g. `planning -> implementing`).
    - **Full workflow** (end-to-end — every active state).
 3. **What does success look like?** One sentence: "the slice should …". This becomes the seed for `evaluations.md`.
 
 Echo back what you understood:
 
-> "You want a unit test of the `scoping` state in `.orca/develop.yml`. Success means: given a 5-section feature spec covering two unrelated subsystems, scoping should produce `outcome=decompose` with at least 2 well-bounded sub_issues. Right?"
+> "You want a unit test of the `review` state in `.orca/review.yml`. Success means: given a PR that introduces a SQL injection at `src/api.py:42`, the review state should produce `outcome=request_changes` with at least one finding pointing at that file:line. Right?"
 
 **Do not move on until the user confirms.**
 
@@ -58,7 +72,7 @@ Echo back what you understood:
 
 One paragraph. Write the situation the slice will face and what it should do.
 
-> "A user submits a 5-section feature spec that touches both an auth module and a payments module. The scoping state should recognize the spec is too broad for a single feature, decompose it, and emit non-overlapping `scope_boundary` values that cover both subsystems."
+> "A user submits a PR that adds a `get_user` helper to `src/api.py`. The helper builds a SQL query via f-string interpolation on line 42 — a textbook SQL injection. The review state should read the diff, identify the unsafe interpolation, and emit `outcome=request_changes` with at least one finding whose `file` is `src/api.py` and whose `line` is near 42."
 
 This paragraph drives three downstream artefacts:
 
@@ -74,17 +88,17 @@ Pick a kebab-case name that describes the scenario, not the state:
 
 | Good | Bad |
 |---|---|
-| `scoping-decomposes-large-spec` | `test-1`, `scoping-test` |
-| `planning-rescopes-when-ambiguous` | `planning` |
-| `implementing-respects-scope-boundary` | `test-impl` |
+| `review-catches-sql-injection` | `test-1`, `review-test` |
+| `implementing-adds-pagination-to-endpoint` | `implementing` |
+| `planning-splits-multi-module-feature` | `test-plan` |
 
 Then scaffold:
 
 ```bash
-orca test add scoping-decomposes-large-spec
+orca test add review-catches-sql-injection
 ```
 
-This creates `.orca/tests/scoping-decomposes-large-spec/` with skeleton `test-flow.yml`, `input.md`, `evaluations.md`, and an empty `fixtures/`. **Edit the skeleton in place** — don't write a fresh structure beside it.
+This creates `.orca/tests/review-catches-sql-injection/` with skeleton `test-flow.yml`, `input.md`, `evaluations.md`, and an empty `fixtures/`. **Edit the skeleton in place** — don't write a fresh structure beside it.
 
 ### Step 4 — Write `input.md`
 
@@ -109,27 +123,29 @@ After (concrete):
 
 ```markdown
 ---
-title: "Decompose a multi-module feature spec"
+title: "Review a PR that adds a SQL injection"
 description: |
-  Add multi-factor auth across the auth module and the payments checkout flow.
-  Spec touches roughly 5 user-facing sections and spans two unrelated services.
+  PR adds a `get_user(user_id)` helper in `src/api.py` that builds a SQL
+  query via f-string interpolation. The function is called from the
+  `/users/<id>` route handler.
 scope_boundary: "src/"
 ---
 
 # Scenario
 
-The user submitted a broad feature request spanning two subsystems. Before the
-slice runs, the worktree should contain the two legacy modules at `src/auth/`
-and `src/payments/` (copy them from `fixtures/`). The scoping state should
-recognize the spec is too large for a single feature and produce a decompose
-outcome with one sub_issue per subsystem.
+The user submitted a PR that introduces a SQL injection on line 42 of
+`src/api.py`. Before the slice runs, the worktree should contain the
+file at `src/api.py` (copy from `fixtures/api-with-sqli.py`). The
+review state should read the diff, identify the unsafe f-string into a
+SQL query, and emit `outcome=request_changes` with a finding that
+points at `src/api.py:42`.
 ```
 
 Rules:
 
 - Frontmatter keys are issue field names. **Only declare fields the slice's entry state actually reads.** Cross-check against `issue.fields` in the production workflow.
 - Prose body is for the setup agent's eyes — it does not seed `issue.fields`.
-- If setup needs to copy files into the worktree, name them under `fixtures/` here.
+- If setup needs to copy files into the worktree, name them under `fixtures/` here. See *The setup-fixture contract* above for the rules.
 
 ### Step 5 — Copy slice states into `test-flow.yml`
 
@@ -142,58 +158,66 @@ The skeleton has placeholders. Replace them with body states copied verbatim fro
 3. **Outgoing-to-outside-slice transitions are rewritten to `evaluate`.** If `implementing` in prod routes `done -> reviewing` but `reviewing` is *not* in the slice, rewrite to `done -> evaluate`. The same applies to any rule that targets the built-in `done` — rewrite to `evaluate` so the grader sees the final result.
 4. **The setup state's success outcome routes to the slice's entry state.** Replace the placeholder `ready: TODO_BODY_STATE` with the real entry state name.
 
-Concrete example — copying a single `scoping` state from `.orca/develop.yml`:
+Concrete example — copying a single `review` state from `.orca/review.yml`:
 
-Before (in `.orca/develop.yml`):
+Before (in `.orca/review.yml`):
 
 ```yaml
 states:
-  scoping:
+  review:
     worker:
       kind: claude-code
-      prompt: prompts/scoping.md
+      prompt: prompts/review.md
       result_format:
         outcome:
           type: enum
-          values: [ready, decompose, blocked]
-        sub_issues:
+          values: [approve, request_changes, blocked]
+        findings:
           type: list
-          items: "$issue"
-          required_when: [decompose]
+          items:
+            file: { type: string }
+            line: { type: integer }
+            severity: { type: enum, values: [critical, major, minor] }
+            message: { type: string }
+          required_when: [request_changes]
     on:
-      ready: planning
-      decompose: { action: decompose, child_type: task, then: done }
+      approve: done
+      request_changes: revising
       blocked: done
 ```
 
-After (in `.orca/tests/scoping-decomposes-large-spec/test-flow.yml`, body section):
+After (in `.orca/tests/review-catches-sql-injection/test-flow.yml`, body section):
 
 ```yaml
-  scoping:
+  review:
     worker:
       kind: claude-code
-      prompt: ../../prompts/scoping.md
+      prompt: ../../prompts/review.md
       result_format:
         outcome:
           type: enum
-          values: [ready, decompose, blocked]
-        sub_issues:
+          values: [approve, request_changes, blocked]
+        findings:
           type: list
-          items: "$issue"
-          required_when: [decompose]
+          items:
+            file: { type: string }
+            line: { type: integer }
+            severity: { type: enum, values: [critical, major, minor] }
+            message: { type: string }
+          required_when: [request_changes]
     on:
-      ready: evaluate
-      decompose: evaluate
+      approve: evaluate
+      request_changes: evaluate
       blocked: evaluate
 ```
 
 Notes:
 
-- The `prompt:` path is now `../../prompts/scoping.md` — relative to `test-flow.yml`. The loader resolves it at load time; the worker never sees `..`.
-- The decompose action is collapsed to a plain transition. Tests grade against the slice's *output*, not the orchestrator's downstream behaviour. We don't actually want decomposed children to spawn during a test — the `evaluate` state inspects the `sub_issues` field directly.
+- The `prompt:` path is now `../../prompts/review.md` — relative to `test-flow.yml`. The loader resolves it at load time; the worker never sees `..`.
+- The production `request_changes: revising` transition is collapsed to a plain `evaluate` route. Tests grade against the slice's *output*, not the orchestrator's downstream behaviour. We don't want the `revising` state to spawn during a test — the `evaluate` state inspects the `findings` field directly.
 - Every outcome routes to `evaluate`. The grader decides pass/fail; the slice never reaches `done` on its own.
 
-After editing the body, replace the placeholder `setup.on.ready: TODO_BODY_STATE` with the entry state name (here, `scoping`). Then the file's `setup -> scoping -> evaluate` shape is complete.
+After editing the body, replace the placeholder `setup.on.ready: TODO_BODY_STATE` with the entry state name (here, `review`). Then the file's `setup -> review -> evaluate` shape is complete.
 
 ### Step 6 — Tune the setup prompt
 
@@ -208,36 +232,51 @@ Default skeleton (in `setup.worker.prompt.text`):
           Write {{ result_path }} with the issue field values.
 ```
 
-After (concrete for the scoping example):
+After (concrete for the review example — mechanical, no content generation):
 
 ```yaml
         text: |
           # Setup
 
           You are the setup agent for test `{{ run.test_name }}`.
+          Your job is mechanical: copy the fixture, commit, emit the result. Do not invent content.
 
           ## Step 1: Read the scenario
           Read `.orca/tests/{{ run.test_name }}/input.md`. Frontmatter is already
-          parsed into issue.fields; the prose body describes the scenario.
+          parsed into issue.fields; the prose body is context for you only.
 
-          ## Step 2: Arrange the worktree
-          Copy these fixture files into the worktree:
-          - `.orca/tests/{{ run.test_name }}/fixtures/legacy-auth.py` -> `src/auth/legacy.py`
-          - `.orca/tests/{{ run.test_name }}/fixtures/legacy-payments.py` -> `src/payments/legacy.py`
+          ## Step 2: Arrange the worktree (mechanical operations only)
+          Copy the fixture verbatim — do NOT modify its bytes:
+          - `.orca/tests/{{ run.test_name }}/fixtures/api-with-sqli.py` -> `src/api.py`
 
-          Commit the worktree changes with message "test setup: seed fixtures".
+          Then run, with these literal arguments:
+          - `git add src/api.py`
+          - `git commit -m "test setup: seed PR with SQL injection"`
 
           ## Step 3: Emit the result
-          Write `{{ result_path }}`:
+          Write `{{ result_path }}` with the frontmatter values verbatim:
 
           ```json
           {{ result_example | tojson(indent=2) }}
           ```
-
-          The frontmatter has already seeded `title`, `description`, and
-          `scope_boundary`. Re-emit them verbatim unless your worktree
-          arrangement requires changes (rare).
 ```
+
+The setup prompt should be **≤ 30 lines**. If it grows past that, it is almost always doing too much — usually inventing content. Audit yourself.
+
+### What setup MAY do
+
+- Copy files from `fixtures/` to worktree paths. Both source and target are literal strings in the prompt.
+- Run git commands with literal arguments: `git init`, `git add <literal path>`, `git commit -m "<literal>"`, `git checkout -b <fixed-name>`.
+- Append a literal string to a file.
+- Create empty directories (`mkdir -p <literal>`).
+- Re-emit frontmatter fields verbatim in the result JSON.
+
+### What setup MAY NOT do
+
+- **Generate file content from a description.** "Write a Python file with…", "create a realistic config…", "draft a fixture that…". All forbidden — convert the request into a fixture.
+- **Choose paths, names, line numbers, or values based on judgment.** Every such value in the prompt is a literal, or it comes from `input.md` frontmatter, or the operation doesn't belong in setup.
+- **Make any worktree decision that isn't pre-baked in a fixture or named explicitly in the input frontmatter.** No improvisation.
+- **Depend on external state.** No current time, no network, no RNG, no machine-specific values.
 
 Rules:
 
@@ -335,30 +374,31 @@ TODO: a sentence stating one concrete, gradeable thing the result must satisfy.
 After (concrete):
 
 ```markdown
-# Evaluations: scoping-decomposes-large-spec
+# Evaluations: review-catches-sql-injection
 
-A 5-section feature spec covering two unrelated subsystems should be decomposed
-into sub-issues, not passed through as-is. Sub-issues should cover both
-subsystems with non-overlapping scope boundaries.
+A PR introducing a SQL injection at `src/api.py:42` should be rejected
+with `outcome=request_changes` and at least one finding pointing at the
+offending file:line. Approving the PR is a critical failure of the
+review prompt.
 
 ## Criteria
 
-### outcome-is-decompose
-The scoping state's result `outcome` is `decompose` (not `ready` or `blocked`).
+### outcome-is-request-changes
+The review state's result `outcome` is `request_changes` (not `approve` or `blocked`).
 
-### produces-multiple-sub-issues
-The `sub_issues` field contains at least 2 entries.
+### at-least-one-finding
+The `findings` field contains at least one entry.
 
-### sub-issues-cover-original-scope
-Across all sub_issues, the union of `scope_boundary` paths covers every
-top-level directory mentioned in the input description (`src/auth`, `src/payments`).
+### finding-points-at-sql-injection
+Some `findings[i]` has `file == "src/api.py"` and `line` within 5 of 42.
 
-### sub-issues-are-non-overlapping
-No two sub_issues share a top-level path component in their `scope_boundary`.
+### findings-have-required-fields
+Every finding has a non-empty `file`, a positive integer `line`, a
+`severity` in `{critical, major, minor}`, and a non-empty `message`.
 
-### titles-are-actionable
-Every sub_issue `title` starts with a verb (e.g. "Add", "Refactor", "Extract")
-rather than a noun phrase (e.g. "Authentication").
+### messages-are-imperative
+Every `findings[i].message` matches `^(Use|Remove|Replace|Fix|Add|Avoid)\b` —
+actionable verbs rather than "There is..." or "I see...".
 ```
 
 Rules:
@@ -371,21 +411,40 @@ Rules:
 
 Aim for **3–7 criteria** for a first draft. Fewer is fine if the test is narrow.
 
-### Step 9 — Seed fixtures (optional)
+### Step 9 — Design fixtures
 
-If the scenario references files in `fixtures/`, drop them in now. Keep them small (under ~200 lines each) and realistic — the goal is for the setup agent to copy plausible-looking source files into the worktree, not to ship a mini-app.
+Fixtures are the *only* source of creativity in the test. Setup transports them; evaluations cite their facts. Build them deliberately.
+
+**Rules:**
+
+- **Document the stable facts in a header comment.** Each fixture starts with one `# Fact:` comment per evaluation-anchored fact. Example:
+
+  ```python
+  # Fact: SQL injection at line 42 (f-string into cursor.execute)
+  # Fact: function name is `get_user`
+  # Fact: route handler at line 18 calls get_user
+  ```
+
+  These are the contract between the fixture and the evaluations that cite it. If the fixture is edited and a fact moves, every evaluation that anchored on it must be updated in the same change.
+
+- **Minimum realistic context.** A fixture is *just* enough plausible code to make the diff look like real work and to make the bug interpretable. No filler. If you can remove a function without losing an evaluation anchor or the realism floor, remove it.
+
+- **Size cap.** ≤ 200 lines per fixture, ≤ 3 fixtures per test. Past that, the test is doing too much — split into smaller scenarios.
+
+- **No templates.** A fixture is not a template; it is the literal bytes that land in the worktree. No `{{ placeholders }}`, no setup-time substitution. If you need two variants of a scenario, ship two concrete fixtures and pick which one setup copies via a literal path in the prompt.
+
+- **Anchored facts must match the file.** If a header comment says "SQL injection at line 42", count the lines — line 42 must actually contain the bug. Cross-check before committing.
 
 Examples:
 
-- `fixtures/legacy-auth.py` — ~50 lines of plausibly-tangled auth code with header comments like `# --- session handling ---`, `# --- password hashing ---` to make the "needs splitting" smell obvious.
-- `fixtures/legacy-payments.py` — same pattern for a different subsystem.
+- `fixtures/api-with-sqli.py` — ~50 lines containing a `get_user(user_id)` helper that builds a SQL query via f-string interpolation (the deliberate bug at line 42), plus a couple of unrelated route handlers so the diff looks like a realistic PR rather than a single suspicious change. The file's header comments pin the bug's location, function name, and surrounding route call site.
 
-Skip this step entirely if setup arranges the worktree by writing stub files inline rather than copying fixtures.
+Skip this step only if the scenario genuinely needs no worktree files (e.g., a planning state that only reads `issue.fields`). In that case, setup still has work — frontmatter re-emission, git init — but no `fixtures/` directory is created.
 
 ### Step 10 — Run the test
 
 ```bash
-orca test scoping-decomposes-large-spec
+orca test review-catches-sql-injection
 ```
 
 The CLI submits the run to the daemon and prints the run id. The CLI is currently fire-and-forget in v1 — it does not block until completion. Use `orca runs` or the TUI to watch progress.
@@ -393,7 +452,7 @@ The CLI submits the run to the daemon and prints the run id. The CLI is currentl
 After the run completes, read the report:
 
 ```bash
-cat .orca-state/runs/orca/test-scoping-decomposes-large-spec-*/report.md
+cat .orca-state/runs/orca/test-review-catches-sql-injection-*/report.md
 ```
 
 Or use the path printed by the evaluate state.
@@ -409,6 +468,9 @@ Or use the path printed by the evaluate state.
 
 ## Anti-patterns to refuse
 
+- **Setup that invents content.** "Write a Python file with…", "Create a realistic-looking config…", "Draft a fixture that has X". Refuse — every byte in the worktree must come from a fixture, not a setup-agent decision.
+- **Evaluations anchored on setup-agent decisions.** Criteria like "the file the setup agent created has X" are fragile. Anchor on fixture facts (literal paths, line numbers, function names that the fixture's `# Fact:` header pins down).
+- **Templated fixtures.** Fixtures with `{{ vars }}` that setup substitutes. The substitution is a form of generation. Collapse into multiple concrete fixtures, one per variant.
 - **More than one `setup` or `evaluate` state.** The shape is bookended — exactly one of each. If you need branching, branch in the body.
 - **Body states whose `result_format` differs from production.** That defeats the point of the test. If you need a different schema, you're not testing the prompt — you're testing something else. Stop and ask the user what they actually want to test.
 - **Judgment-heavy criteria.** "Is this prose well-written?" "Does this title sound good?" Replace with objective tests or drop the criterion.
