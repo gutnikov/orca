@@ -64,6 +64,44 @@ def _parse_result_format_field(name: str, data: dict[str, Any]) -> ResultFormatF
         raise ConfigValidationError(msg)
 
 
+def _parse_prompt_field(state_name: str, raw: Any) -> tuple[str, bool]:
+    """Parse the worker.prompt field.
+
+    Accepts:
+        - bare string: legacy form, treated as a file path relative to flow_root.
+        - {path: <str>}: explicit file path.
+        - {text: <str>}: inline Jinja template source.
+
+    Returns (prompt_value, is_inline).
+    """
+    if raw is None:
+        return "", False
+    if isinstance(raw, str):
+        return raw, False
+    if isinstance(raw, dict):
+        has_path = "path" in raw
+        has_text = "text" in raw
+        if has_path and has_text:
+            msg = f"State '{state_name}': worker.prompt cannot specify both 'path' and 'text'"
+            raise ConfigValidationError(msg)
+        if not has_path and not has_text:
+            msg = f"State '{state_name}': worker.prompt must specify 'path' or 'text'"
+            raise ConfigValidationError(msg)
+        if has_path:
+            value = raw["path"]
+            if not isinstance(value, str):
+                msg = f"State '{state_name}': worker.prompt.path must be a string"
+                raise ConfigValidationError(msg)
+            return value, False
+        value = raw["text"]
+        if not isinstance(value, str):
+            msg = f"State '{state_name}': worker.prompt.text must be a string"
+            raise ConfigValidationError(msg)
+        return value, True
+    msg = f"State '{state_name}': worker.prompt must be a string or a mapping with 'path' or 'text'"
+    raise ConfigValidationError(msg)
+
+
 def _parse_on_rule(key: str, value: Any) -> OnRule:
     if isinstance(value, str):
         return OnTransition(target=value)
@@ -93,7 +131,7 @@ def _parse_state(name: str, raw_data: dict[str, Any] | None) -> StateDef:
     worker_data = data.get("worker")
     if worker_data is not None:
         kind: str = worker_data.get("kind", "")
-        prompt: str = worker_data.get("prompt", "")
+        prompt, prompt_inline = _parse_prompt_field(name, worker_data.get("prompt"))
         timeout: int | None = worker_data.get("timeout")
         inactivity_timeout: int | None = worker_data.get("inactivity_timeout")
         rf_data: dict[str, Any] = worker_data.get("result_format", {})
@@ -113,6 +151,7 @@ def _parse_state(name: str, raw_data: dict[str, Any] | None) -> StateDef:
             model=model,
             args=args,
             progress=progress,
+            prompt_inline=prompt_inline,
         )
 
     on: dict[str, OnRule] = {}

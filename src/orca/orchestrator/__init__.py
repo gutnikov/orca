@@ -6,7 +6,7 @@ from orca.orchestrator.orchestrator import Orchestrator
 from orca.orchestrator.persistence import Persistence
 from orca.orchestrator.runner import main, parse_task_file, run
 from orca.orchestrator.session_sync import SessionManifest, SessionSync
-from orca.orchestrator.template import render_prompt
+from orca.orchestrator.template import render_prompt, render_prompt_string
 from orca.orchestrator.validation import validate_result
 from orca.orchestrator.worker import (
     KIND_REGISTRY,
@@ -37,6 +37,7 @@ __all__ = [
     "main",
     "parse_task_file",
     "render_prompt",
+    "render_prompt_string",
     "run",
     "setup_logging",
     "validate_result",

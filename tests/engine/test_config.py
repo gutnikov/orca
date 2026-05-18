@@ -419,6 +419,101 @@ initial: todo
         with pytest.raises(ConfigValidationError, match="kind must be one of"):
             parse_config(yaml_str)
 
+    def test_parse_worker_with_prompt_path_mapping(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      kind: claude-code
+      prompt:
+        path: prompts/work.md
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+initial: todo
+"""
+        cfg = parse_config(yaml_str)
+        worker = cfg.types["default"].states["todo"].worker
+        assert worker is not None
+        assert worker.prompt == "prompts/work.md"
+        assert worker.prompt_inline is False
+
+    def test_parse_worker_with_inline_prompt_text(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      kind: claude-code
+      prompt:
+        text: |
+          Hello {{ issue.fields.name }}, write to {{ result_path }}.
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+initial: todo
+"""
+        cfg = parse_config(yaml_str)
+        worker = cfg.types["default"].states["todo"].worker
+        assert worker is not None
+        assert worker.prompt_inline is True
+        assert "{{ issue.fields.name }}" in worker.prompt
+
+    def test_prompt_mapping_with_both_path_and_text_rejected(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      kind: claude-code
+      prompt:
+        path: prompts/work.md
+        text: hello
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+initial: todo
+"""
+        with pytest.raises(ConfigValidationError, match="both 'path' and 'text'"):
+            parse_config(yaml_str)
+
+    def test_prompt_mapping_with_neither_path_nor_text_rejected(self) -> None:
+        yaml_str = """\
+issue:
+  fields: {}
+states:
+  todo:
+    worker:
+      kind: claude-code
+      prompt: {}
+      result_format:
+        outcome:
+          type: enum
+          values: [go]
+          description: d
+    on:
+      go: done
+initial: todo
+"""
+        with pytest.raises(ConfigValidationError, match="'path' or 'text'"):
+            parse_config(yaml_str)
+
     def test_missing_prompt_rejected(self) -> None:
         yaml_str = """\
 issue:

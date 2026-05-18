@@ -12,7 +12,7 @@ from typing import Any, Protocol
 from orca.engine.types import DispatchWorkerEffect
 from orca.orchestrator.pty_session import PtySession
 from orca.orchestrator.session_sync import SessionManifest
-from orca.orchestrator.template import TemplateRenderError, render_prompt
+from orca.orchestrator.template import TemplateRenderError, render_prompt, render_prompt_string
 from orca.orchestrator.validation import validate_result
 
 logger = logging.getLogger(__name__)
@@ -77,6 +77,7 @@ class Worker(Protocol):
         unblock_message: list[str] | None = None,
         on_blocked: Callable[[str], None] | None = None,
         on_unblocked: Callable[[str], None] | None = None,
+        prompt_text: str | None = None,
     ) -> WorkerOutcome: ...
 
 
@@ -147,6 +148,7 @@ class CliAgentWorker:
         unblock_message: list[str] | None = None,
         on_blocked: Callable[[str], None] | None = None,
         on_unblocked: Callable[[str], None] | None = None,
+        prompt_text: str | None = None,
     ) -> WorkerOutcome:
         assert pty_session is not None, "pty_session is required"
 
@@ -154,8 +156,17 @@ class CliAgentWorker:
         result_path.unlink(missing_ok=True)
 
         # b. Render prompt
-        if prompt_path is not None:
-            try:
+        try:
+            if prompt_text is not None:
+                prompt = render_prompt_string(
+                    prompt_text,
+                    effect.issue,
+                    effect.result_format,
+                    result_path,
+                    progress=effect.progress_enabled,
+                    run=run_context,
+                )
+            elif prompt_path is not None:
                 prompt = render_prompt(
                     prompt_path,
                     self._repo_root,
@@ -165,10 +176,10 @@ class CliAgentWorker:
                     progress=effect.progress_enabled,
                     run=run_context,
                 )
-            except TemplateRenderError as exc:
-                return WorkerFailure(error=str(exc))
-        else:
-            prompt = ""
+            else:
+                prompt = ""
+        except TemplateRenderError as exc:
+            return WorkerFailure(error=str(exc))
 
         # c. Build command
         cmd_parts: list[str] = [self._kind_config.bin]

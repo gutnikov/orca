@@ -1,0 +1,53 @@
+# Inline-prompt workflow example
+#
+# Demonstrates `worker.prompt: { text: ... }` — Jinja prompt source written
+# directly in the YAML, no separate prompts/ file. Use this shape when a flow
+# has one or two states and a separate prompt file would be overhead.
+#
+# Single-state flow: worker reviews task.md and writes a short summary.
+
+issue:
+  fields:
+    title:
+      type: string
+      description: "Short title"
+    description:
+      type: string
+      description: "What to summarize"
+
+initial: summarizing
+
+states:
+  summarizing:
+    worker:
+      kind: claude-code
+      prompt:
+        text: |
+          # Role
+          You are a summarization agent.
+
+          ## Task
+          Title: {{ issue.fields.title }}
+          Description: {{ issue.fields.description }}
+
+          ## Instructions
+          1. Read the task above.
+          2. Produce a 2-sentence summary capturing the intent and any constraints.
+
+          ## Result
+          Write your result to `{{ result_path }}`:
+
+          ```json
+          {{ result_example | tojson(indent=2) }}
+          ```
+      timeout: 300
+      result_format:
+        outcome:
+          type: enum
+          values: [done]
+          description: "Summary written"
+        summary:
+          type: string
+          description: "Two-sentence summary"
+    on:
+      done: done

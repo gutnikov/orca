@@ -68,6 +68,27 @@ def _build_result_example(result_format: dict[str, Any]) -> dict[str, Any]:
     return example
 
 
+def _build_context(
+    issue: dict[str, Any],
+    result_format: dict[str, Any],
+    result_path: Path,
+    run: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        "issue": issue,
+        "result_format": result_format,
+        "result_example": _build_result_example(result_format),
+        "result_path": str(result_path),
+        "run": run,
+    }
+
+
+def _finalize(rendered: str, *, progress: bool) -> str:
+    if progress:
+        rendered = _PROGRESS_INSTRUCTION + "\n\n---\n\n" + rendered
+    return rendered + _RESULT_FILE_WARNING
+
+
 def render_prompt(
     template_path: Path,
     repo_root: Path,
@@ -78,7 +99,7 @@ def render_prompt(
     progress: bool = False,
     run: dict[str, Any] | None = None,
 ) -> str:
-    """Render a Jinja2 template with issue context and output rules.
+    """Render a Jinja2 template from a file with issue context and output rules.
 
     Args:
         template_path: Absolute path to the template file.
@@ -102,14 +123,7 @@ def render_prompt(
     )
 
     template = env.get_template(str(template_path))
-
-    context = {
-        "issue": issue,
-        "result_format": result_format,
-        "result_example": _build_result_example(result_format),
-        "result_path": str(result_path),
-        "run": run,
-    }
+    context = _build_context(issue, result_format, result_path, run)
 
     try:
         rendered = template.render(context)
@@ -120,6 +134,33 @@ def render_prompt(
             "use bracket syntax such as result_format['outcome']['values']."
         )
         raise TemplateRenderError(msg) from exc
-    if progress:
-        rendered = _PROGRESS_INSTRUCTION + "\n\n---\n\n" + rendered
-    return rendered + _RESULT_FILE_WARNING
+    return _finalize(rendered, progress=progress)
+
+
+def render_prompt_string(
+    template_source: str,
+    issue: dict[str, Any],
+    result_format: dict[str, Any],
+    result_path: Path,
+    *,
+    progress: bool = False,
+    run: dict[str, Any] | None = None,
+) -> str:
+    """Render an inline Jinja2 template string with issue context and output rules.
+
+    Mirrors `render_prompt` but accepts the template source directly instead of a file path.
+    """
+    env = Environment(autoescape=False)
+    template = env.from_string(template_source)
+    context = _build_context(issue, result_format, result_path, run)
+
+    try:
+        rendered = template.render(context)
+    except Exception as exc:
+        msg = (
+            f"Failed to render inline prompt template: {exc}. "
+            "If you are accessing dict keys that may shadow Python methods, "
+            "use bracket syntax such as result_format['outcome']['values']."
+        )
+        raise TemplateRenderError(msg) from exc
+    return _finalize(rendered, progress=progress)

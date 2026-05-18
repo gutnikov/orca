@@ -37,6 +37,15 @@ states:
   scoping:
     worker:
       kind: claude-code
+      # `prompt` accepts three shapes:
+      #   prompt: prompts/scoping.md             # bare string — path under .orca/
+      #   prompt: { path: prompts/scoping.md }   # explicit path
+      #   prompt:                                # inline Jinja, no separate file
+      #     text: |
+      #       You are scoping issue {{ issue.fields.title }}.
+      #       Write the result to {{ result_path }}.
+      # File-based prompts are recommended for non-trivial states; inline is handy
+      # for very short or single-state flows.
       prompt: prompts/scoping.md
       timeout: 600                     # 10 minutes
       result_format:

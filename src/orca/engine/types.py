@@ -45,6 +45,9 @@ class WorkerDef:
     model: str | None = None
     args: tuple[str, ...] | None = None
     progress: bool = False
+    # When True, `prompt` holds inline Jinja template source.
+    # When False (default), `prompt` is a path (relative to flow_root) to a template file.
+    prompt_inline: bool = False
 
 
 @dataclass(frozen=True)

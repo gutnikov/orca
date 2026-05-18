@@ -3,7 +3,7 @@ from typing import Any
 
 import pytest
 
-from orca.orchestrator.template import TemplateRenderError, render_prompt
+from orca.orchestrator.template import TemplateRenderError, render_prompt, render_prompt_string
 
 
 class TestRenderPrompt:
@@ -218,3 +218,34 @@ class TestRenderPromptSubdir:
         output = render_prompt(template_file, tmp_path, issue, result_format, result_path)
 
         assert "Fix bug" in output
+
+
+class TestRenderPromptString:
+    def test_inline_basic_rendering(self) -> None:
+        source = "Title: {{ issue.fields.title }}\nResult path: {{ result_path }}"
+        issue: dict[str, Any] = {
+            "fields": {"title": "Fix bug"},
+            "event_log": [],
+            "decomposed_from": None,
+            "depends_on": [],
+            "children": [],
+        }
+        output = render_prompt_string(source, issue, {}, Path("/tmp/result.txt"))
+        assert "Fix bug" in output
+        assert "/tmp/result.txt" in output
+
+    def test_inline_render_error_wraps_exception(self) -> None:
+        bad_source = "{{ issue.fields.title.nonexistent() }}"
+        issue: dict[str, Any] = {"fields": {"title": "hi"}, "event_log": []}
+        with pytest.raises(TemplateRenderError):
+            render_prompt_string(bad_source, issue, {}, Path("/tmp/result.txt"))
+
+    def test_inline_result_file_warning_appended(self) -> None:
+        output = render_prompt_string(
+            "hello",
+            {"fields": {}, "event_log": []},
+            {},
+            Path("/tmp/result.txt"),
+        )
+        assert "IMPORTANT" in output
+        assert "result file" in output
