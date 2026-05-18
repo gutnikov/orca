@@ -52,7 +52,7 @@ The full set of variables exposed to a prompt template:
 | `{{ issue.decomposed_from }}` | string | Parent issue ID (if child) | When a child task needs parent context |
 | `{{ result_format }}` | dict | Schema Orca validates against | Advanced prompts that explain allowed outcomes |
 | `{{ result_example }}` | dict | Concrete result JSON the worker can copy and fill in | **Always** — embed via `tojson(indent=2)` |
-| `{{ result_path }}` | string | Path to write result.json | **Always** — tell the worker where to write |
+| `{{ result_path }}` | string | Path to write result.json | **Always — and inside the `## Result` section, not only at the top of the prompt.** See pitfall P3. |
 | `{{ run.branch }}` | string | Git branch name | Prompts that orchestrate their own filesystem |
 | `{{ run.workflow }}` | string | Workflow name | Same as above (rare) |
 | `{{ run.run_dir }}` | string | `.orca-state/runs/BRANCH/WORKFLOW` | Same as above (rare) |
@@ -191,19 +191,43 @@ Write your result to `{{ result_path }}`:
 ```
 ````
 
-#### P3. Writing the result file before committing
+#### P3. Omitting `{{ result_path }}` in the `## Result` section
+
+**Bad:**
+```markdown
+## Result
+
+Writing the result file is the FINAL action. Commit every change first — orca terminates the session ~30 s after detecting a valid result.
+```
+
+The worker reads "the result file" and has no path in this section. Historically this caused real zombies — late in the run, the worker would start an unbounded sub-investigation to *find* the path (often reading `.orca-state/runs/.../state.json` or grepping the repo), burn through `--max-turns` or context budget, and the session would end without `result.json` ever being written. Orca then records `worker_failed: result file not found after session exited`.
+
+The framework now interpolates the path into the auto-appended end-of-prompt warning, so the worker can still recover it from the very last line of the rendered prompt. That makes this pitfall a clarity issue rather than a fatal one — but workers don't always read prompts linearly, especially long ones, and an explicit path in the `## Result` section avoids the seek-back-to-the-bottom pattern entirely.
+
+**Good:**
+```markdown
+## Result
+
+Write the result JSON (schema above) to `{{ result_path }}`. Writing the result file is the FINAL action. Commit every change first — orca terminates the session ~30 s after detecting a valid result.
+```
+
+The literal path is right there at the moment the worker is about to act on it. No lookup, no guessing.
+
+**Rule of thumb:** Mentioning `{{ result_path }}` once at the top of the prompt is not enough — long prompts (200+ lines) push the path out of the worker's attention window by the time it reaches the result-writing step. The path belongs in the section the worker is reading *when it writes*. If you also embed a schema block earlier with `Write your result to \`{{ result_path }}\`:` (P2), the `## Result` reminder can be a one-liner pointing back to it.
+
+#### P4. Writing the result file before committing
 
 **Bad:** Write result → commit → session killed before commit finishes.
 
 **Good:** Commit all work → write result file as FINAL action. The orchestrator terminates the session ~30 seconds after detecting a valid result file.
 
-#### P4. Hardcoding values instead of template variables
+#### P5. Hardcoding values instead of template variables
 
 **Bad:** `Edit files in src/auth/` — breaks if scope changes.
 
 **Good:** `Edit files in {{ issue.fields.scope_boundary }}`
 
-#### P5. Missing scope boundary enforcement
+#### P6. Missing scope boundary enforcement
 
 **Bad:** Prompt doesn't mention scope — worker edits random files.
 
@@ -214,7 +238,7 @@ Write your result to `{{ result_path }}`:
 - Do NOT modify files outside this boundary
 ```
 
-#### P6. No verification steps (or generic ones)
+#### P7. No verification steps (or generic ones)
 
 **Bad:** "Implement the feature" — no mention of testing. Or: "Run tests" — worker picks the wrong runner.
 
@@ -278,6 +302,7 @@ Before committing:
 2. **All field references exist.** Every `{{ issue.fields.X }}` in the prompt must be declared in the workflow's `issue.fields` block (or set by an upstream state's `result_format`). Grep the prompt for `issue.fields.` and cross-check.
 3. **`{% if %}` guards on optional sections.** Anything that depends on optional data (`depends_on`, `children`, etc.) must be guarded — otherwise the rendered prompt has dangling empty headers.
 4. **JSON template renders cleanly.** Mentally render the bottom block with the actual `result_format` and check that the JSON is what you want the worker to produce.
+5. **`{{ result_path }}` appears in the `## Result` section** — not only at the top of the prompt. Run `grep -A2 '^## Result' .orca/prompts/{state}.md | grep -q '{{ result_path }}'`. The framework also interpolates the path into the auto-appended end-of-prompt warning, so a forgotten `{{ result_path }}` is no longer fatal — but the `## Result` section is the logical home for it, and the worker is more likely to write the file correctly when the path sits next to the schema rather than at the very end of a 200+ line prompt. Treat this as defense-in-depth, not a single point of failure.
 
 If your editor supports it, render the Jinja template with a sample issue and read the output — many bugs only show up post-render (orphan headers, missing fields, wrong indentation in the JSON block).
 

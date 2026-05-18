@@ -23,11 +23,11 @@ class TemplateRenderError(Exception):
     pass
 
 
-_RESULT_FILE_WARNING = """
+_RESULT_FILE_WARNING_TEMPLATE = """
 
 ---
 
-**IMPORTANT: Writing the result file is the final action of your session. \
+**IMPORTANT: Writing the result file at `{result_path}` is the final action of your session. \
 The orchestrator will terminate this session shortly after detecting the result file. \
 Complete ALL other work — git commits, file writes, code changes — before writing the result file.**"""
 
@@ -83,10 +83,10 @@ def _build_context(
     }
 
 
-def _finalize(rendered: str, *, progress: bool) -> str:
+def _finalize(rendered: str, *, progress: bool, result_path: Path) -> str:
     if progress:
         rendered = _PROGRESS_INSTRUCTION + "\n\n---\n\n" + rendered
-    return rendered + _RESULT_FILE_WARNING
+    return rendered + _RESULT_FILE_WARNING_TEMPLATE.format(result_path=str(result_path))
 
 
 def render_prompt(
@@ -134,7 +134,7 @@ def render_prompt(
             "use bracket syntax such as result_format['outcome']['values']."
         )
         raise TemplateRenderError(msg) from exc
-    return _finalize(rendered, progress=progress)
+    return _finalize(rendered, progress=progress, result_path=result_path)
 
 
 def render_prompt_string(
@@ -163,4 +163,4 @@ def render_prompt_string(
             "use bracket syntax such as result_format['outcome']['values']."
         )
         raise TemplateRenderError(msg) from exc
-    return _finalize(rendered, progress=progress)
+    return _finalize(rendered, progress=progress, result_path=result_path)

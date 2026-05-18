@@ -159,6 +159,7 @@ class TestRenderPrompt:
 
         assert "final action" in output.lower()
         assert "terminate this session" in output.lower()
+        assert str(result_path) in output
 
 
 class TestProgressInjection:
