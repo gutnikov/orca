@@ -17,7 +17,7 @@ def test_claude_plugin_manifest_paths_exist() -> None:
     manifest = _read_json(manifest_path)
 
     assert manifest["name"] == "orca"
-    assert (manifest_path.parent.parent / "skills/orca-setup/SKILL.md").exists()
+    assert (manifest_path.parent.parent / "skills/orca-install/SKILL.md").exists()
     assert (manifest_path.parent.parent / ".mcp.json").exists()
     assert (manifest_path.parent.parent / "hooks/hooks.json").exists()
 
@@ -42,7 +42,7 @@ def test_codex_plugin_manifest_paths_exist() -> None:
     assert manifest["skills"] == "./skills/"
     assert manifest["hooks"] == "./hooks.json"
     assert manifest["mcpServers"] == "./.mcp.json"
-    assert (plugin_root / "skills/orca-setup/SKILL.md").exists()
+    assert (plugin_root / "skills/orca-install/SKILL.md").exists()
     assert (plugin_root / ".mcp.json").exists()
     assert (plugin_root / "hooks.json").exists()
 
@@ -59,7 +59,7 @@ def test_codex_marketplace_points_to_plugin() -> None:
 
 
 def test_codex_setup_skill_defaults_to_codex_worker() -> None:
-    setup_skill = (ROOT / "plugins/orca/skills/orca-setup/SKILL.md").read_text()
+    setup_skill = (ROOT / "plugins/orca/skills/orca-install/SKILL.md").read_text()
 
     assert "kind: codex" in setup_skill
     assert "kind: claude-code" not in setup_skill
