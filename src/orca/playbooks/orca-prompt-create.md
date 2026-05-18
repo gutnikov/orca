@@ -290,6 +290,14 @@ If you're editing an existing workflow, run **[orca-workflow-review.md](orca-wor
 
 If you're inside the larger [orca-workflow-create.md](orca-workflow-create.md) flow, the audit is already part of step 6 there; don't double-run it.
 
+## Step 8 — Consider a unit test
+
+For non-trivial prompts, add a unit test under `.orca/tests/<name>/` that exercises this prompt in isolation against a representative scenario.
+
+Follow [orca-test-create.md](orca-test-create.md). Pick a single-state slice (just this state) and write 3–5 pass/fail criteria covering the most important guarantees of the prompt — typically the expected `outcome` value, the presence of required result fields, and any constraint the prompt enforces (scope boundary, no-rename rule, etc.).
+
+The test pays off the first time you edit this prompt and want to know whether you broke anything. Skip for trivial prompts (one-line decision states with no constraints worth grading).
+
 ## Anti-patterns to refuse
 
 - **Two-job prompts.** "First plan, then implement" in one prompt — refuse, ask to split states.

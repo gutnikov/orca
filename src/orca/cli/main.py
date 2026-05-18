@@ -101,6 +101,11 @@ def build_parser() -> argparse.ArgumentParser:
     unblock_parser.add_argument("issue_id", type=str)
     unblock_parser.add_argument("-m", "--message", type=str, required=True, help="Message to send to the worker")
 
+    # orca test [<name> | add <name>] [--all]
+    test_parser = sub.add_parser("test", help="Run orca tests under .orca/tests/")
+    test_parser.add_argument("args", nargs="*", help="<name> | add <name>")
+    test_parser.add_argument("--all", action="store_true", help="Run every test serially")
+
     return parser
 
 
@@ -181,6 +186,11 @@ def main() -> None:
         from orca.cli.unblock_cmd import unblock_command
 
         unblock_command(args.run_id, args.issue_id, args.message, root=args.root)
+
+    elif args.subcommand == "test":
+        from orca.cli.test_cmd import test_command
+
+        test_command(args, root=args.root)
 
     else:
         parser.print_help()

@@ -32,6 +32,23 @@ from orca.orchestrator.worktree import WorktreeManager
 logger = logging.getLogger(__name__)
 
 
+def _derive_test_name(config_path: Path) -> str | None:
+    """If config_path matches `.orca/tests/<name>/test-flow.yml`, return <name>.
+
+    Otherwise return None. Matching is structural: at least three trailing
+    path parts where the third-to-last is "tests" and the last is
+    "test-flow.yml".
+    """
+    parts = config_path.parts
+    if len(parts) < 3:
+        return None
+    if parts[-1] != "test-flow.yml":
+        return None
+    if parts[-3] != "tests":
+        return None
+    return parts[-2]
+
+
 def _generate_id() -> str:
     return str(uuid4())
 
@@ -222,6 +239,7 @@ class RunManager:
             flow_root=flow_root,
             session_sync=session_sync,
             insights_enabled=insights,
+            test_name=_derive_test_name(config_path),
         )
 
         # Create RunInfo and launch
@@ -456,6 +474,7 @@ class RunManager:
             flow_root=flow_root,
             session_sync=session_sync,
             insights_enabled=run_info.insights,
+            test_name=_derive_test_name(config_path),
         )
         run_info.orchestrator = orchestrator
         run_info.issue_count = len(state.issues)

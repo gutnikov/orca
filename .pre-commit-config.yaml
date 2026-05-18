@@ -10,6 +10,7 @@ repos:
     rev: v1.15.0
     hooks:
       - id: mypy
+        exclude: ^examples/
         additional_dependencies:
           - types-PyYAML>=6.0.12
           - pytest>=9.0.2

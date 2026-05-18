@@ -151,6 +151,14 @@ If the audit produced fixes (or even if it didn't and the user wants confidence)
 
 If a test run surfaces new issues, loop back to the relevant phase — don't patch ad-hoc.
 
+## Tests under `.orca/tests/`
+
+If `.orca/tests/` exists in the repo, the audit is incomplete without checking the tests. For each directory under `.orca/tests/`, delegate to [orca-test-review.md](orca-test-review.md) and fold its findings into your audit report alongside the workflow findings.
+
+Tests are not optional once they exist — stale tests are worse than no tests, because they create false confidence. Treat a Critical finding in a test (e.g. drift between body `result_format` and production) as Critical for the workflow audit as a whole.
+
+If the user changed a production `result_format` in this audit pass, every test that copied that state is now drifted by definition. Surface this proactively rather than waiting for the next test run to fail.
+
 ## Anti-patterns to refuse
 
 - **Hand-wavy "looks good".** If you didn't run every checklist item, you didn't audit — say so.

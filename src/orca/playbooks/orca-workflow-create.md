@@ -135,6 +135,14 @@ Once the workflow validates:
 
 If yes, follow [orca-workflow-run.md](orca-workflow-run.md) with a tiny test task scoped to surface workflow bugs (not production work). If the test surfaces issues, loop back to step 4 or 5 — fix the config/prompts and rerun.
 
+### Step 8 — Add a smoke test
+
+Before declaring the workflow done, scaffold at least one orca test under `.orca/tests/`. Follow [orca-test-create.md](orca-test-create.md).
+
+For new workflows, a single end-to-end test (`setup -> [every state] -> evaluate`) is usually enough as a smoke test — it confirms the whole pipeline runs and lets future edits catch regressions early. For complex flows, also add unit tests for the highest-risk states (typically the planning and implementing equivalents) so a single failure points at the offending prompt.
+
+This step is optional but strongly recommended. A workflow without any tests rots silently — the first time someone edits a prompt, no signal will tell them whether they broke something.
+
 ## Anti-patterns to refuse (or push back on)
 
 - **No escape hatch.** Every active state needs `blocked` or `waiting` in addition to success outcomes. Refuse to write a state that can only succeed.

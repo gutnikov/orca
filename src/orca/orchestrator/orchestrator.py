@@ -61,6 +61,7 @@ class Orchestrator:
         hot_sessions: set[str] | None = None,
         session_log_paths: dict[str, str] | None = None,
         insights_state: dict[str, str] | None = None,
+        test_name: str | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -73,6 +74,7 @@ class Orchestrator:
         self.worktree_mgr = worktree_mgr
         self.repo_root = repo_root
         self.flow_root = flow_root or repo_root
+        self.test_name = test_name
         self._session_sync = session_sync
         self._insights_enabled = insights_enabled
         self._insights_state = insights_state
@@ -315,6 +317,7 @@ class Orchestrator:
                 tracking_id,
                 model=state_def.worker.model,
                 extra_args=state_def.worker.args,
+                prompt_inline=state_def.worker.prompt_inline,
             )
         )
         self._in_flight[task] = (effect.issue_id, tracking_id)
@@ -348,6 +351,7 @@ class Orchestrator:
         tracking_id: str,
         model: str | None = None,
         extra_args: tuple[str, ...] | None = None,
+        prompt_inline: bool = False,
     ) -> WorkerOutcome:
         """Wait for backoff delay, then run the worker."""
         if backoff > 0:
@@ -358,7 +362,15 @@ class Orchestrator:
                 extra={"event": "worker_backoff", "issue_id": effect.issue_id, "backoff_seconds": backoff},
             )
             await asyncio.sleep(backoff)
-        return await self._run_worker(effect, worker, prompt_template, tracking_id, model=model, extra_args=extra_args)
+        return await self._run_worker(
+            effect,
+            worker,
+            prompt_template,
+            tracking_id,
+            model=model,
+            extra_args=extra_args,
+            prompt_inline=prompt_inline,
+        )
 
     async def _run_worker(
         self,
@@ -368,6 +380,7 @@ class Orchestrator:
         tracking_id: str,
         model: str | None = None,
         extra_args: tuple[str, ...] | None = None,
+        prompt_inline: bool = False,
     ) -> WorkerOutcome:
         """Create worktree if needed, then execute the worker."""
         workdir = await self._ensure_worktree(effect.issue_id)
@@ -385,7 +398,10 @@ class Orchestrator:
             result_path = workdir / ".orca-state" / "result.json"
 
         prompt_path: Path | None = None
-        if self.flow_root is not None:
+        prompt_text: str | None = None
+        if prompt_inline:
+            prompt_text = prompt_template
+        elif self.flow_root is not None:
             prompt_path = self.flow_root / prompt_template
 
         # Enrich issue context with base_branch for the prompt template
@@ -429,6 +445,7 @@ class Orchestrator:
                 sessions=self._session_sync.manifest.read(),
                 branch=self.root_branch,
                 workflow=run_dir.name,
+                test_name=self.test_name,
             )
 
         # Create unblock channel for this worker
@@ -480,6 +497,7 @@ class Orchestrator:
                 unblock_message=unblock_message,
                 on_blocked=_on_blocked,
                 on_unblocked=_on_unblocked,
+                prompt_text=prompt_text,
             )
         finally:
             self._waiting_workers.pop(effect.issue_id, None)

@@ -51,6 +51,7 @@ class ScriptedWorker:
         unblock_message: Any = None,
         on_blocked: Any = None,
         on_unblocked: Any = None,
+        prompt_text: str | None = None,
     ) -> WorkerOutcome:
         key = (effect.issue_id, effect.state)
         self.calls.append(key)

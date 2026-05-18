@@ -162,3 +162,30 @@ class TestUnblockParser:
         parser = build_parser()
         with pytest.raises(SystemExit):
             parser.parse_args(["unblock", "my-run:default", "issue-1"])
+
+
+class TestTestParser:
+    def test_parser_accepts_bare_test(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["test"])
+        assert args.subcommand == "test"
+        assert args.args == []
+        assert args.all is False
+
+    def test_parser_accepts_test_name(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["test", "my-test"])
+        assert args.subcommand == "test"
+        assert args.args == ["my-test"]
+
+    def test_parser_accepts_test_add(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["test", "add", "my-test"])
+        assert args.subcommand == "test"
+        assert args.args == ["add", "my-test"]
+
+    def test_parser_accepts_test_all(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["test", "--all"])
+        assert args.subcommand == "test"
+        assert args.all is True

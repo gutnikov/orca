@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from orca.daemon.manager import RunManager, RunStatus
+from orca.daemon.manager import RunManager, RunStatus, _derive_test_name
 from orca.engine.types import DispatchWorkerEffect
 from orca.orchestrator.worker import WorkerOutcome, WorkerSuccess
 
@@ -69,6 +69,7 @@ class MockWorker:
         unblock_message: Any = None,
         on_blocked: Any = None,
         on_unblocked: Any = None,
+        prompt_text: str | None = None,
     ) -> WorkerOutcome:
         self.calls.append((effect.issue_id, effect.state))
         return self.outcomes.get(effect.state, WorkerSuccess(result={"outcome": "start"}))
@@ -346,6 +347,26 @@ class TestExternalFlow:
 
         await mgr.drop_run(run_id)
         assert not (run_dir / "config_source.json").exists()
+
+
+class TestDeriveTestName:
+    def test_matches_tests_layout(self) -> None:
+        assert _derive_test_name(Path("/repo/.orca/tests/foo/test-flow.yml")) == "foo"
+
+    def test_kebab_case_name(self) -> None:
+        assert _derive_test_name(Path("/repo/.orca/tests/scoping-decomposes/test-flow.yml")) == "scoping-decomposes"
+
+    def test_returns_none_for_regular_workflow(self) -> None:
+        assert _derive_test_name(Path("/repo/.orca/develop.yml")) is None
+
+    def test_returns_none_for_unexpected_filename(self) -> None:
+        assert _derive_test_name(Path("/repo/.orca/tests/foo/orca.yml")) is None
+
+    def test_returns_none_for_path_outside_tests_dir(self) -> None:
+        assert _derive_test_name(Path("/repo/.orca/flows/foo/test-flow.yml")) is None
+
+    def test_returns_none_for_short_path(self) -> None:
+        assert _derive_test_name(Path("test-flow.yml")) is None
 
 
 class TestScanInterruptedRuns:

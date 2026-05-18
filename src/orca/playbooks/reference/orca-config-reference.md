@@ -100,6 +100,8 @@ states:
     worker:                  # Optional. If absent, state is passive (manual advance only)
       kind: claude-code      # Required. See supported kinds below
       prompt: prompts/impl.md  # Required. Jinja2 template path (relative to .orca/ directory)
+                               # — or { path: prompts/impl.md } for explicit path
+                               # — or { text: "Inline Jinja {{ issue.fields.title }}..." } for inline source
       timeout: 1200          # Optional. Hard kill after N seconds of total wall-clock
       inactivity_timeout: 300  # Optional. Kill if no progress for N seconds. Default: 300.
                                # Paused while the worker's last outcome is `waiting`.
@@ -139,7 +141,7 @@ states:
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `kind` | `claude-code` \| `codex` \| `opencode` | yes | — | Which agent CLI orca spawns the worker as. |
-| `prompt` | string (path) | yes | — | Jinja2 template path, relative to `.orca/`. Rendered with the issue context before dispatch. |
+| `prompt` | string \| mapping | yes | — | Jinja2 prompt source. Accepts three shapes: (1) bare string — path to a template file, relative to `.orca/`; (2) `{ path: <str> }` — same, but explicit; (3) `{ text: <str> }` — inline Jinja source rendered directly. Rendered with the issue context before dispatch. |
 | `timeout` | positive int (seconds) | no | none | Hard wall-clock kill. Use for worst-case bounding; the worker is terminated regardless of activity. |
 | `inactivity_timeout` | positive int (seconds) | no | 300 | Kill the worker if no progress for this many seconds. **Paused while the worker's last outcome is `waiting`** (so HITL doesn't trip the timer). |
 | `model` | string | no | inherits from the agent CLI | Passed to the worker CLI as `-m <model>`. Accepted values are whatever the CLI supports — for `claude-code`, a Claude model id like `claude-sonnet-4-6`; for `codex`, an OpenAI model id like `gpt-5.4`; for `opencode`, its provider/model scheme. |
@@ -199,6 +201,35 @@ Examples: `.orca/develop.yml`, `.orca/prd.yml`, `.orca/qa-spec.yml`, `.orca/inve
 
 Select with `-w`: `orca run task.md -w develop` loads `.orca/develop.yml`. Default (no `-w`) loads `.orca/default.yml`.
 
+## Tests
+
+Orca recognizes `.orca/tests/<name>/test-flow.yml` as a test workflow.
+
+```
+.orca/
+  develop.yml                # production workflow
+  prompts/
+    scoping.md
+  tests/
+    scoping-decomposes-large-spec/
+      test-flow.yml          # bookended workflow: setup -> slice -> evaluate
+      input.md               # scenario + YAML frontmatter (seeds issue.fields)
+      evaluations.md         # pass/fail checklist
+      fixtures/              # optional — files setup may copy into the worktree
+```
+
+Recognized conventions:
+
+- The directory `<name>` is kebab-case and descriptive of the scenario.
+- The workflow file is named `test-flow.yml` (not `orca.yml`) so it's grep-distinguishable from production workflows.
+- The directory must also contain `input.md` (issue data + scenario) and `evaluations.md` (pass/fail checklist). `fixtures/` is optional.
+- The workflow follows a bookended shape: `setup -> <body slice> -> evaluate`. Body states are copied verbatim from the production workflow; `prompt:` paths use `../../prompts/<name>.md` and the loader resolves them at config-load time (workers never see `..` paths).
+- When the engine loads a config file at this path, it sets `run.test_name = <name>` in the Jinja template context. Setup and evaluate inline prompts use this to locate sibling files (`input.md`, `evaluations.md`, `fixtures/`).
+- `input.md` supports YAML frontmatter at the top. The engine parses it and seeds `issue.fields.*` before the setup state runs, so trivial setups are effectively judgment-free.
+- The `evaluate` state writes `report.md` into `{{ run.run_dir }}/report.md`. The source directory stays clean; reports live with the run.
+
+See [`../orca-test-create.md`](../orca-test-create.md) for the authoring procedure and [`../orca-test-review.md`](../orca-test-review.md) for the audit checklist.
+
 ## Validation Rules
 
 The config parser enforces all of these. A workflow that violates any rule will fail to load.
@@ -212,7 +243,7 @@ The config parser enforces all of these. A workflow that violates any rule will 
 | Active state routing | States with worker + on: must have `outcome` enum in result_format |
 | At least one routable outcome | State must have ≥1 non-reserved outcome with an `on:` rule |
 | Valid worker kind | Must be `claude-code`, `codex`, or `opencode` |
-| Non-empty prompt | `worker.prompt` required if worker defined |
+| Non-empty prompt | `worker.prompt` required if worker defined. If given as a mapping, exactly one of `path` or `text` must be set. |
 | Positive timeouts | `timeout`, `inactivity_timeout` must be positive integers |
 | Positive max_workers | `max_workers` must be positive integer |
 | Positive max_hops | `max_hops` must be positive integer |
