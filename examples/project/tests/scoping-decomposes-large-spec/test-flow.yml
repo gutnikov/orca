@@ -1,10 +1,10 @@
 # Test workflow: scoping-decomposes-large-spec
 #
-# Bookended shape: setup -> scoping -> evaluate.
-# The `scoping` body state copies result_format verbatim from
-# examples/project/orca.yml and references ../../prompts/scoping.md so the
-# prompt under test is exercised as-is. Both scoping outcomes route to
-# `evaluate` — we're grading the result, not running the rest of the flow.
+# Shape: scoping -> evaluate.
+# Body state `scoping` is copied verbatim from examples/project/orca.yml
+# and references ../../prompts/scoping.md so the prompt under test is
+# exercised as-is. Both scoping outcomes route to `evaluate` — we're
+# grading the result, not running the rest of the flow.
 
 issue:
   fields:
@@ -21,59 +21,10 @@ issue:
 max_hops: 5
 max_worker_retries: 2
 
-initial: setup
+initial: scoping
 
 states:
 
-  # Head: arrange the worktree from input.md + fixtures, then emit issue fields.
-  setup:
-    worker:
-      kind: claude-code
-      prompt:
-        text: |
-          # Setup
-
-          You are arranging the worktree for an orca test run.
-
-          1. Read `tests/{{ run.test_name }}/input.md`. The YAML frontmatter
-             holds the issue field values; the body explains what the worktree
-             should look like.
-          2. Copy `tests/{{ run.test_name }}/fixtures/legacy-auth.py` to
-             `src/auth/legacy_auth.py` (create the directory if needed).
-          3. Copy `tests/{{ run.test_name }}/fixtures/legacy-payments.py` to
-             `src/payments/legacy_payments.py` (create the directory if needed).
-          4. Write `{{ result_path }}` with outcome `ready` and the three issue
-             fields populated from the frontmatter. If anything goes wrong,
-             write outcome `setup_failed` instead.
-
-          ```json
-          {{ result_example | tojson(indent=2) }}
-          ```
-      timeout: 300
-      result_format:
-        outcome:
-          type: enum
-          values: [ready, setup_failed]
-          description: "Whether setup arranged the worktree successfully"
-          values_description:
-            ready: "Worktree is arranged; issue fields are populated"
-            setup_failed: "Setup could not complete — grade as inconclusive"
-        title:
-          type: string
-          description: "Issue title (from input.md frontmatter)"
-        description:
-          type: string
-          description: "Issue description (from input.md frontmatter)"
-        scope_boundary:
-          type: string
-          description: "Issue scope boundary (from input.md frontmatter)"
-    on:
-      ready: scoping
-      setup_failed: failed
-
-  # Body: the slice under test. result_format copied verbatim from
-  # examples/project/orca.yml. The prompt is referenced by relative path so
-  # the production prompt is exercised as-is.
   scoping:
     worker:
       kind: claude-code
@@ -93,13 +44,9 @@ states:
           required_when: [decompose]
           description: "List of sub-issues to create"
     on:
-      # Both production transitions are rewritten to route to `evaluate`:
-      # this is a test, so we grade the scoping result rather than running
-      # the rest of the flow.
       decompose: evaluate
       ready: evaluate
 
-  # Tail: read evaluations.md, grade each criterion, write report.md.
   evaluate:
     worker:
       kind: claude-code
