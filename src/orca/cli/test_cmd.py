@@ -265,12 +265,22 @@ def test_command(args: Namespace, root: Path | None = None) -> None:
         if len(sub_args) != 2:
             print("Usage: orca test add <name>", file=sys.stderr)
             raise SystemExit(2)
+        name = sub_args[1]
         try:
-            path = scaffold_test(repo, sub_args[1])
+            path = scaffold_test(repo, name)
         except (ValueError, FileExistsError) as exc:
             print(f"Error: {exc}", file=sys.stderr)
             raise SystemExit(1) from exc
+        wt = repo / ".orca-state" / "test-states" / name
         print(f"Scaffolded: {path}")
+        print(f"State branch: orca-test-state/{name}")
+        print(f"Author worktree: {wt}")
+        print()
+        print("Next:")
+        print(f"  cd {wt}")
+        print("  # arrange your test state, then:")
+        print('  git add . && git commit -m "seed: <describe scenario>"')
+        print(f"  # then: orca test {name}")
         return
 
     if sub_args:
