@@ -1,5 +1,5 @@
 ---
-name: orca-create-test
+name: orca-test-create
 description: Use when the user wants to create, update, or audit an orca test under `.orca/tests/`. Triggers on "create an orca test", "add a test for the planning prompt", "test my workflow end-to-end", "write a unit test for scoping", "audit my orca tests", "review .orca/tests/", "check my test for drift", or whenever a user mentions `evaluations.md`, `test-flow.yml`, or the `.orca/tests/` directory. Handles test creation, edits, and audit.
 ---
 

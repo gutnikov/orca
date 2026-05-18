@@ -1,5 +1,5 @@
 ---
-name: orca-create-workflow
+name: orca-workflow-create
 description: Use when the user wants to create, update, audit, or review an orca workflow (`.orca/{flow}.yml` plus prompt templates). Triggers on "create an orca workflow", "build a workflow that does X", "add a state to my workflow", "fix my orca config", "audit .orca/", "review my orca workflow", "why is my workflow slow", or whenever invoked with orca worker logs to diagnose a state. Handles workflow creation, edits, and three-layer audit.
 ---
 
@@ -87,4 +87,4 @@ After creating or updating a workflow, offer to test it:
 
 > "Workflow ready. Want me to start a test run with a small `task.md`?"
 
-If yes, follow the supervise skill (or the `orca-workflow-run.md` playbook) — the create-test-fix loop is the fastest way to catch a workflow bug.
+If yes, follow the `orca-workflow-run` skill (or the `orca-workflow-run.md` playbook) — the create-test-fix loop is the fastest way to catch a workflow bug.

@@ -70,14 +70,14 @@ orca daemon status    # should show running
 
 `orca init` is what makes future agent sessions able to find these playbooks under `.orca/playbooks/`. Without it, agents fall back to reading the playbooks shipped with the orca install (less convenient and not editable per project).
 
-If the user is not in an orca-enabled project yet, skip this — direct them to [orca-workflow-create.md](orca-workflow-create.md). With the orca plugin installed, the `orca-setup` skill auto-triggers on phrases like *"set up orca"* and runs the same end-to-end setup; in environments without the plugin, follow the playbook by reading it directly.
+If the user is not in an orca-enabled project yet, skip this — direct them to [orca-workflow-create.md](orca-workflow-create.md). With the orca plugin installed, the `orca-install` skill auto-triggers on phrases like *"set up orca"* and runs the same end-to-end setup; in environments without the plugin, follow the playbook by reading it directly.
 
 ### Done
 
 Report to the user:
 - orca version installed
 - whether the daemon was started (and where, if so)
-- next step: set up a project (invoke the `orca-setup` skill if the orca plugin is installed, otherwise follow [orca-workflow-create.md](orca-workflow-create.md)), or run an existing workflow ([orca-workflow-run.md](orca-workflow-run.md))
+- next step: set up a project (invoke the `orca-install` skill if the orca plugin is installed, otherwise follow [orca-workflow-create.md](orca-workflow-create.md)), or run an existing workflow ([orca-workflow-run.md](orca-workflow-run.md))
 
 ---
 

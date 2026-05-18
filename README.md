@@ -43,7 +43,7 @@ Then ask Claude Code:
 set up orca in this project
 ```
 
-The `orca-setup` skill installs or verifies the Orca CLI, starts the daemon, adds `.orca-state/` to `.gitignore`, creates `.orca/default.yml` and `.orca/prompts/implement.md`, copies playbooks into `.orca/playbooks/`, and runs a smoke task.
+The `orca-install` skill installs or verifies the Orca CLI, starts the daemon, adds `.orca-state/` to `.gitignore`, creates `.orca/default.yml` and `.orca/prompts/implement.md`, copies playbooks into `.orca/playbooks/`, and runs a smoke task.
 
 ### Codex Marketplace
 
@@ -71,10 +71,10 @@ codex
 Then ask Codex:
 
 ```text
-Use the orca-setup skill to set up Orca in this project end-to-end.
+Use the orca-install skill to set up Orca in this project end-to-end.
 ```
 
-The `orca-setup` skill installs or verifies the Orca CLI, starts the daemon, adds `.orca-state/` to `.gitignore`, creates a starter workflow using `kind: codex`, copies playbooks into `.orca/playbooks/`, and runs a smoke task.
+The `orca-install` skill installs or verifies the Orca CLI, starts the daemon, adds `.orca-state/` to `.gitignore`, creates a starter workflow using `kind: codex`, copies playbooks into `.orca/playbooks/`, and runs a smoke task.
 
 After setup, start work by asking your agent to create a task and start an Orca run. Watch active work with:
 

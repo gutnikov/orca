@@ -11,7 +11,7 @@ Start an orca run from a task description, then supervise it through to a termin
 
 ## Scope of this playbook
 
-This playbook is self-contained: it covers pre-flight, task composition, the watch loop (Phase C), the post-completion merge plan, and wrap-up. With the orca plugin installed, the `orca-supervise` skill auto-triggers on phrases like *"supervise the run"* or *"babysit orca"* — it runs the watch loop directly (no task composition), useful when the user is already mid-run and just wants oversight. The logic is the same — what's in Phase C below is the canonical version.
+This playbook is self-contained: it covers pre-flight, task composition, the watch loop (Phase C), the post-completion merge plan, and wrap-up. With the orca plugin installed, the `orca-workflow-run` skill auto-triggers on phrases like *"supervise the run"* or *"babysit orca"* — it runs the watch loop directly (no task composition), useful when the user is already mid-run and just wants oversight. The logic is the same — what's in Phase C below is the canonical version.
 
 ## Phase A — Pre-flight
 

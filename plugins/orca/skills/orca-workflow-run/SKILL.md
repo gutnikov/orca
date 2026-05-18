@@ -1,5 +1,5 @@
 ---
-name: orca-supervise
+name: orca-workflow-run
 description: Use when the user wants to supervise, babysit, watch, or check on a live orca run. Triggers on "supervise the orca run", "babysit orca", "watch the run", "check on my orca workflow", "monitor the run", "is the orca worker stuck", or any time the user is mid-run and wants oversight (waiting outcomes surfaced, stuck states remediated, merge handled). Also triggers when starting a new run that needs supervision from the get-go.
 ---
 

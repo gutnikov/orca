@@ -1,5 +1,5 @@
 ---
-name: orca-setup
+name: orca-install
 description: Use when the user wants to install, set up, bootstrap, or add Orca to a project. Triggers on "set up orca", "install orca", "bootstrap orca", "add orca to this repo", or any first-time orca onboarding. Handles pipx install, daemon start, .gitignore, .orca scaffolding, and a smoke-test run.
 ---
 
