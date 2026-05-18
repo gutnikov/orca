@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import subprocess
 import sys
 from argparse import Namespace
 from dataclasses import dataclass
@@ -17,13 +18,14 @@ _KEBAB_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 
 _SKELETON_TEST_FLOW = """\
 # Test workflow scaffold — fill in the body states before running.
-# Bookended shape: setup -> <slice under test> -> evaluate.
+# Shape: <slice under test> -> evaluate.
+# The worktree is checked out from the state_ref declared in input.md.
 
 issue:
   fields:
     title:
       type: string
-      description: "Issue title (seeded by setup or input.md frontmatter)"
+      description: "Issue title (seeded from input.md frontmatter)"
     description:
       type: string
       description: "Issue description"
@@ -31,34 +33,9 @@ issue:
 max_hops: 10
 max_worker_retries: 2
 
-initial: setup
+initial: TODO_BODY_STATE   # rename to the slice's entry state
 
 states:
-
-  setup:
-    worker:
-      kind: claude-code
-      prompt:
-        text: |
-          # Setup
-          Read tests/{{ run.test_name }}/input.md and arrange the worktree.
-          Write {{ result_path }} with the issue field values.
-
-          ```json
-          {{ result_example | tojson(indent=2) }}
-          ```
-      timeout: 300
-      result_format:
-        outcome:
-          type: enum
-          values: [ready, setup_failed]
-        title:
-          type: string
-        description:
-          type: string
-    on:
-      ready: TODO_BODY_STATE   # rename to the slice's entry state
-      setup_failed: failed
 
   # TODO: copy body states from the production workflow here.
   # Outgoing routes that would leave the slice (or go to `done`) must
@@ -95,12 +72,15 @@ _SKELETON_INPUT = """\
 title: "TODO: a one-line title for the test scenario"
 description: |
   TODO: a one-paragraph description of the situation the slice should handle.
+state_ref: TODO_STATE_REF
 ---
 
 # Scenario
 
-TODO: describe the test scenario — what should the slice do, what does the
-worktree need to look like beforehand, and what fixtures should setup copy in.
+TODO: describe (for a human reader) what this test asserts and how the
+state branch is arranged. The state branch checked out into the run
+worktree is whatever `state_ref` above points at — edit the state
+under `.orca-state/test-states/<name>/` and commit with plain git.
 """
 
 _SKELETON_EVALUATIONS = """\
@@ -121,8 +101,92 @@ class TestPaths:
     task_file: Path
 
 
+def parse_state_ref(task_file: Path) -> str | None:
+    """Return the `state_ref` frontmatter value from a test input.md.
+
+    Returns None if the field is missing or still holds the placeholder
+    `TODO_STATE_REF` that the scaffold writes initially.
+    """
+    from orca.orchestrator.runner import parse_task_file
+
+    fields = parse_task_file(task_file)
+    value = fields.get("state_ref")
+    if not isinstance(value, str):
+        return None
+    if value == "TODO_STATE_REF":
+        return None
+    return value
+
+
+def _create_state_branch_and_worktree(repo_root: Path, name: str) -> Path:
+    """Create `orca-test-state/<name>` as an orphan branch + worktree.
+
+    Returns the worktree path. Does NOT mutate the main repo's HEAD.
+
+    Mechanic: create a detached worktree at the target location, switch to an
+    orphan branch inside it, clear the worktree, commit one empty commit.
+    The main repo's working tree and HEAD are untouched throughout.
+    """
+    branch = f"orca-test-state/{name}"
+    worktree_path = repo_root / ".orca-state" / "test-states" / name
+
+    check = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "--verify", branch],
+        capture_output=True,
+    )
+    if check.returncode == 0:
+        msg = f"state branch already exists: {branch}"
+        raise FileExistsError(msg)
+
+    worktree_path.parent.mkdir(parents=True, exist_ok=True)
+
+    subprocess.run(
+        ["git", "-C", str(repo_root), "worktree", "add", "--detach", str(worktree_path), "HEAD"],
+        check=True,
+        capture_output=True,
+    )
+
+    try:
+        subprocess.run(
+            ["git", "-C", str(worktree_path), "checkout", "--orphan", branch],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(worktree_path), "rm", "-rf", "--quiet", "."],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(worktree_path),
+                "commit",
+                "--allow-empty",
+                "-m",
+                f"init: orca test state for {name}",
+            ],
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError:
+        subprocess.run(
+            ["git", "-C", str(repo_root), "worktree", "remove", "--force", str(worktree_path)],
+            capture_output=True,
+        )
+        raise
+
+    return worktree_path
+
+
 def scaffold_test(repo_root: Path, name: str) -> Path:
-    """Create `.orca/tests/<name>/` with skeleton files. Returns the directory."""
+    """Create `.orca/tests/<name>/` with skeleton files. Returns the directory.
+
+    Also creates `orca-test-state/<name>` (orphan branch) and a persistent
+    author worktree at `.orca-state/test-states/<name>/`. The state_ref
+    marker pointing at that branch is stamped into input.md.
+    """
     if not _KEBAB_RE.match(name):
         msg = f"test name must be kebab-case (lowercase + hyphens), got {name!r}"
         raise ValueError(msg)
@@ -132,10 +196,12 @@ def scaffold_test(repo_root: Path, name: str) -> Path:
         msg = f"test directory already exists: {test_dir}"
         raise FileExistsError(msg)
 
-    fixtures_dir = test_dir / "fixtures"
-    fixtures_dir.mkdir(parents=True)
+    _create_state_branch_and_worktree(repo_root, name)
+
+    test_dir.mkdir(parents=True)
+    input_text = _SKELETON_INPUT.replace("TODO_STATE_REF", f"orca-test-state/{name}")
     (test_dir / "test-flow.yml").write_text(_SKELETON_TEST_FLOW)
-    (test_dir / "input.md").write_text(_SKELETON_INPUT)
+    (test_dir / "input.md").write_text(input_text)
     (test_dir / "evaluations.md").write_text(_SKELETON_EVALUATIONS)
     return test_dir
 
@@ -159,7 +225,12 @@ def resolve_test_paths(repo_root: Path, name: str) -> TestPaths:
     return TestPaths(config_path=config_path.resolve(), task_file=task_file.resolve())
 
 
-async def _submit_run(repo_root: Path, config_path: Path, task_file: Path) -> str:
+async def _submit_run(
+    repo_root: Path,
+    config_path: Path,
+    task_file: Path,
+    state_ref: str,
+) -> str:
     """POST to the daemon to start a run. Returns the run_id."""
     from orca.daemon.lifecycle import socket_path
 
@@ -173,6 +244,7 @@ async def _submit_run(repo_root: Path, config_path: Path, task_file: Path) -> st
         "run_id": None,
         "headless": True,
         "insights": False,
+        "state_ref": state_ref,
     }
     async with (
         aiohttp.ClientSession(connector=connector) as session,
@@ -188,7 +260,15 @@ async def _submit_run(repo_root: Path, config_path: Path, task_file: Path) -> st
 def run_test(repo_root: Path, name: str) -> str:
     """Submit a test run to the daemon. Returns the run_id."""
     paths = resolve_test_paths(repo_root, name)
-    return asyncio.run(_submit_run(repo_root, paths.config_path, paths.task_file))
+    state_ref = parse_state_ref(paths.task_file)
+    if state_ref is None:
+        msg = (
+            f"test '{name}' has no state_ref in input.md frontmatter — add "
+            f"`state_ref: orca-test-state/{name}` and create the branch with "
+            f"`orca test add` (or fix the marker)."
+        )
+        raise RuntimeError(msg)
+    return asyncio.run(_submit_run(repo_root, paths.config_path, paths.task_file, state_ref))
 
 
 def test_command(args: Namespace, root: Path | None = None) -> None:
@@ -216,12 +296,22 @@ def test_command(args: Namespace, root: Path | None = None) -> None:
         if len(sub_args) != 2:
             print("Usage: orca test add <name>", file=sys.stderr)
             raise SystemExit(2)
+        name = sub_args[1]
         try:
-            path = scaffold_test(repo, sub_args[1])
+            path = scaffold_test(repo, name)
         except (ValueError, FileExistsError) as exc:
             print(f"Error: {exc}", file=sys.stderr)
             raise SystemExit(1) from exc
+        wt = repo / ".orca-state" / "test-states" / name
         print(f"Scaffolded: {path}")
+        print(f"State branch: orca-test-state/{name}")
+        print(f"Author worktree: {wt}")
+        print()
+        print("Next:")
+        print(f"  cd {wt}")
+        print("  # arrange your test state, then:")
+        print('  git add . && git commit -m "seed: <describe scenario>"')
+        print(f"  # then: orca test {name}")
         return
 
     if sub_args:

@@ -57,6 +57,34 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _git_ref_exists(repo_root: Path, ref: str) -> bool:
+    """Return True if `ref` resolves in the repo at `repo_root`."""
+    import subprocess
+
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "--verify", ref],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
+async def _reset_test_worktree(repo_root: Path, branch: str, worktree_path: Path) -> None:
+    """Tear down a prior test worktree + its short-lived branch.
+
+    Idempotent: missing worktree / branch is not an error.
+    """
+    import subprocess
+
+    subprocess.run(
+        ["git", "-C", str(repo_root), "worktree", "remove", "--force", str(worktree_path)],
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo_root), "branch", "-D", branch],
+        capture_output=True,
+    )
+
+
 class RunStatus(enum.Enum):
     RUNNING = "running"
     COMPLETED = "completed"
@@ -122,6 +150,7 @@ class RunManager:
         run_id: str | None = None,
         max_hops: int | None = None,
         max_retries: int | None = None,
+        state_ref: str | None = None,
         *,
         insights: bool = False,
     ) -> str:
@@ -134,6 +163,14 @@ class RunManager:
         config_path = resolve_config_path(self.repo_root, workflow)
         config = parse_config(config_path.read_text())
         flow_root = config_path.parent
+
+        # If state_ref is set, validate it resolves before doing any setup.
+        if state_ref is not None and not _git_ref_exists(self.repo_root, state_ref):
+            msg = (
+                f"state ref '{state_ref}' not found — create it "
+                f"(e.g. `orca test add <name>`) or fix the marker in input.md"
+            )
+            raise ValueError(msg)
 
         # Derive effective_workflow name (short name for run directory)
         if workflow and ("/" in workflow or workflow.endswith(".yml")):
@@ -219,6 +256,18 @@ class RunManager:
 
         # Find root issue ID
         root_issue_id = _find_root_issue(state)
+
+        if state_ref is not None:
+            run_worktree = worktree_mgr.resolve(branch)
+            # Reset any prior run's worktree + short-lived branch.
+            await _reset_test_worktree(self.repo_root, branch, run_worktree)
+            # Create the run worktree branched off the state ref's tip.
+            # Orchestrator._ensure_worktree will find this path and reuse it.
+            await worktree_mgr.create(
+                issue_id=root_issue_id,
+                branch_name=branch,
+                parent_branch=state_ref,
+            )
 
         # Set up workers and orchestrator
         workers = {name: CliAgentWorker(self.repo_root, kc) for name, kc in KIND_REGISTRY.items()}

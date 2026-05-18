@@ -59,6 +59,7 @@ async def _start_run(request: Request) -> JSONResponse:
             run_id=body.get("run_id"),
             max_hops=body.get("max_hops"),
             max_retries=body.get("max_retries"),
+            state_ref=body.get("state_ref"),
             insights=bool(body.get("insights", False)),
         )
     except Exception as exc:

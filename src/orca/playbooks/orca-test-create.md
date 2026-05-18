@@ -5,10 +5,10 @@ Author a small orca test under `.orca/tests/<name>/` that exercises a slice of a
 An **orca test** is just an orca workflow with a fixed shape:
 
 ```
-setup -> [ 1..N states under test, copied from prod ] -> evaluate
+[ 1..N states under test, copied from prod ] -> evaluate
 ```
 
-The body states are copied verbatim from a production workflow YAML so the prompts under test are exercised exactly as they would be in production. `setup` seeds the worktree and issue fields; `evaluate` grades the result against `evaluations.md` and writes `report.md` into the run directory.
+The body states are copied verbatim from a production workflow YAML so the prompts under test are exercised exactly as they would be in production. The worktree is checked out from the state branch declared in `input.md` frontmatter (`state_ref`); `evaluate` grades the result against `evaluations.md` and writes `report.md` into the run directory.
 
 This playbook is **conversational**. Walk the user through every step, show your work, and ask before silently making decisions that change the shape of the test.
 
@@ -20,7 +20,7 @@ Before asking the user anything:
 - [`orca-test-review.md`](orca-test-review.md) — the audit checklist you'll run at the end
 - [`reference/orca-config-reference.md`](reference/orca-config-reference.md) — full workflow schema (tests are workflows)
 - [`reference/orca-workflow-patterns.md`](reference/orca-workflow-patterns.md) — the building blocks you may reuse
-- [`orca-prompt-create.md`](orca-prompt-create.md) — inline-prompt conventions used in `setup` and `evaluate`
+- [`orca-prompt-create.md`](orca-prompt-create.md) — inline-prompt conventions used in `evaluate`
 
 ## Prerequisites
 
@@ -31,21 +31,20 @@ Before asking the user anything:
 
 ## Cost note — surface this before the first run
 
-Every test run costs **N + 2 LLM invocations** (1 setup, N body states, 1 evaluate). A 5-state slice = 7 worker sessions per run. Tell the user this up front so they aren't surprised. Prefer **single-state slices** for first tests — they're the cheapest way to start and the easiest to debug.
+Every test run costs **N + 1 LLM invocations** (N body states + 1 evaluate). A 5-state slice = 6 worker sessions per run. The worktree is set up by `git checkout` rather than an LLM, so there is no per-run setup cost. Prefer **single-state slices** for first tests — they're the cheapest way to start and the easiest to debug.
 
-## The setup-fixture contract
+## The state-branch contract
 
-Read this **before drafting any of the steps below**. It is the load-bearing discipline that keeps tests deterministic. Three roles, sharp boundaries:
+Read this **before drafting any of the steps below**. It is the load-bearing discipline that keeps tests deterministic. Two roles, sharp boundaries:
 
-- **Fixtures** are checked-in artefacts under `fixtures/`. They contain every byte of the scenario the worker will read. **Creativity lives here, and only here.**
-- **Setup** is a mechanical transport. It moves fixtures to worktree paths, runs git commands with literal strings, and emits frontmatter. **It does not invent content.**
-- **Evaluations** anchor on stable fixture facts — literal line numbers, paths, function names. **They reference what the fixture contains, not what setup might produce.**
+- **The state branch** (`orca-test-state/<name>`) is the source of every byte the worker will read. **Creativity lives here, and only here.**
+- **Evaluations** anchor on stable bytes in the state branch — literal line numbers, paths, function names. **They reference what the state branch contains, not what the orchestrator might produce.**
 
-The non-negotiable rule: every byte the slice's body state will read came from a fixture, not from a setup-agent decision. If a criterion says `line within 5 of 42`, then line 42 is where the *fixture* puts the bug — not where the setup agent chose to put it.
+The non-negotiable rule: every byte the slice's body state will read came from the state branch, not from any LLM decision at run time. If a criterion says `line within 5 of 42`, then line 42 is where the *state branch* puts the bug — pinned by a commit you reviewed before merging the test.
 
-Why this is the rule: setup is itself an LLM agent reading an inline prompt. Anything you ask it to invent will vary run-to-run; criteria that depend on those varying outputs become flaky. The cure is to drain creativity out of setup and into fixtures — fixtures are stable bytes on disk; the LLM doesn't reinterpret them.
+Why this is the rule: state-branch bytes are stable, version-controlled, and easy to inspect. Any byte produced by an LLM at run time varies run-to-run; criteria that depend on such bytes become flaky. The cure is to drain creativity out of run time and into git history — commits are bytes on disk; nobody reinterprets them.
 
-The steps that follow operationalise this contract: Step 5 copies the slice; Step 6 writes the (mechanical) setup prompt; Step 8 writes evaluations that cite fixture facts; Step 9 designs the fixtures themselves. Step 6 has a full MAY / MAY NOT list for setup operations; Step 9 has the fixture rules including the `# Fact:` header convention.
+The steps that follow operationalise this contract: Step 5 copies the slice; Step 6 authors the state branch; Step 8 writes evaluations that cite state-branch facts.
 
 ## Interactive process
 
@@ -76,8 +75,8 @@ One paragraph. Write the situation the slice will face and what it should do.
 
 This paragraph drives three downstream artefacts:
 
-- `input.md` body (the prose context the setup agent reads)
-- the setup prompt (what the worktree should look like before the slice runs)
+- `input.md` body (the prose context — for a human reader)
+- the state branch commits (what the worktree should contain before the slice runs)
 - `evaluations.md` (the criteria — derived from "should do" wording above)
 
 Show the paragraph and ask the user to refine. Do not start writing files yet.
@@ -98,11 +97,11 @@ Then scaffold:
 orca test add review-catches-sql-injection
 ```
 
-This creates `.orca/tests/review-catches-sql-injection/` with skeleton `test-flow.yml`, `input.md`, `evaluations.md`, and an empty `fixtures/`. **Edit the skeleton in place** — don't write a fresh structure beside it.
+This creates `.orca/tests/review-catches-sql-injection/` with skeleton `test-flow.yml`, `input.md`, `evaluations.md`. It also creates the orphan branch `orca-test-state/review-catches-sql-injection` and a persistent author worktree at `.orca-state/test-states/review-catches-sql-injection/`. **Edit the skeleton in place** — don't write a fresh structure beside it.
 
 ### Step 4 — Write `input.md`
 
-Two sections: YAML frontmatter (engine-parsed into `issue.fields.*` before setup runs) and freeform prose body.
+Two sections: YAML frontmatter (engine-parsed into `issue.fields.*` before the first body state runs) and freeform prose body. The frontmatter also carries the `state_ref` marker — the scaffold stamps it; you generally don't need to edit it.
 
 Before:
 
@@ -111,12 +110,13 @@ Before:
 title: "TODO: a one-line title for the test scenario"
 description: |
   TODO: a one-paragraph description of the situation the slice should handle.
+state_ref: orca-test-state/<test-name>
 ---
 
 # Scenario
 
-TODO: describe the test scenario — what should the slice do, what does the
-worktree need to look like beforehand, and what fixtures should setup copy in.
+TODO: describe (for a human reader) what this test asserts and how the
+state branch is arranged.
 ```
 
 After (concrete):
@@ -129,23 +129,24 @@ description: |
   query via f-string interpolation. The function is called from the
   `/users/<id>` route handler.
 scope_boundary: "src/"
+state_ref: orca-test-state/review-catches-sql-injection
 ---
 
 # Scenario
 
 The user submitted a PR that introduces a SQL injection on line 42 of
-`src/api.py`. Before the slice runs, the worktree should contain the
-file at `src/api.py` (copy from `fixtures/api-with-sqli.py`). The
-review state should read the diff, identify the unsafe f-string into a
-SQL query, and emit `outcome=request_changes` with a finding that
-points at `src/api.py:42`.
+`src/api.py`. The state branch `orca-test-state/review-catches-sql-injection`
+carries that file at the expected path. The review state should read the
+diff, identify the unsafe f-string into a SQL query, and emit
+`outcome=request_changes` with a finding that points at `src/api.py:42`.
 ```
 
 Rules:
 
 - Frontmatter keys are issue field names. **Only declare fields the slice's entry state actually reads.** Cross-check against `issue.fields` in the production workflow.
-- Prose body is for the setup agent's eyes — it does not seed `issue.fields`.
-- If setup needs to copy files into the worktree, name them under `fixtures/` here. See *The setup-fixture contract* above for the rules.
+- `state_ref` is required. Without it `orca test <name>` refuses to start the run.
+- Prose body is for the reader's eyes — it does not seed `issue.fields`.
+- If the test should share state with another test, point `state_ref` at that test's branch instead of the scaffolded default.
 
 ### Step 5 — Copy slice states into `test-flow.yml`
 
@@ -156,7 +157,7 @@ The skeleton has placeholders. Replace them with body states copied verbatim fro
 1. **`result_format` is copied verbatim.** Drift here is the whole point of having tests — keep them in sync.
 2. **Internal transitions stay verbatim.** If `planning` in prod routes `done -> implementing` and both states are in the slice, copy the rule unchanged.
 3. **Outgoing-to-outside-slice transitions are rewritten to `evaluate`.** If `implementing` in prod routes `done -> reviewing` but `reviewing` is *not* in the slice, rewrite to `done -> evaluate`. The same applies to any rule that targets the built-in `done` — rewrite to `evaluate` so the grader sees the final result.
-4. **The setup state's success outcome routes to the slice's entry state.** Replace the placeholder `ready: TODO_BODY_STATE` with the real entry state name.
+4. **`initial:` names the slice's entry state.** Replace the placeholder `initial: TODO_BODY_STATE` with the real entry state name (e.g. `initial: review`).
 
 Concrete example — copying a single `review` state from `.orca/review.yml`:
 
@@ -217,71 +218,31 @@ Notes:
 - The production `request_changes: revising` transition is collapsed to a plain `evaluate` route. Tests grade against the slice's *output*, not the orchestrator's downstream behaviour. We don't want the `revising` state to spawn during a test — the `evaluate` state inspects the `findings` field directly.
 - Every outcome routes to `evaluate`. The grader decides pass/fail; the slice never reaches `done` on its own.
 
-After editing the body, replace the placeholder `setup.on.ready: TODO_BODY_STATE` with the entry state name (here, `review`). Then the file's `setup -> review -> evaluate` shape is complete.
+After editing the body, replace the placeholder `initial: TODO_BODY_STATE` with the entry state name (here, `review`). Then the file's `review -> evaluate` shape is complete.
 
-### Step 6 — Tune the setup prompt
+### Step 6 — Author the state branch
 
-The skeleton setup prompt reads `input.md` and arranges the worktree. Customise the inline prompt for the scenario.
+`orca test add <name>` already created `orca-test-state/<name>` as an orphan branch and a persistent author worktree at `.orca-state/test-states/<name>/`. Now you arrange the fixture bytes there using plain git — no orca tooling involved.
 
-Default skeleton (in `setup.worker.prompt.text`):
-
-```yaml
-        text: |
-          # Setup
-          Read tests/{{ run.test_name }}/input.md and arrange the worktree.
-          Write {{ result_path }} with the issue field values.
+```
+cd .orca-state/test-states/<name>/
+# write the files the slice will read
+vim src/api.py
+# commit when the state is ready
+git add . && git commit -m "seed: <describe the scenario>"
 ```
 
-After (concrete for the review example — mechanical, no content generation):
+#### Rules
 
-```yaml
-        text: |
-          # Setup
+- **Stable facts go in commits, not in run-time prompts.** A criterion that says "line 42 contains the SQL injection" anchors on a byte that the state branch carries. There is no LLM that could move it.
+- **Minimum realistic context.** A state branch contains *just* enough plausible code to make the diff look like real work and to make the scenario interpretable. No filler.
+- **No project chrome.** Do not commit `.orca/`, `pyproject.toml`, or `README.md` to the state branch. The orchestrator reads workflow YAML and prompts from the iteration branch; the worktree only needs the bytes the slice will actually look at.
+- **Sharing.** Multiple tests can point `state_ref` at the same branch. After `orca test add` creates `orca-test-state/<test-name>`, edit `input.md` to retarget the marker if you want this test to share an already-authored state.
+- **Iteration.** `cd` back into the author worktree, edit, commit. The next test run picks up the new tip automatically — `state_ref` is a ref name, not a commit hash.
 
-          You are the setup agent for test `{{ run.test_name }}`.
-          Your job is mechanical: copy the fixture, commit, emit the result. Do not invent content.
+#### Cross-checking facts
 
-          ## Step 1: Read the scenario
-          Read `.orca/tests/{{ run.test_name }}/input.md`. Frontmatter is already
-          parsed into issue.fields; the prose body is context for you only.
-
-          ## Step 2: Arrange the worktree (mechanical operations only)
-          Copy the fixture verbatim — do NOT modify its bytes:
-          - `.orca/tests/{{ run.test_name }}/fixtures/api-with-sqli.py` -> `src/api.py`
-
-          Then run, with these literal arguments:
-          - `git add src/api.py`
-          - `git commit -m "test setup: seed PR with SQL injection"`
-
-          ## Step 3: Emit the result
-          Write `{{ result_path }}` with the frontmatter values verbatim:
-
-          ```json
-          {{ result_example | tojson(indent=2) }}
-          ```
-```
-
-The setup prompt should be **≤ 30 lines**. If it grows past that, it is almost always doing too much — usually inventing content. Audit yourself.
-
-### What setup MAY do
-
-- Copy files from `fixtures/` to worktree paths. Both source and target are literal strings in the prompt.
-- Run git commands with literal arguments: `git init`, `git add <literal path>`, `git commit -m "<literal>"`, `git checkout -b <fixed-name>`.
-- Append a literal string to a file.
-- Create empty directories (`mkdir -p <literal>`).
-- Re-emit frontmatter fields verbatim in the result JSON.
-
-### What setup MAY NOT do
-
-- **Generate file content from a description.** "Write a Python file with…", "create a realistic config…", "draft a fixture that…". All forbidden — convert the request into a fixture.
-- **Choose paths, names, line numbers, or values based on judgment.** Every such value in the prompt is a literal, or it comes from `input.md` frontmatter, or the operation doesn't belong in setup.
-- **Make any worktree decision that isn't pre-baked in a fixture or named explicitly in the input frontmatter.** No improvisation.
-- **Depend on external state.** No current time, no network, no RNG, no machine-specific values.
-
-Rules:
-
-- The setup `result_format` must cover every `issue.fields.*` the slice's entry state reads. Engine seeds these from frontmatter; setup either re-emits them or overrides them.
-- `setup_failed` outcome routes to `failed` (in the skeleton). Don't route it to `evaluate` — failed setups produce `inconclusive`, not `failed`.
+If a criterion anchors on `src/api.py:42`, count the lines in the file the state branch carries and verify line 42 is the bug. The fact and the file must agree. Both live in git now, so a single mismatch becomes a deliberate commit you can review.
 
 ### Step 7 — Tune the evaluate prompt
 
@@ -411,37 +372,7 @@ Rules:
 
 Aim for **3–7 criteria** for a first draft. Fewer is fine if the test is narrow.
 
-### Step 9 — Design fixtures
-
-Fixtures are the *only* source of creativity in the test. Setup transports them; evaluations cite their facts. Build them deliberately.
-
-**Rules:**
-
-- **Document the stable facts in a header comment.** Each fixture starts with one `# Fact:` comment per evaluation-anchored fact. Example:
-
-  ```python
-  # Fact: SQL injection at line 42 (f-string into cursor.execute)
-  # Fact: function name is `get_user`
-  # Fact: route handler at line 18 calls get_user
-  ```
-
-  These are the contract between the fixture and the evaluations that cite it. If the fixture is edited and a fact moves, every evaluation that anchored on it must be updated in the same change.
-
-- **Minimum realistic context.** A fixture is *just* enough plausible code to make the diff look like real work and to make the bug interpretable. No filler. If you can remove a function without losing an evaluation anchor or the realism floor, remove it.
-
-- **Size cap.** ≤ 200 lines per fixture, ≤ 3 fixtures per test. Past that, the test is doing too much — split into smaller scenarios.
-
-- **No templates.** A fixture is not a template; it is the literal bytes that land in the worktree. No `{{ placeholders }}`, no setup-time substitution. If you need two variants of a scenario, ship two concrete fixtures and pick which one setup copies via a literal path in the prompt.
-
-- **Anchored facts must match the file.** If a header comment says "SQL injection at line 42", count the lines — line 42 must actually contain the bug. Cross-check before committing.
-
-Examples:
-
-- `fixtures/api-with-sqli.py` — ~50 lines containing a `get_user(user_id)` helper that builds a SQL query via f-string interpolation (the deliberate bug at line 42), plus a couple of unrelated route handlers so the diff looks like a realistic PR rather than a single suspicious change. The file's header comments pin the bug's location, function name, and surrounding route call site.
-
-Skip this step only if the scenario genuinely needs no worktree files (e.g., a planning state that only reads `issue.fields`). In that case, setup still has work — frontmatter re-emission, git init — but no `fixtures/` directory is created.
-
-### Step 10 — Run the test
+### Step 9 — Run the test
 
 ```bash
 orca test review-catches-sql-injection
@@ -461,20 +392,19 @@ Or use the path printed by the evaluate state.
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Setup fails (`inconclusive`) | Setup prompt couldn't arrange the worktree (missing fixtures, wrong paths). | Re-read fixture paths in the setup prompt; verify `fixtures/` files exist. |
+| Daemon error: `state ref '<...>' not found` | The state branch was deleted or renamed, or `state_ref` in `input.md` is wrong. | `git branch --list 'orca-test-state/*'` to confirm; recreate via `orca test add` or fix the marker. |
+| Worktree contents look wrong | State branch tip changed since the author last edited; or someone committed `.orca/` or other chrome to the state branch. | `cd .orca-state/test-states/<name>/ && git log --oneline` to inspect; amend or reset as needed. |
 | Slice fails with worker error | `result_format` drift between test and prod, or the production prompt has a bug. | Re-copy `result_format` verbatim from prod; if still failing, the prompt itself is buggy — fix in prod. |
 | Criteria flip-flop run-to-run | Judgment-heavy criteria. | Rewrite to be objective (counts, presence, regexes). |
 | Every criterion `fail` | Evaluate prompt isn't reading evidence from the right place. | Double-check `{{ run.run_dir }}/state-results/` references; confirm the slice actually emitted a result. |
 
 ## Anti-patterns to refuse
 
-- **Setup that invents content.** "Write a Python file with…", "Create a realistic-looking config…", "Draft a fixture that has X". Refuse — every byte in the worktree must come from a fixture, not a setup-agent decision.
-- **Evaluations anchored on setup-agent decisions.** Criteria like "the file the setup agent created has X" are fragile. Anchor on fixture facts (literal paths, line numbers, function names that the fixture's `# Fact:` header pins down).
-- **Templated fixtures.** Fixtures with `{{ vars }}` that setup substitutes. The substitution is a form of generation. Collapse into multiple concrete fixtures, one per variant.
-- **More than one `setup` or `evaluate` state.** The shape is bookended — exactly one of each. If you need branching, branch in the body.
+- **State branches that include project chrome.** Committing `.orca/`, `pyproject.toml`, or other top-level files to `orca-test-state/<name>` makes the branch confusing to inspect and risks the worker reading state from the wrong place. The state branch should contain only the bytes the slice will actually read.
+- **`state_ref` pointing at a branch outside the `orca-test-state/` namespace.** Tests pointing at `main` or a feature branch run against arbitrary history that may change underfoot. Use the dedicated namespace; share within it freely.
+- **More than one `evaluate` state.** The shape is body→evaluate — exactly one evaluate. If you need branching, branch in the body.
 - **Body states whose `result_format` differs from production.** That defeats the point of the test. If you need a different schema, you're not testing the prompt — you're testing something else. Stop and ask the user what they actually want to test.
 - **Judgment-heavy criteria.** "Is this prose well-written?" "Does this title sound good?" Replace with objective tests or drop the criterion.
-- **Fixtures larger than ~200 lines.** If you need that much code, the test is doing too much. Split into smaller tests.
 - **`evaluate` routing anywhere except `done`.** All three outcomes (`passed`, `failed`, `inconclusive`) terminate the test.
 - **Calling the test directory `test-1`, `test-foo`, `unit-test`.** Use a descriptive kebab-case name that says what the scenario is testing.
 
@@ -483,7 +413,8 @@ Or use the path printed by the evaluate state.
 Report:
 
 - Directory created: `.orca/tests/<name>/`
-- Files: `test-flow.yml`, `input.md`, `evaluations.md`, optionally `fixtures/`
+- Files: `test-flow.yml`, `input.md` (with `state_ref` marker), `evaluations.md`
+- State branch: `orca-test-state/<name>` (commits arranging the worktree)
 - Slice shape: single-state / subgraph / e2e — and which states
 - Criteria count
 - Whether a first run was performed and its outcome

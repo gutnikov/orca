@@ -222,6 +222,199 @@ class TestRunManager:
         await mgr.stop_all()
 
 
+class TestStartRunStateRef:
+    @pytest.mark.asyncio()
+    async def test_resets_worktree_when_state_ref_set(self, repo_root: Path) -> None:
+        """Second run starts from state_ref's tip, not the previous worktree state."""
+        import subprocess as _subp
+
+        from orca.daemon.manager import _reset_test_worktree
+
+        _subp.run(["git", "init", str(repo_root)], check=True, capture_output=True)
+        _subp.run(
+            ["git", "-C", str(repo_root), "config", "user.email", "test@test.com"],
+            check=True,
+            capture_output=True,
+        )
+        _subp.run(
+            ["git", "-C", str(repo_root), "config", "user.name", "Test"],
+            check=True,
+            capture_output=True,
+        )
+        (repo_root / "README.md").write_text("init\n")
+        _subp.run(["git", "-C", str(repo_root), "add", "."], check=True, capture_output=True)
+        _subp.run(
+            ["git", "-C", str(repo_root), "commit", "-m", "init"],
+            check=True,
+            capture_output=True,
+        )
+        _subp.run(
+            ["git", "-C", str(repo_root), "checkout", "-b", "orca-test-state/foo"],
+            check=True,
+            capture_output=True,
+        )
+        (repo_root / "fixture.txt").write_text("fixture\n")
+        _subp.run(["git", "-C", str(repo_root), "add", "."], check=True, capture_output=True)
+        _subp.run(
+            ["git", "-C", str(repo_root), "commit", "-m", "fixture"],
+            check=True,
+            capture_output=True,
+        )
+        _subp.run(
+            ["git", "-C", str(repo_root), "checkout", "main"],
+            capture_output=True,
+        )
+
+        # Simulate prior run: a worktree at the test branch with extra files.
+        wt = repo_root / ".orca-state" / "worktrees" / "test-foo"
+        wt.parent.mkdir(parents=True, exist_ok=True)
+        _subp.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "worktree",
+                "add",
+                "-b",
+                "test-foo",
+                str(wt),
+                "orca-test-state/foo",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        (wt / "junk.txt").write_text("garbage\n")
+        _subp.run(["git", "-C", str(wt), "add", "."], check=True, capture_output=True)
+        _subp.run(
+            ["git", "-C", str(wt), "commit", "-m", "garbage"],
+            check=True,
+            capture_output=True,
+        )
+        assert (wt / "junk.txt").exists()
+
+        await _reset_test_worktree(repo_root, branch="test-foo", worktree_path=wt)
+
+        assert not wt.exists()
+        rc = _subp.run(
+            ["git", "-C", str(repo_root), "rev-parse", "--verify", "test-foo"],
+            capture_output=True,
+        ).returncode
+        assert rc != 0
+
+    @pytest.mark.asyncio()
+    async def test_run_worktree_starts_from_state_ref(self, repo_root: Path) -> None:
+        """When state_ref is set, the run worktree contains the state branch's files."""
+        import subprocess as _subp
+
+        _subp.run(["git", "init", str(repo_root)], check=True, capture_output=True)
+        _subp.run(
+            ["git", "-C", str(repo_root), "config", "user.email", "t@t"],
+            check=True,
+            capture_output=True,
+        )
+        _subp.run(
+            ["git", "-C", str(repo_root), "config", "user.name", "t"],
+            check=True,
+            capture_output=True,
+        )
+        _subp.run(["git", "-C", str(repo_root), "add", "."], check=True, capture_output=True)
+        _subp.run(
+            ["git", "-C", str(repo_root), "commit", "-m", "init"],
+            check=True,
+            capture_output=True,
+        )
+
+        _subp.run(
+            [
+                "git",
+                "-C",
+                str(repo_root),
+                "worktree",
+                "add",
+                "--detach",
+                str(repo_root / ".tmp-state"),
+                "HEAD",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        _subp.run(
+            [
+                "git",
+                "-C",
+                str(repo_root / ".tmp-state"),
+                "checkout",
+                "--orphan",
+                "orca-test-state/foo",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        _subp.run(
+            ["git", "-C", str(repo_root / ".tmp-state"), "rm", "-rf", "--quiet", "."],
+            check=True,
+            capture_output=True,
+        )
+        (repo_root / ".tmp-state" / "fixture.txt").write_text("hello\n")
+        _subp.run(
+            ["git", "-C", str(repo_root / ".tmp-state"), "add", "."],
+            check=True,
+            capture_output=True,
+        )
+        _subp.run(
+            ["git", "-C", str(repo_root / ".tmp-state"), "commit", "-m", "fixture"],
+            check=True,
+            capture_output=True,
+        )
+        _subp.run(
+            ["git", "-C", str(repo_root), "worktree", "remove", str(repo_root / ".tmp-state")],
+            check=True,
+            capture_output=True,
+        )
+
+        mgr = RunManager(repo_root)
+        task_file = repo_root / "task.md"
+
+        mock_worker = MockWorker(
+            outcomes={
+                "todo": WorkerSuccess(result={"outcome": "start"}),
+                "implementing": WorkerSuccess(result={"outcome": "complete"}),
+            }
+        )
+        with (
+            patch("orca.daemon.manager.resolve_branch", return_value="test-foo"),
+            patch("orca.daemon.manager.CliAgentWorker", return_value=mock_worker),
+        ):
+            await mgr.start_run(task_file, state_ref="orca-test-state/foo")
+            await mgr.stop_all()
+
+        wt = repo_root / ".orca-state" / "worktrees" / "test-foo"
+        assert (wt / "fixture.txt").exists()
+        assert (wt / "fixture.txt").read_text() == "hello\n"
+
+    @pytest.mark.asyncio()
+    async def test_rejects_unresolved_state_ref(self, repo_root: Path) -> None:
+        """If state_ref is set but the ref does not exist, start_run errors."""
+        import subprocess as _subp
+
+        _subp.run(["git", "init", str(repo_root)], check=True, capture_output=True)
+        _subp.run(
+            ["git", "-C", str(repo_root), "config", "user.email", "test@test.com"],
+            check=True,
+            capture_output=True,
+        )
+        _subp.run(
+            ["git", "-C", str(repo_root), "config", "user.name", "Test"],
+            check=True,
+            capture_output=True,
+        )
+
+        mgr = RunManager(repo_root)
+        task_file = repo_root / "task.md"
+        with pytest.raises(ValueError, match="state ref 'orca-test-state/ghost' not found"):
+            await mgr.start_run(task_file, state_ref="orca-test-state/ghost")
+
+
 @pytest.fixture()
 def external_flow(tmp_path: Path) -> tuple[Path, Path]:
     """Create an external flow directory with config and prompts, separate from repo_root."""
