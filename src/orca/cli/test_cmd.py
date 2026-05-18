@@ -112,8 +112,9 @@ def scaffold_test(repo_root: Path, name: str) -> Path:
         raise FileExistsError(msg)
 
     test_dir.mkdir(parents=True)
+    input_text = _SKELETON_INPUT.replace("TODO_STATE_REF", f"orca-test-state/{name}")
     (test_dir / "test-flow.yml").write_text(_SKELETON_TEST_FLOW)
-    (test_dir / "input.md").write_text(_SKELETON_INPUT)
+    (test_dir / "input.md").write_text(input_text)
     (test_dir / "evaluations.md").write_text(_SKELETON_EVALUATIONS)
     return test_dir
 

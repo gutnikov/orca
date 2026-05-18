@@ -71,6 +71,12 @@ class TestScaffoldTest:
         with pytest.raises(FileExistsError):
             scaffold_test(repo_root=tmp_path, name="my-test")
 
+    def test_input_md_carries_state_ref(self, tmp_path: Path) -> None:
+        scaffold_test(repo_root=_init_git_repo(tmp_path), name="my-test")
+        content = (tmp_path / ".orca" / "tests" / "my-test" / "input.md").read_text()
+        assert "state_ref: orca-test-state/my-test" in content
+        assert "TODO_STATE_REF" not in content
+
     def test_validates_name_is_kebab_case(self, tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="kebab-case"):
             scaffold_test(repo_root=tmp_path, name="My Test")
