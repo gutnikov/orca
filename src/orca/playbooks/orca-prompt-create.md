@@ -6,6 +6,10 @@ Write or update a single `.orca/prompts/{state}.md` template — the instruction
 
 > **Inline vs file prompts.** The `worker.prompt` field also accepts inline Jinja directly in the YAML — `prompt: { text: "..." }` — for very short single-state flows where a separate file is overhead. The structure and pitfalls in this playbook still apply; the prompt source just lives in the YAML instead of in `.orca/prompts/{state}.md`. Default to a file: it's easier to review, diff, and reuse. Use inline only when the prompt is small enough to skim without scrolling.
 
+## Required reading (you, the agent — not the user)
+
+- [`reference/prompt-design.md`](reference/prompt-design.md) — the evaluations-first paradigm. Prompts are downstream of user-curated evaluations; read this before you write a line of prompt prose, otherwise you'll skip the design step that prevents prompt-rot.
+
 ## When to use this
 
 - During **[orca-workflow-create.md](orca-workflow-create.md)** step 5 (writing prompt templates).
@@ -290,13 +294,19 @@ If you're editing an existing workflow, run **[orca-workflow-review.md](orca-wor
 
 If you're inside the larger [orca-workflow-create.md](orca-workflow-create.md) flow, the audit is already part of step 6 there; don't double-run it.
 
-## Step 8 — Consider a unit test
+## Step 8 — Verify against the evaluations
 
-For non-trivial prompts, add a unit test under `.orca/tests/<name>/` that exercises this prompt in isolation against a representative scenario.
+Under the evaluations-first paradigm (see [`reference/prompt-design.md`](reference/prompt-design.md)), this step is not optional for non-trivial prompts — and it is not the *last* step in spirit. The evaluations should have been drafted *before* the prompt; this step verifies the prompt converges on them.
 
-Follow [orca-test-create.md](orca-test-create.md). Pick a single-state slice (just this state) and write 3–5 pass/fail criteria covering the most important guarantees of the prompt — typically the expected `outcome` value, the presence of required result fields, and any constraint the prompt enforces (scope boundary, no-rename rule, etc.).
+If you wrote the prompt without evaluations first, stop and treat this as a bootstrap step:
 
-The test pays off the first time you edit this prompt and want to know whether you broke anything. Skip for trivial prompts (one-line decision states with no constraints worth grading).
+1. Draft `evaluations.md` per Section 4 of [`reference/prompt-design.md`](reference/prompt-design.md) — 3–5 objective criteria covering the most important guarantees (expected `outcome` value, presence of required result fields, any constraint the prompt enforces).
+2. Follow [`orca-test-create.md`](orca-test-create.md) to scaffold a single-state slice that exercises this prompt.
+3. Run the test. Read the report.
+4. Walk the failure-attribution taxonomy before editing anything.
+5. Apply the minimal edit; re-run.
+
+Skip only for genuinely trivial prompts (one-line decision states with no constraints worth grading).
 
 ## Anti-patterns to refuse
 
