@@ -122,6 +122,7 @@ class RunManager:
         run_id: str | None = None,
         max_hops: int | None = None,
         max_retries: int | None = None,
+        state_ref: str | None = None,
         *,
         insights: bool = False,
     ) -> str:
