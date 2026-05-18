@@ -225,7 +225,12 @@ def resolve_test_paths(repo_root: Path, name: str) -> TestPaths:
     return TestPaths(config_path=config_path.resolve(), task_file=task_file.resolve())
 
 
-async def _submit_run(repo_root: Path, config_path: Path, task_file: Path) -> str:
+async def _submit_run(
+    repo_root: Path,
+    config_path: Path,
+    task_file: Path,
+    state_ref: str,
+) -> str:
     """POST to the daemon to start a run. Returns the run_id."""
     from orca.daemon.lifecycle import socket_path
 
@@ -239,6 +244,7 @@ async def _submit_run(repo_root: Path, config_path: Path, task_file: Path) -> st
         "run_id": None,
         "headless": True,
         "insights": False,
+        "state_ref": state_ref,
     }
     async with (
         aiohttp.ClientSession(connector=connector) as session,
@@ -254,7 +260,15 @@ async def _submit_run(repo_root: Path, config_path: Path, task_file: Path) -> st
 def run_test(repo_root: Path, name: str) -> str:
     """Submit a test run to the daemon. Returns the run_id."""
     paths = resolve_test_paths(repo_root, name)
-    return asyncio.run(_submit_run(repo_root, paths.config_path, paths.task_file))
+    state_ref = parse_state_ref(paths.task_file)
+    if state_ref is None:
+        msg = (
+            f"test '{name}' has no state_ref in input.md frontmatter — add "
+            f"`state_ref: orca-test-state/{name}` and create the branch with "
+            f"`orca test add` (or fix the marker)."
+        )
+        raise RuntimeError(msg)
+    return asyncio.run(_submit_run(repo_root, paths.config_path, paths.task_file, state_ref))
 
 
 def test_command(args: Namespace, root: Path | None = None) -> None:

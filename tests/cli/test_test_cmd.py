@@ -205,6 +205,21 @@ class TestParseStateRef:
         assert parse_state_ref(f) is None
 
 
+class TestRunTestStateRef:
+    def test_run_test_errors_when_input_md_missing_state_ref(self, tmp_path: Path) -> None:
+        from orca.cli.test_cmd import run_test
+
+        repo = _init_git_repo(tmp_path)
+        test_dir = repo / ".orca" / "tests" / "no-marker"
+        test_dir.mkdir(parents=True)
+        (test_dir / "test-flow.yml").write_text("initial: foo\nstates:\n  foo: {}\n")
+        (test_dir / "input.md").write_text("---\ntitle: x\n---\n")
+        (test_dir / "evaluations.md").write_text("# evals\n")
+
+        with pytest.raises(RuntimeError, match="state_ref"):
+            run_test(repo, "no-marker")
+
+
 class TestResolveTestPaths:
     def test_resolves_paths_for_existing_test(self, tmp_path: Path) -> None:
         repo = _init_git_repo(tmp_path)
