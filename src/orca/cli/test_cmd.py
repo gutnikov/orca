@@ -17,13 +17,14 @@ _KEBAB_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 
 _SKELETON_TEST_FLOW = """\
 # Test workflow scaffold — fill in the body states before running.
-# Bookended shape: setup -> <slice under test> -> evaluate.
+# Shape: <slice under test> -> evaluate.
+# The worktree is checked out from the state_ref declared in input.md.
 
 issue:
   fields:
     title:
       type: string
-      description: "Issue title (seeded by setup or input.md frontmatter)"
+      description: "Issue title (seeded from input.md frontmatter)"
     description:
       type: string
       description: "Issue description"
@@ -31,34 +32,9 @@ issue:
 max_hops: 10
 max_worker_retries: 2
 
-initial: setup
+initial: TODO_BODY_STATE   # rename to the slice's entry state
 
 states:
-
-  setup:
-    worker:
-      kind: claude-code
-      prompt:
-        text: |
-          # Setup
-          Read tests/{{ run.test_name }}/input.md and arrange the worktree.
-          Write {{ result_path }} with the issue field values.
-
-          ```json
-          {{ result_example | tojson(indent=2) }}
-          ```
-      timeout: 300
-      result_format:
-        outcome:
-          type: enum
-          values: [ready, setup_failed]
-        title:
-          type: string
-        description:
-          type: string
-    on:
-      ready: TODO_BODY_STATE   # rename to the slice's entry state
-      setup_failed: failed
 
   # TODO: copy body states from the production workflow here.
   # Outgoing routes that would leave the slice (or go to `done`) must
@@ -95,12 +71,15 @@ _SKELETON_INPUT = """\
 title: "TODO: a one-line title for the test scenario"
 description: |
   TODO: a one-paragraph description of the situation the slice should handle.
+state_ref: TODO_STATE_REF
 ---
 
 # Scenario
 
-TODO: describe the test scenario — what should the slice do, what does the
-worktree need to look like beforehand, and what fixtures should setup copy in.
+TODO: describe (for a human reader) what this test asserts and how the
+state branch is arranged. The state branch checked out into the run
+worktree is whatever `state_ref` above points at — edit the state
+under `.orca-state/test-states/<name>/` and commit with plain git.
 """
 
 _SKELETON_EVALUATIONS = """\
