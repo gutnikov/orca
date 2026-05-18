@@ -106,6 +106,71 @@ class TestListTests:
         assert result == ["valid"]
 
 
+class TestCreateStateBranchAndWorktree:
+    def test_creates_orphan_branch(self, tmp_path: Path) -> None:
+        from orca.cli.test_cmd import _create_state_branch_and_worktree
+
+        repo = _init_git_repo(tmp_path)
+        _create_state_branch_and_worktree(repo, "my-test")
+
+        rc = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", "orca-test-state/my-test"],
+            capture_output=True,
+        ).returncode
+        assert rc == 0
+
+    def test_creates_persistent_worktree(self, tmp_path: Path) -> None:
+        from orca.cli.test_cmd import _create_state_branch_and_worktree
+
+        repo = _init_git_repo(tmp_path)
+        _create_state_branch_and_worktree(repo, "my-test")
+        wt = repo / ".orca-state" / "test-states" / "my-test"
+        assert wt.is_dir()
+        head = subprocess.run(
+            ["git", "-C", str(wt), "branch", "--show-current"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert head == "orca-test-state/my-test"
+
+    def test_branch_is_orphan(self, tmp_path: Path) -> None:
+        from orca.cli.test_cmd import _create_state_branch_and_worktree
+
+        repo = _init_git_repo(tmp_path)
+        _create_state_branch_and_worktree(repo, "my-test")
+        wt = repo / ".orca-state" / "test-states" / "my-test"
+        assert not (wt / "README.md").exists()
+
+    def test_does_not_change_main_repo_head(self, tmp_path: Path) -> None:
+        from orca.cli.test_cmd import _create_state_branch_and_worktree
+
+        repo = _init_git_repo(tmp_path)
+        original_head = subprocess.run(
+            ["git", "-C", str(repo), "branch", "--show-current"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        _create_state_branch_and_worktree(repo, "my-test")
+        new_head = subprocess.run(
+            ["git", "-C", str(repo), "branch", "--show-current"],
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        assert new_head == original_head
+
+    def test_errors_if_branch_already_exists(self, tmp_path: Path) -> None:
+        from orca.cli.test_cmd import _create_state_branch_and_worktree
+
+        repo = _init_git_repo(tmp_path)
+        subprocess.run(
+            ["git", "-C", str(repo), "branch", "orca-test-state/my-test"],
+            check=True,
+            capture_output=True,
+        )
+        with pytest.raises(FileExistsError, match="orca-test-state/my-test"):
+            _create_state_branch_and_worktree(repo, "my-test")
+
+
 class TestResolveTestPaths:
     def test_resolves_paths_for_existing_test(self, tmp_path: Path) -> None:
         repo = _init_git_repo(tmp_path)

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import subprocess
 import sys
 from argparse import Namespace
 from dataclasses import dataclass
@@ -98,6 +99,68 @@ TODO: a sentence stating one concrete, gradeable thing the result must satisfy.
 class TestPaths:
     config_path: Path
     task_file: Path
+
+
+def _create_state_branch_and_worktree(repo_root: Path, name: str) -> Path:
+    """Create `orca-test-state/<name>` as an orphan branch + worktree.
+
+    Returns the worktree path. Does NOT mutate the main repo's HEAD.
+
+    Mechanic: create a detached worktree at the target location, switch to an
+    orphan branch inside it, clear the worktree, commit one empty commit.
+    The main repo's working tree and HEAD are untouched throughout.
+    """
+    branch = f"orca-test-state/{name}"
+    worktree_path = repo_root / ".orca-state" / "test-states" / name
+
+    check = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "--verify", branch],
+        capture_output=True,
+    )
+    if check.returncode == 0:
+        msg = f"state branch already exists: {branch}"
+        raise FileExistsError(msg)
+
+    worktree_path.parent.mkdir(parents=True, exist_ok=True)
+
+    subprocess.run(
+        ["git", "-C", str(repo_root), "worktree", "add", "--detach", str(worktree_path), "HEAD"],
+        check=True,
+        capture_output=True,
+    )
+
+    try:
+        subprocess.run(
+            ["git", "-C", str(worktree_path), "checkout", "--orphan", branch],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(worktree_path), "rm", "-rf", "--quiet", "."],
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(worktree_path),
+                "commit",
+                "--allow-empty",
+                "-m",
+                f"init: orca test state for {name}",
+            ],
+            check=True,
+            capture_output=True,
+        )
+    except subprocess.CalledProcessError:
+        subprocess.run(
+            ["git", "-C", str(repo_root), "worktree", "remove", "--force", str(worktree_path)],
+            capture_output=True,
+        )
+        raise
+
+    return worktree_path
 
 
 def scaffold_test(repo_root: Path, name: str) -> Path:
