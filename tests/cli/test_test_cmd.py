@@ -182,6 +182,29 @@ class TestCreateStateBranchAndWorktree:
             _create_state_branch_and_worktree(repo, "my-test")
 
 
+class TestParseStateRef:
+    def test_returns_state_ref_value(self, tmp_path: Path) -> None:
+        from orca.cli.test_cmd import parse_state_ref
+
+        f = tmp_path / "input.md"
+        f.write_text("---\ntitle: Foo\nstate_ref: orca-test-state/foo\n---\n\n# body\n")
+        assert parse_state_ref(f) == "orca-test-state/foo"
+
+    def test_returns_none_when_missing(self, tmp_path: Path) -> None:
+        from orca.cli.test_cmd import parse_state_ref
+
+        f = tmp_path / "input.md"
+        f.write_text("---\ntitle: Foo\n---\n\n# body\n")
+        assert parse_state_ref(f) is None
+
+    def test_returns_none_for_placeholder(self, tmp_path: Path) -> None:
+        from orca.cli.test_cmd import parse_state_ref
+
+        f = tmp_path / "input.md"
+        f.write_text("---\ntitle: Foo\nstate_ref: TODO_STATE_REF\n---\n")
+        assert parse_state_ref(f) is None
+
+
 class TestResolveTestPaths:
     def test_resolves_paths_for_existing_test(self, tmp_path: Path) -> None:
         repo = _init_git_repo(tmp_path)

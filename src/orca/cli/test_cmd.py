@@ -101,6 +101,23 @@ class TestPaths:
     task_file: Path
 
 
+def parse_state_ref(task_file: Path) -> str | None:
+    """Return the `state_ref` frontmatter value from a test input.md.
+
+    Returns None if the field is missing or still holds the placeholder
+    `TODO_STATE_REF` that the scaffold writes initially.
+    """
+    from orca.orchestrator.runner import parse_task_file
+
+    fields = parse_task_file(task_file)
+    value = fields.get("state_ref")
+    if not isinstance(value, str):
+        return None
+    if value == "TODO_STATE_REF":
+        return None
+    return value
+
+
 def _create_state_branch_and_worktree(repo_root: Path, name: str) -> Path:
     """Create `orca-test-state/<name>` as an orphan branch + worktree.
 
