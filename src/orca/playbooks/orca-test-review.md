@@ -42,12 +42,12 @@ Most checks below cross-reference these tables. Build them once, then run the ch
 
 These catch shape violations that would fail at runtime or produce uninterpretable results.
 
-- [ ] **First state is `setup`.** `initial:` must equal `setup`. No other arrangement is supported.
+- [ ] **`initial:` names a body state, not a reserved name.** `initial:` must point at the slice's entry state — not `setup`, `evaluate`, `done`, or `failed`.
 - [ ] **Last state before `done` is `evaluate`.** Every terminal outcome in the workflow must route to `done` *through* `evaluate`, or directly route from `evaluate` to `done`.
-- [ ] **Exactly one `setup` state and exactly one `evaluate` state.** No `setup-2`, `pre-setup`, `evaluate-final`. The bookending is rigid by design.
-- [ ] **Body sits between them.** Setup's success outcome routes to a body state (not directly to `evaluate`, unless the slice is intentionally empty — flag and confirm). Every body state's terminal outgoing route lands in `evaluate`.
-- [ ] **No reserved state names misused.** No body state named `setup`, `evaluate`, `done`, or `failed`.
-- [ ] **`setup_failed` routes to `failed` (not `evaluate`).** A failed setup should produce an `inconclusive`-flavoured terminal, not be graded.
+- [ ] **Exactly one `evaluate` state.** No `evaluate-2`, `final-evaluate`, etc. The tail is rigid by design.
+- [ ] **No `setup` state.** State-branch tests don't have a setup state — the daemon checks the state branch out into the worktree before any state runs.
+- [ ] **Every body state's terminal outgoing route lands in `evaluate`.** Routes to states outside the slice get rewritten to `evaluate`.
+- [ ] **No reserved state names misused.** No body state named `evaluate`, `done`, or `failed`.
 
 **Severity:** failures here are **Critical**. The test will either fail to load or produce meaningless results.
 
@@ -69,7 +69,7 @@ These are the standard workflow-level checks, scoped to the test file.
 
 - [ ] **All `on:` targets exist.** Every transition target is either a state in `test-flow.yml`, the literal `evaluate`, or the built-in `done`/`failed`.
 - [ ] **Outcomes match `on:` keys.** Every key in `on:` must be a value in the state's `result_format.outcome.values`.
-- [ ] **All body states reachable.** Every body state must be reachable from `setup` via the `on:` graph. Unreachable body states are dead code in the test.
+- [ ] **All body states reachable.** Every body state must be reachable from `initial:` via the `on:` graph. Unreachable body states are dead code in the test.
 - [ ] **Worker `kind` valid.** `claude-code`, `codex`, or `opencode`.
 - [ ] **`max_hops` and `max_worker_retries` set.** Tests need bounds just like production. Recommended: `max_hops: 10`, `max_worker_retries: 2` (tests should fail fast).
 
@@ -87,27 +87,28 @@ These are the standard workflow-level checks, scoped to the test file.
 
 **Severity:** unparseable headings → **Critical**. Judgment-heavy criteria → **Important** (flake-prone). Reference mismatch → **Important** (silent fail-by-default).
 
-## Phase 6 — Setup contract
+## Phase 6 — State branch contract
 
-### Routing & schema
+The contract: every byte in the worktree comes from `state_ref`'s commit history; no LLM-arranged content. See `orca-test-create.md` ("The state-branch contract") for the rationale.
 
-- [ ] **Setup's `result_format` covers the slice entry state's input fields.** Cross-reference setup's emitted fields with the `issue.fields.*` references in the entry state's prompt (or in its `result_format` derivations).
-- [ ] **Fields seeded by `input.md` frontmatter don't require re-emission.** If `description` is in the frontmatter, setup doesn't need to emit `description` unless it overrides. Flag re-emission of unchanged fields as redundant (Minor) but not wrong.
-- [ ] **Setup's success outcome routes to the slice's entry state.** Not to a body state in the middle of the slice.
-- [ ] **Setup's failure outcome (`setup_failed` or equivalent) routes to `failed`.** Not to `evaluate`.
+### Marker & resolution
 
-### Determinism (the setup-fixture contract)
+- [ ] **`state_ref` is present in `input.md` frontmatter.** Grep: `grep -n '^state_ref:' .orca/tests/<name>/input.md` — should return exactly one line.
+- [ ] **`state_ref` is not the placeholder.** `TODO_STATE_REF` means the scaffold ran but the author never authored the state. Flag as Critical — the test cannot run.
+- [ ] **`state_ref` resolves to a real branch.** Run: `git rev-parse --verify $(yq '.state_ref' .orca/tests/<name>/input.md)`. Exit code 0 = ref exists. If not, the test cannot run.
+- [ ] **`state_ref` lives in the `orca-test-state/` namespace.** Branches outside the namespace (e.g. `main`, feature branches) tie the test to history that changes under your feet. Sharing within the namespace is fine; pointing at `main` is Important.
 
-The contract: setup is a mechanical transport. Every byte in the worktree must come from a fixture or a literal in the prompt. See `orca-test-create.md` ("The setup-fixture contract") for the full rules.
+### Branch contents
 
-- [ ] **Setup prompt is ≤ 30 lines.** Longer setup prompts almost always hide content generation. Flag as Important and inspect line-by-line.
-- [ ] **No content-generation verbs in the setup prompt.** Scan for "write a file", "create a file that…", "generate", "draft" applied to file content. Any hit is an Important finding — convert to a fixture.
-- [ ] **Every worktree path setup produces is sourced from `fixtures/` or `input.md` frontmatter.** No invented paths. Grep the prompt for path strings and verify each is either a `fixtures/` source, a target named in the prompt verbatim, or a frontmatter value.
-- [ ] **Setup git commands use literal arguments.** No "commit with a descriptive message" — the message is a literal string in the prompt. Same for branch names, paths.
-- [ ] **No templated fixtures.** Fixtures don't contain `{{ placeholders }}` that setup substitutes. If you find any, flag as Important.
-- [ ] **Evaluation-anchored facts match fixture contents.** For every criterion that references a literal file path, line number, function name, or fixed string, verify that the corresponding fixture is laid out that way. Cross-check against the fixture's `# Fact:` header comments — they should declare exactly what the evaluations cite.
+- [ ] **State branch contains no project chrome.** Run: `git ls-tree --name-only orca-test-state/<name>` — confirm no `.orca/`, `pyproject.toml`, `README.md`, or other top-level files unrelated to the scenario.
+- [ ] **Evaluation criteria anchor on bytes in the state branch.** For every criterion that references a literal file path, line number, function name, or fixed string, run `git show orca-test-state/<name>:<path>` (or similar) and verify the bytes match. Mismatches mean the state was edited but the criterion wasn't updated.
+- [ ] **No body state has its own `setup` re-implementation.** If a body state's prompt instructs the worker to copy files, run git commands, or seed scenario content, it's recreating the deleted setup step — fold those bytes into the state branch instead.
 
-**Severity:** missing-field coverage → **Critical** (slice will crash). Routing errors → **Critical**. Content generation in setup → **Important** (silent flake source). Anchor mismatch between evaluations and fixture facts → **Critical** (evaluation passes or fails for wrong reasons).
+### Issue fields
+
+- [ ] **`input.md` frontmatter covers every `issue.fields.*` the slice's entry state reads.** Cross-reference frontmatter keys with the `issue.fields.*` references in the entry state's prompt. Missing fields → the slice will fail at first run.
+
+**Severity:** unresolved `state_ref` → **Critical**. Project chrome in state branch → **Important**. Evaluation/fixture anchor mismatch → **Critical** (criteria pass or fail for wrong reasons). Missing issue.fields → **Critical**.
 
 ## Phase 7 — Drift report
 
@@ -132,7 +133,7 @@ Use the same format as [`orca-workflow-review.md`](orca-workflow-review.md) so o
 ## Test audit: .orca/tests/<name>/
 
 ### Critical
-- [structural] test-flow.yml — initial: is `review`, not `setup`. Tests must start with setup.
+- [state-branch] input.md:L8 — `state_ref` is `TODO_STATE_REF`; author the state branch and update the marker.
 - [evaluations] evaluations.md:L24 — duplicate id `outcome-is-request-changes`.
 
 ### Important
@@ -140,31 +141,33 @@ Use the same format as [`orca-workflow-review.md`](orca-workflow-review.md) so o
 - [evaluations] evaluations.md:L34 — criterion "messages-are-actionable" asks a judgment question. Rewrite as a regex check (e.g., message starts with a verb from a fixed list).
 
 ### Minor
-- [setup] test-flow.yml:L18 — setup re-emits `description` unchanged from frontmatter. Remove from result_format to keep setup small.
+- [state-branch] orca-test-state/<name> — contains `README.md` at root. Remove from the state branch; it's project chrome.
 ```
 
 Rules:
 
-- Prefix every finding with the layer: `[structural]`, `[drift]`, `[reference]`, `[evaluations]`, or `[setup]`.
+- Prefix every finding with the layer: `[structural]`, `[drift]`, `[reference]`, `[evaluations]`, or `[state-branch]`.
 - Cite `file:line` for line-specific findings. Cite the file alone for shape-level findings (drift, unreachable body, etc).
 - Suggest a concrete fix. Refer the user to a specific step in [`orca-test-create.md`](orca-test-create.md) when the fix maps to one.
 - Sort within each section by file path so reruns produce stable diffs.
 
 ## Anti-patterns to flag
 
-- **No body states.** Setup directly routes to `evaluate`. The test grades nothing real. Refuse — ask the user what they meant to test.
+- **No body states.** `initial:` points straight at `evaluate`. The test grades nothing real. Refuse — ask the user what they meant to test.
+- **A `setup` state.** State-branch tests have no setup state. If you find one, the test predates the migration — re-scaffold via `orca test add` or migrate by hand (see `orca-test-create.md` Step 6).
+- **`fixtures/` directory present.** Same as above — the directory is a fossil from the pre-state-branch model. Move its contents into commits on `orca-test-state/<name>` and delete the directory.
 - **Two body states with the same name.** The YAML parser may accept this (silently keeping the last); the test is unverifiable. Flag as Critical.
 - **Body state routes to a state not in this file.** Dangling reference — config fails to load. Critical.
 - **Criteria that reference fields not in any `result_format`.** The criterion will silently fail every run. Important.
 - **Tests in `.orca/tests/<name>/` without `evaluations.md`.** The test directory is incomplete — the evaluator has nothing to grade against. Critical.
-- **`fixtures/` files referenced by setup prompt but not present on disk.** Setup will fail at first run. Important (catchable on first run, but worth surfacing before).
+- **`state_ref` points at a branch outside `orca-test-state/`.** Tests pointing at `main` or feature branches run against history that changes underfoot. Important.
 
 ## Done
 
 Report:
 
 - Test audited: `.orca/tests/<name>/`
-- Phase pass/fail summary: structural / slice-integrity / reference / evaluations / setup-contract
+- Phase pass/fail summary: structural / slice-integrity / reference / evaluations / state-branch
 - Counts: Critical / Important / Minor
 - Drift table (separate from the main report — drift is high-signal even when not yet broken)
 - Total criteria count
