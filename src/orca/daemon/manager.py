@@ -257,6 +257,18 @@ class RunManager:
         # Find root issue ID
         root_issue_id = _find_root_issue(state)
 
+        if state_ref is not None:
+            run_worktree = worktree_mgr.resolve(branch)
+            # Reset any prior run's worktree + short-lived branch.
+            await _reset_test_worktree(self.repo_root, branch, run_worktree)
+            # Create the run worktree branched off the state ref's tip.
+            # Orchestrator._ensure_worktree will find this path and reuse it.
+            await worktree_mgr.create(
+                issue_id=root_issue_id,
+                branch_name=branch,
+                parent_branch=state_ref,
+            )
+
         # Set up workers and orchestrator
         workers = {name: CliAgentWorker(self.repo_root, kc) for name, kc in KIND_REGISTRY.items()}
 
