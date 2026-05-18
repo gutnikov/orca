@@ -222,6 +222,30 @@ class TestRunManager:
         await mgr.stop_all()
 
 
+class TestStartRunStateRef:
+    @pytest.mark.asyncio()
+    async def test_rejects_unresolved_state_ref(self, repo_root: Path) -> None:
+        """If state_ref is set but the ref does not exist, start_run errors."""
+        import subprocess as _subp
+
+        _subp.run(["git", "init", str(repo_root)], check=True, capture_output=True)
+        _subp.run(
+            ["git", "-C", str(repo_root), "config", "user.email", "test@test.com"],
+            check=True,
+            capture_output=True,
+        )
+        _subp.run(
+            ["git", "-C", str(repo_root), "config", "user.name", "Test"],
+            check=True,
+            capture_output=True,
+        )
+
+        mgr = RunManager(repo_root)
+        task_file = repo_root / "task.md"
+        with pytest.raises(ValueError, match="state ref 'orca-test-state/ghost' not found"):
+            await mgr.start_run(task_file, state_ref="orca-test-state/ghost")
+
+
 @pytest.fixture()
 def external_flow(tmp_path: Path) -> tuple[Path, Path]:
     """Create an external flow directory with config and prompts, separate from repo_root."""

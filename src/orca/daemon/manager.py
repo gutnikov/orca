@@ -57,6 +57,17 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _git_ref_exists(repo_root: Path, ref: str) -> bool:
+    """Return True if `ref` resolves in the repo at `repo_root`."""
+    import subprocess
+
+    result = subprocess.run(
+        ["git", "-C", str(repo_root), "rev-parse", "--verify", ref],
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
 class RunStatus(enum.Enum):
     RUNNING = "running"
     COMPLETED = "completed"
@@ -135,6 +146,14 @@ class RunManager:
         config_path = resolve_config_path(self.repo_root, workflow)
         config = parse_config(config_path.read_text())
         flow_root = config_path.parent
+
+        # If state_ref is set, validate it resolves before doing any setup.
+        if state_ref is not None and not _git_ref_exists(self.repo_root, state_ref):
+            msg = (
+                f"state ref '{state_ref}' not found — create it "
+                f"(e.g. `orca test add <name>`) or fix the marker in input.md"
+            )
+            raise ValueError(msg)
 
         # Derive effective_workflow name (short name for run directory)
         if workflow and ("/" in workflow or workflow.endswith(".yml")):
