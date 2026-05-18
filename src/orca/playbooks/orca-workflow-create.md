@@ -14,10 +14,12 @@ This playbook is **conversational**. Walk the user through each step. Do not sil
 
 Before you ask the user anything, read these:
 
+- [`reference/prompt-design.md`](reference/prompt-design.md) — the evaluations-first paradigm; the foundational discipline for every prompt this workflow will contain
 - [`orca-glossary.md`](reference/orca-glossary.md) — definitions for terms used below (outcome vs target, `failed` ambiguity, bounds and timers)
 - [`orca-config-reference.md`](reference/orca-config-reference.md) — full schema, validation rules, recommended defaults
 - [`orca-workflow-patterns.md`](reference/orca-workflow-patterns.md) — single-type vs multi-type, decomposition, parallel fan-out, HITL
 - [`orca-prompt-create.md`](orca-prompt-create.md) — prompt template structure, Jinja conventions, output contracts
+- [`orca-test-create.md`](orca-test-create.md) — the per-state test scaffold you'll run in Step 8
 - [`orca-workflow-review.md`](orca-workflow-review.md) — what to verify at the end
 
 For a complete worked example to mirror, fetch `examples/project/orca.yml` and `examples/project/prompts/` from the orca repo (https://github.com/gutnikov/orca/tree/main/examples/project). If you can't fetch, the patterns reference doc has compositional snippets covering every shape used in that example.
@@ -135,16 +137,29 @@ Once the workflow validates:
 
 If yes, follow [orca-workflow-run.md](orca-workflow-run.md) with a tiny test task scoped to surface workflow bugs (not production work). If the test surfaces issues, loop back to step 4 or 5 — fix the config/prompts and rerun.
 
-### Step 8 — Add a smoke test
+### Step 8 — Create per-state tests (required ask)
 
-Before declaring the workflow done, scaffold at least one orca test under `.orca/tests/`. Follow [orca-test-create.md](orca-test-create.md).
+Before declaring the workflow done, you **must** ask the user about creating tests for each active state. This ask is non-skippable — even if the user later declines, the question must be put in front of them. Ask verbatim:
 
-For new workflows, a single end-to-end test (`setup -> [every state] -> evaluate`) is usually enough as a smoke test — it confirms the whole pipeline runs and lets future edits catch regressions early. For complex flows, also add unit tests for the highest-risk states (typically the planning and implementing equivalents) so a single failure points at the offending prompt.
+> "I'll create one orca test per active state, following the evaluations-first paradigm in [`reference/prompt-design.md`](reference/prompt-design.md). Each test is a single-state slice that grades the prompt against 3–5 objective criteria, so future prompt edits have something to validate against. Should I create them now?"
 
-This step is optional but strongly recommended. A workflow without any tests rots silently — the first time someone edits a prompt, no signal will tell them whether they broke something.
+If the user says **yes**:
+
+1. **Pick the scope.** Ask which states to cover. Default: every active state. For large workflows (5+ states), suggest starting with the highest-risk 1–2 (typically planning and implementing equivalents); the user can add more later.
+2. **Per state, follow [`orca-test-create.md`](orca-test-create.md) end-to-end.** Each test is a `setup -> {state} -> evaluate` single-state slice. The scenario, `evaluations.md`, and `result_format` should already have been drafted as part of Step 5 (per [`orca-prompt-create.md`](orca-prompt-create.md) Step 1) — re-use those artefacts rather than re-drafting from scratch.
+3. **Run each test once after scaffolding.** Read the report. Iterate per [`reference/prompt-design.md`](reference/prompt-design.md) §4 — walk the failure-attribution taxonomy and apply the minimal edit. Continue until criteria pass, or the user accepts the remaining gaps.
+4. **Commit each test directory** under `.orca/tests/<scenario>/` only after the first run completes (passing or with user-accepted failures).
+
+If the user says **no**:
+
+- Note the decision in the final report. The workflow ships without a regression-catching surface; surface this risk plainly. Quote the user's reason if they gave one, so the next agent (or future-you) knows whether to re-ask later.
+- Optionally, offer the lighter alternative: a single end-to-end smoke test (`setup -> [every state] -> evaluate`) instead of per-state tests. Re-ask once.
+
+A workflow without tests rots silently — the first prompt edit may break things invisibly, and there's no signal to catch it. This is why the *ask* is non-skippable, even though the *answer* can be "skip".
 
 ## Anti-patterns to refuse (or push back on)
 
+- **Declaring the workflow done without asking about tests.** Step 8's ask is non-skippable. The user may answer "no" — but they must be asked, and the answer recorded.
 - **No escape hatch.** Every active state needs `blocked` or `waiting` in addition to success outcomes. Refuse to write a state that can only succeed.
 - **Result format / prompt drift.** If you change `result_format`, update the prompt's output contract in the same edit. Never commit one without the other.
 - **Hidden fan-out on a merge state.** A merge/apply state must have `max_workers: 1`. Surface this explicitly to the user.
@@ -156,5 +171,6 @@ This step is optional but strongly recommended. A workflow without any tests rot
 Report to the user:
 - File paths written (`.orca/{flow}.yml`, `.orca/prompts/*.md`)
 - The final state-machine diagram
-- Whether a test run was performed and its outcome
-- What to do next: either run a real task ([orca-workflow-run.md](orca-workflow-run.md)) or commit the workflow files
+- Whether a smoke run was performed and its outcome (Step 7)
+- **Per-state tests** (Step 8): list of tests created with paths and pass/fail status, **or** "user declined" with the recorded reason
+- What to do next: either run a real task ([orca-workflow-run.md](orca-workflow-run.md)) or commit the workflow + test files
