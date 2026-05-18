@@ -71,6 +71,17 @@ class TestScaffoldTest:
         with pytest.raises(FileExistsError):
             scaffold_test(repo_root=tmp_path, name="my-test")
 
+    def test_scaffold_creates_state_branch_and_worktree(self, tmp_path: Path) -> None:
+        repo = _init_git_repo(tmp_path)
+        scaffold_test(repo_root=repo, name="my-test")
+
+        rc = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "--verify", "orca-test-state/my-test"],
+            capture_output=True,
+        ).returncode
+        assert rc == 0
+        assert (repo / ".orca-state" / "test-states" / "my-test").is_dir()
+
     def test_input_md_carries_state_ref(self, tmp_path: Path) -> None:
         scaffold_test(repo_root=_init_git_repo(tmp_path), name="my-test")
         content = (tmp_path / ".orca" / "tests" / "my-test" / "input.md").read_text()

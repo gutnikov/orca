@@ -164,7 +164,12 @@ def _create_state_branch_and_worktree(repo_root: Path, name: str) -> Path:
 
 
 def scaffold_test(repo_root: Path, name: str) -> Path:
-    """Create `.orca/tests/<name>/` with skeleton files. Returns the directory."""
+    """Create `.orca/tests/<name>/` with skeleton files. Returns the directory.
+
+    Also creates `orca-test-state/<name>` (orphan branch) and a persistent
+    author worktree at `.orca-state/test-states/<name>/`. The state_ref
+    marker pointing at that branch is stamped into input.md.
+    """
     if not _KEBAB_RE.match(name):
         msg = f"test name must be kebab-case (lowercase + hyphens), got {name!r}"
         raise ValueError(msg)
@@ -173,6 +178,8 @@ def scaffold_test(repo_root: Path, name: str) -> Path:
     if test_dir.exists():
         msg = f"test directory already exists: {test_dir}"
         raise FileExistsError(msg)
+
+    _create_state_branch_and_worktree(repo_root, name)
 
     test_dir.mkdir(parents=True)
     input_text = _SKELETON_INPUT.replace("TODO_STATE_REF", f"orca-test-state/{name}")
