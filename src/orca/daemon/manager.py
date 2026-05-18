@@ -68,6 +68,23 @@ def _git_ref_exists(repo_root: Path, ref: str) -> bool:
     return result.returncode == 0
 
 
+async def _reset_test_worktree(repo_root: Path, branch: str, worktree_path: Path) -> None:
+    """Tear down a prior test worktree + its short-lived branch.
+
+    Idempotent: missing worktree / branch is not an error.
+    """
+    import subprocess
+
+    subprocess.run(
+        ["git", "-C", str(repo_root), "worktree", "remove", "--force", str(worktree_path)],
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "-C", str(repo_root), "branch", "-D", branch],
+        capture_output=True,
+    )
+
+
 class RunStatus(enum.Enum):
     RUNNING = "running"
     COMPLETED = "completed"
