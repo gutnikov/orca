@@ -172,6 +172,17 @@ class RunManager:
             )
             raise ValueError(msg)
 
+        # state_ref is only meaningful for test runs (`.orca/tests/<name>/test-flow.yml`).
+        # Reject early so a state_ref accidentally passed with a non-test config can't
+        # silently set up the run with a bogus run-branch.
+        test_name = _derive_test_name(config_path)
+        if state_ref is not None and test_name is None:
+            msg = (
+                "state_ref is only supported for test runs — "
+                f"config_path '{config_path}' is not a test-flow.yml under .orca/tests/<name>/"
+            )
+            raise ValueError(msg)
+
         # Derive effective_workflow name (short name for run directory)
         if workflow and ("/" in workflow or workflow.endswith(".yml")):
             # External flow — derive name from filename
@@ -183,9 +194,15 @@ class RunManager:
         if max_retries is not None:
             object.__setattr__(config, "max_worker_retries", max_retries)
 
-        # Resolve branch
+        # Resolve branch. For test runs we use a test-specific ephemeral branch
+        # so the run worktree branched from state_ref doesn't collide with the
+        # user's current checkout (the iteration branch) and so the cleanup in
+        # _reset_test_worktree can't accidentally `git branch -D` user code.
         if branch is None:
-            branch = resolve_branch()
+            if state_ref is not None and test_name is not None:
+                branch = f"orca-test-run-{test_name}"
+            else:
+                branch = resolve_branch()
 
         run_id = run_id or self.make_run_id(branch, effective_workflow)
 
