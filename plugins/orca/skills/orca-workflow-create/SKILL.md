@@ -88,3 +88,7 @@ After creating or updating a workflow, offer to test it:
 > "Workflow ready. Want me to start a test run with a small `task.md`?"
 
 If yes, follow the `orca-workflow-run` skill (or the `orca-workflow-run.md` playbook) — the create-test-fix loop is the fastest way to catch a workflow bug.
+
+## Wrapper skill integration
+
+After the workflow is created (and optionally smoke-tested), offer a thin convenience wrapper skill so the team can invoke the workflow without knowing Orca exists. See Step 9 of `.orca/playbooks/orca-workflow-create.md` and the template at `.orca/playbooks/reference/wrapper-skill-template.md`. The wrapper is fire-and-forget — it composes `task.md` from natural-language input and starts the run via `orca_start_run` once. Always write both `.claude/skills/<name>/SKILL.md` and `.agents/skills/<name>/SKILL.md` so the wrapper works regardless of host CLI.

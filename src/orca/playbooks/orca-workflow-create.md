@@ -157,6 +157,29 @@ If the user says **no**:
 
 A workflow without tests rots silently — the first prompt edit may break things invisibly, and there's no signal to catch it. This is why the *ask* is non-skippable, even though the *answer* can be "skip".
 
+### Step 9 — Offer a convenience wrapper skill (optional)
+
+A wrapper skill is a thin SKILL.md scaffolded into the user's project so teammates can invoke this workflow with natural language — "fix this bug", "ship a feature" — without knowing Orca exists. The wrapper composes `task.md` from the user's ask and starts the run via `orca_start_run`. It is **fire-and-forget**: it kicks the run off and exits. Supervision stays in [`orca-workflow-run.md`](orca-workflow-run.md).
+
+Ask the user once, skippably:
+
+> "I can also create a convenience wrapper skill so anyone on the team can invoke this workflow by saying something like *'<example trigger phrase>'* — without knowing Orca exists. Want one? (skippable)"
+
+Pick the example phrase from Step 1's "what does it do" answer.
+
+If the user says **yes**, follow [`reference/wrapper-skill-template.md`](reference/wrapper-skill-template.md) end-to-end. The shape:
+
+1. **Confirm the name.** Default = the workflow's filename without `.yml`. The user may override.
+2. **Author the `description:` line.** This is the most important step — it's the *only* thing the host CLI uses to decide whether to route to the wrapper. Generate a description per the rules in the template doc (lead with `"Use when..."`, enumerate ≥3 concrete trigger phrases, name the action, ≤80 words, don't mention Orca). Show to the user and iterate until they confirm the phrasing matches how the team actually talks.
+3. **Fill the template** with workflow name, issue-schema fields (from Step 3), and the confirmed description.
+4. **Write both files** with identical content:
+   - `.claude/skills/<name>/SKILL.md` (Claude Code)
+   - `.agents/skills/<name>/SKILL.md` (Codex)
+5. **Check `.gitignore`.** If `.claude/skills/` or `.agents/skills/` is ignored wholesale, surface it and offer to add an exception (`!.claude/skills/`). Don't silently un-ignore.
+6. **Report.** Print both paths plus: *"Wrapper ready. Next session, anyone in either CLI can say `<example phrase>` to kick off a run. To supervise an in-flight run, ask me to babysit it."*
+
+If the user says **no**, note it in the final report and move on.
+
 ## Anti-patterns to refuse (or push back on)
 
 - **Declaring the workflow done without asking about tests.** Step 8's ask is non-skippable. The user may answer "no" — but they must be asked, and the answer recorded.
@@ -165,6 +188,7 @@ A workflow without tests rots silently — the first prompt edit may break thing
 - **Hidden fan-out on a merge state.** A merge/apply state must have `max_workers: 1`. Surface this explicitly to the user.
 - **Mystery field references.** If a prompt references `{{ issue.fields.X }}`, `X` must be in the issue schema (either declared at start or set by an upstream state's `result_format`).
 - **Free-form outcomes.** Every value in `result_format.outcome.values` must appear in `on:` (or it's an unhandled terminal — confirm with the user).
+- **Generating a wrapper skill with a generic description.** Skill routing is description-driven; the offer in Step 9 is wasted if the trigger phrases don't match how the team actually speaks. Walk the description-authoring step from [`reference/wrapper-skill-template.md`](reference/wrapper-skill-template.md) — don't shortcut it.
 
 ## Done
 
@@ -173,4 +197,5 @@ Report to the user:
 - The final state-machine diagram
 - Whether a smoke run was performed and its outcome (Step 7)
 - **Per-state tests** (Step 8): list of tests created with paths and pass/fail status, **or** "user declined" with the recorded reason
+- **Wrapper skill** (Step 9): wrapper name plus both written paths (`.claude/skills/<name>/SKILL.md`, `.agents/skills/<name>/SKILL.md`), **or** "user declined"
 - What to do next: either run a real task ([orca-workflow-run.md](orca-workflow-run.md)) or commit the workflow + test files
