@@ -1,26 +1,33 @@
-"""orca init — copy playbooks into .orca/playbooks/."""
+"""orca init — deprecated; playbooks are now served via the MCP tool."""
 
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 
 
 def init_command(root: Path | None = None) -> None:
-    """Copy bundled playbooks into .orca/playbooks/, preserving subdirectories."""
+    """Print a deprecation notice and remove any leftover `.orca/playbooks/`.
+
+    Since version 0.3.5, playbooks are served directly from the installed orca
+    package via the `orca_get_playbook` MCP tool. `orca init` no longer copies
+    files into the project. Re-running it cleans up any stale `.orca/playbooks/`
+    directory left over from earlier orca versions.
+    """
     from orca.cli.daemon_cmd import _repo_root
 
     repo = _repo_root(root)
-    src = Path(__file__).resolve().parent.parent / "playbooks"
-    dst = repo / ".orca" / "playbooks"
-    dst.mkdir(parents=True, exist_ok=True)
+    legacy = repo / ".orca" / "playbooks"
 
-    copied = 0
-    for src_file in src.rglob("*.md"):
-        rel = src_file.relative_to(src)
-        out = dst / rel
-        out.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(src_file, out)
-        copied += 1
+    message = (
+        "orca init: playbooks are now served via the `orca_get_playbook` MCP "
+        "tool. This command no longer copies files into your project."
+    )
 
-    print(f"Copied {copied} playbooks to {dst}")
+    if legacy.exists():
+        shutil.rmtree(legacy)
+        print(f"{message}\nRemoved legacy directory: {legacy}", file=sys.stderr)
+        return
+
+    print(message, file=sys.stderr)

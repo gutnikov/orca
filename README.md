@@ -43,7 +43,7 @@ Then ask Claude Code:
 set up orca in this project
 ```
 
-The `orca-install` skill installs or verifies the Orca CLI, starts the daemon, adds `.orca-state/` to `.gitignore`, creates `.orca/default.yml` and `.orca/prompts/implement.md`, copies playbooks into `.orca/playbooks/`, and runs a smoke task.
+The `orca-install` skill installs or verifies the Orca CLI, starts the daemon, adds `.orca-state/` to `.gitignore`, creates `.orca/default.yml` and `.orca/prompts/implement.md`, and runs a smoke task. Playbooks (the reference docs agents use to build and audit workflows) are served via the `orca_get_playbook` MCP tool — no copy in your project.
 
 ### Codex Marketplace
 
@@ -74,7 +74,7 @@ Then ask Codex:
 Use the orca-install skill to set up Orca in this project end-to-end.
 ```
 
-The `orca-install` skill installs or verifies the Orca CLI, starts the daemon, adds `.orca-state/` to `.gitignore`, creates a starter workflow using `kind: codex`, copies playbooks into `.orca/playbooks/`, and runs a smoke task.
+The `orca-install` skill installs or verifies the Orca CLI, starts the daemon, adds `.orca-state/` to `.gitignore`, creates a starter workflow using `kind: codex`, and runs a smoke task. Playbooks (the reference docs agents use to build and audit workflows) are served via the `orca_get_playbook` MCP tool — no copy in your project.
 
 After setup, start work by asking your agent to create a task and start an Orca run. Watch active work with:
 
@@ -835,7 +835,7 @@ The `run` variable is available in all prompts and contains:
 | `run.insights` | Path to insights file (JSON), if insights are enabled |
 | `run.state` | Path to the state snapshot (JSON) |
 
-The setup flow copies the bundled playbooks into `.orca/playbooks/` in your project — these include [`orca-prompt-create.md`](playbooks/orca-prompt-create.md) (writing principles, pitfalls, template anatomy), [`reference/orca-config-reference.md`](playbooks/reference/orca-config-reference.md), [`reference/orca-workflow-patterns.md`](playbooks/reference/orca-workflow-patterns.md), and [`orca-workflow-review.md`](playbooks/orca-workflow-review.md). When creating or modifying workflows, tell your coding agent: *"Read `.orca/playbooks/` and then update my workflow."*
+Playbooks (the reference material agents use to build and audit workflows) are bundled inside the installed orca package and served via the `orca_get_playbook` MCP tool — no copy lives in your project. Notable ones include [`orca-prompt-create`](src/orca/playbooks/orca-prompt-create.md) (writing principles, pitfalls, template anatomy), [`reference/orca-config-reference`](src/orca/playbooks/reference/orca-config-reference.md), [`reference/orca-workflow-patterns`](src/orca/playbooks/reference/orca-workflow-patterns.md), and [`orca-workflow-review`](src/orca/playbooks/orca-workflow-review.md). When creating or modifying workflows, tell your coding agent: *"Fetch the relevant orca playbooks and update my workflow."*
 
 See [`examples/project/prompts/`](examples/project/prompts/) for complete prompt templates.
 
@@ -1037,7 +1037,7 @@ The config parser validates on load. These are the most common errors and what t
 
 ## Workflow Patterns
 
-Orca workflows are composable — mix and match these patterns to build your pipeline. Full config snippets for each pattern are in `.orca/playbooks/reference/orca-workflow-patterns.md` (copied during [setup](#installation)) or in the [source repo](playbooks/reference/orca-workflow-patterns.md).
+Orca workflows are composable — mix and match these patterns to build your pipeline. Full config snippets for each pattern are available via the `orca_get_playbook` MCP tool (name: `reference/orca-workflow-patterns`) or in the [source repo](src/orca/playbooks/reference/orca-workflow-patterns.md).
 
 ### Sequential Pipeline
 

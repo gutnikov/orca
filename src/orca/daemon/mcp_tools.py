@@ -3,12 +3,50 @@
 from __future__ import annotations
 
 import json
+from importlib.resources import files
+from importlib.resources.abc import Traversable
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
 from orca.daemon.client import DaemonClient
 from orca.daemon.lifecycle import check_daemon_running, socket_path
+
+
+def _resolve_playbook(name: str) -> Traversable:
+    """Resolve a playbook name to the bundled file Traversable.
+
+    Accepts names with or without a trailing `.md`. Subdirectories use `/`.
+    Rejects empty, absolute, or parent-traversing names.
+    """
+    stem = name.removesuffix(".md")
+    parts = stem.split("/")
+    if not stem or any(p in ("", "..", ".") for p in parts):
+        msg = f"invalid playbook name: {name!r}"
+        raise ValueError(msg)
+    target = files("orca.playbooks")
+    for part in parts[:-1]:
+        target = target.joinpath(part)
+    target = target.joinpath(parts[-1] + ".md")
+    if not target.is_file():
+        msg = f"playbook not found: {name!r}"
+        raise ValueError(msg)
+    return target
+
+
+def _list_playbook_names() -> list[str]:
+    """Return every bundled playbook's name (no `.md`), sorted."""
+    names: list[str] = []
+
+    def _walk(node: Traversable, prefix: str) -> None:
+        for child in node.iterdir():
+            if child.is_dir():
+                _walk(child, prefix + child.name + "/")
+            elif child.name.endswith(".md"):
+                names.append(prefix + child.name.removesuffix(".md"))
+
+    _walk(files("orca.playbooks"), "")
+    return sorted(names)
 
 
 def create_mcp_server() -> FastMCP:
@@ -167,6 +205,36 @@ def create_mcp_server() -> FastMCP:
         result = await _get_client(root).resume_run(run_id)
         return json.dumps(result)
 
+    async def orca_get_playbook(name: str) -> str:
+        """Fetch an orca playbook by name.
+
+        Playbooks are the agent-facing reference material that drive every
+        orca skill (`orca-workflow-create`, `orca-test-create`, etc.). They
+        are bundled inside the installed orca package — call this tool
+        instead of looking for them in the project's `.orca/playbooks/`
+        directory; that directory no longer exists.
+
+        Args:
+            name: Playbook name without `.md`, e.g. `orca-workflow-create`
+                  or `reference/orca-glossary`. Subdirectory names use `/`.
+
+        Returns:
+            The playbook's markdown content.
+
+        Markdown links inside the returned content (e.g.
+        `[orca-glossary](reference/orca-glossary.md)`) are also playbook
+        names — follow them by calling this tool again with the link target.
+        """
+        return _resolve_playbook(name).read_text(encoding="utf-8")
+
+    async def orca_list_playbooks() -> str:
+        """List every playbook available via `orca_get_playbook`.
+
+        Returns:
+            JSON-encoded sorted list of playbook names (no `.md`).
+        """
+        return json.dumps(_list_playbook_names())
+
     async def orca_unblock_worker(root: str, run_id: str, issue_id: str, message: str) -> str:
         """Unblock a waiting worker by sending it a message.
 
@@ -193,5 +261,7 @@ def create_mcp_server() -> FastMCP:
     server.add_tool(orca_drop_run, name="orca_drop_run")
     server.add_tool(orca_resume_run, name="orca_resume_run")
     server.add_tool(orca_unblock_worker, name="orca_unblock_worker")
+    server.add_tool(orca_get_playbook, name="orca_get_playbook")
+    server.add_tool(orca_list_playbooks, name="orca_list_playbooks")
 
     return server

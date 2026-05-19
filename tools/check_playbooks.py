@@ -4,8 +4,10 @@
 Runs in CI and pre-commit. Validates:
 
 1. Every markdown link with a `.md` target resolves to a file that exists.
-2. No stray `..` link escapes the playbook tree (those break after `orca init`
-   copies playbooks into `.orca/playbooks/` in user projects).
+2. No stray `..` link escapes the playbook tree. Such links break the
+   `orca_get_playbook` MCP tool: the tool resolves names relative to the
+   bundled `orca.playbooks` package and rejects `..` traversal as unsafe,
+   so an agent following such a link cannot reach the target.
 
 Exit code is non-zero if any check fails; output names the offending file and
 the offending link so the failure is easy to locate.

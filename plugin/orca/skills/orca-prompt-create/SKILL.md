@@ -19,18 +19,18 @@ Infer the mode from context:
 
 ## Required reading (you, the agent — not the user)
 
-Read these before doing anything. They live under `.orca/playbooks/` (created by `orca init`):
+Fetch these via the `orca_get_playbook` MCP tool before doing anything. Pass the name without `.md`. Markdown links inside any returned playbook (e.g. `[orca-glossary](reference/orca-glossary.md)`) are also playbook names — follow them by calling the tool again with the link target.
 
-- `reference/prompt-design.md` — the evaluations-first paradigm; **foundational, read first**
-- `orca-prompt-create.md` — end-to-end procedure (Steps 1–8)
-- `reference/orca-config-reference.md` — template variables, `result_format` schema
-- `orca-test-create.md` — for writing the `evaluations.md` and the test that grades the prompt
+- `reference/prompt-design` — the evaluations-first paradigm; **foundational, read first**
+- `orca-prompt-create` — end-to-end procedure (Steps 1–8)
+- `reference/orca-config-reference` — template variables, `result_format` schema
+- `orca-test-create` — for writing the `evaluations.md` and the test that grades the prompt
 
-If `.orca/playbooks/` isn't present, the user hasn't run `orca init` — suggest they do, then re-trigger this skill.
+If `orca_get_playbook` is not available, the orca MCP server isn't running or is on an older version — tell the user to run `orca daemon start` (or `pipx upgrade orca && orca daemon restart` if the tool genuinely doesn't exist).
 
 ## Create mode
 
-Follow the procedure in `.orca/playbooks/orca-prompt-create.md` end-to-end. The evaluations-first shape:
+Follow the procedure in the `orca-prompt-create` playbook (`orca_get_playbook` MCP tool) end-to-end. The evaluations-first shape:
 
 ```
 DRAFT evaluations.md  →  SKETCH result_format from criteria  →  DRAFT prompt  →  CHECK pitfalls  →  VERIFY render  →  SHOW USER the evaluations  →  WORKFLOW re-audit  →  RUN test and iterate
@@ -38,7 +38,7 @@ DRAFT evaluations.md  →  SKETCH result_format from criteria  →  DRAFT prompt
 
 Key decisions to surface to the user (do not decide silently):
 
-- **Evaluations come first.** Never draft the prompt before evaluations + `result_format`. If the user hasn't supplied either, run the 3-question bootstrap from `reference/prompt-design.md` §4 (one-sentence success / obvious failure / shape of result).
+- **Evaluations come first.** Never draft the prompt before evaluations + `result_format`. If the user hasn't supplied either, run the 3-question bootstrap from the `reference/prompt-design` playbook §4 (one-sentence success / obvious failure / shape of result).
 - **Single responsibility.** One state, one job. If the user wants the prompt to plan AND implement, refuse — push back to split into states.
 - **`result_format` is the evidence surface.** Every criterion needs a field; promote anything graded out of free-form `summary` into typed fields.
 - **Constraints near the end.** Scope boundaries, no-rename rules, and similar belong near the bottom of the prompt where the worker's attention is freshest.

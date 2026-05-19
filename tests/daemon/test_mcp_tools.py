@@ -59,6 +59,8 @@ class TestMcpToolRegistration:
             "orca_drop_run",
             "orca_resume_run",
             "orca_unblock_worker",
+            "orca_get_playbook",
+            "orca_list_playbooks",
         }
         assert tool_names == expected
 
@@ -183,3 +185,83 @@ class TestStopRunTool:
             content_blocks, _ = await server.call_tool("orca_stop_run", {"root": FAKE_ROOT, "run_id": "nope:default"})
         data = json.loads(_first_text(content_blocks))
         assert "error" in data
+
+
+@pytest.mark.asyncio()
+class TestGetPlaybookTool:
+    async def test_returns_top_level_playbook_content(self) -> None:
+        server = create_mcp_server()
+        content_blocks, _ = await server.call_tool("orca_get_playbook", {"name": "orca-workflow-create"})
+        text = _first_text(content_blocks)
+        # The playbook starts with this header — proves we read the bundled file.
+        assert text.startswith("# Playbook: Create an Orca Workflow")
+
+    async def test_returns_subdir_playbook_content(self) -> None:
+        server = create_mcp_server()
+        content_blocks, _ = await server.call_tool("orca_get_playbook", {"name": "reference/orca-glossary"})
+        text = _first_text(content_blocks)
+        # First line of the glossary — proves the subdir lookup works.
+        assert "glossary" in text.lower()
+
+    async def test_accepts_trailing_md_suffix(self) -> None:
+        """Names with or without `.md` should resolve identically."""
+        server = create_mcp_server()
+        with_md, _ = await server.call_tool("orca_get_playbook", {"name": "orca-workflow-create.md"})
+        without_md, _ = await server.call_tool("orca_get_playbook", {"name": "orca-workflow-create"})
+        assert _first_text(with_md) == _first_text(without_md)
+
+    async def test_rejects_parent_traversal(self) -> None:
+        from mcp.server.fastmcp.exceptions import ToolError
+
+        server = create_mcp_server()
+        with pytest.raises(ToolError, match="invalid playbook name"):
+            await server.call_tool("orca_get_playbook", {"name": "../../../etc/passwd"})
+
+    async def test_rejects_absolute_path(self) -> None:
+        from mcp.server.fastmcp.exceptions import ToolError
+
+        server = create_mcp_server()
+        with pytest.raises(ToolError, match="invalid playbook name"):
+            await server.call_tool("orca_get_playbook", {"name": "/etc/passwd"})
+
+    async def test_rejects_empty_name(self) -> None:
+        from mcp.server.fastmcp.exceptions import ToolError
+
+        server = create_mcp_server()
+        with pytest.raises(ToolError, match="invalid playbook name"):
+            await server.call_tool("orca_get_playbook", {"name": ""})
+
+    async def test_errors_on_unknown_playbook(self) -> None:
+        from mcp.server.fastmcp.exceptions import ToolError
+
+        server = create_mcp_server()
+        with pytest.raises(ToolError, match="playbook not found"):
+            await server.call_tool("orca_get_playbook", {"name": "does-not-exist"})
+
+
+@pytest.mark.asyncio()
+class TestListPlaybooksTool:
+    async def test_includes_known_playbooks(self) -> None:
+        server = create_mcp_server()
+        content_blocks, _ = await server.call_tool("orca_list_playbooks", {})
+        names = json.loads(_first_text(content_blocks))
+        assert isinstance(names, list)
+        # Spot-check a few well-known playbooks.
+        assert "orca-workflow-create" in names
+        assert "orca-test-create" in names
+        assert "reference/orca-glossary" in names
+        assert "reference/wrapper-skill-template" in names
+
+    async def test_sorted_and_unique(self) -> None:
+        server = create_mcp_server()
+        content_blocks, _ = await server.call_tool("orca_list_playbooks", {})
+        names = json.loads(_first_text(content_blocks))
+        assert names == sorted(names)
+        assert len(names) == len(set(names))
+
+    async def test_no_md_suffix(self) -> None:
+        server = create_mcp_server()
+        content_blocks, _ = await server.call_tool("orca_list_playbooks", {})
+        names = json.loads(_first_text(content_blocks))
+        for n in names:
+            assert not n.endswith(".md")

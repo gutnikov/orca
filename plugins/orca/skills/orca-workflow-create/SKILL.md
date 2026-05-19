@@ -20,22 +20,22 @@ Infer the mode from context:
 
 ## Required reading (you, the agent — not the user)
 
-Read these before doing anything. They live under `.orca/playbooks/` (created by `orca init`):
+Fetch these via the `orca_get_playbook` MCP tool before doing anything. Pass the name without `.md`. Markdown links inside any returned playbook (e.g. `[orca-glossary](reference/orca-glossary.md)`) are also playbook names — follow them by calling the tool again with the link target.
 
-- `reference/orca-glossary.md` — terms used below (outcome vs target, `failed` ambiguity, bounds and timers)
-- `reference/orca-config-reference.md` — full schema, validation rules, recommended defaults
-- `reference/orca-workflow-patterns.md` — reusable building blocks
-- `orca-prompt-create.md` — prompt-writing rules
-- `orca-workflow-create.md` — end-to-end procedure for **Create** mode
-- `orca-workflow-review.md` — three-layer audit procedure for **Audit** mode
+- `reference/orca-glossary` — terms used below (outcome vs target, `failed` ambiguity, bounds and timers)
+- `reference/orca-config-reference` — full schema, validation rules, recommended defaults
+- `reference/orca-workflow-patterns` — reusable building blocks
+- `orca-prompt-create` — prompt-writing rules
+- `orca-workflow-create` — end-to-end procedure for **Create** mode
+- `orca-workflow-review` — three-layer audit procedure for **Audit** mode
 
-If `.orca/playbooks/` isn't present, the user hasn't run `orca init` — suggest they do, then re-trigger this skill.
+If `orca_get_playbook` is not available, the orca MCP server isn't running or is on an older version — tell the user to run `orca daemon start` (or `pipx upgrade orca && orca daemon restart` if the tool genuinely doesn't exist).
 
 For a complete worked example, fetch `examples/project/orca.yml` and `examples/project/prompts/` from https://github.com/gutnikov/orca/tree/main/examples/project.
 
 ## Create mode
 
-Follow the procedure in `.orca/playbooks/orca-workflow-create.md` end-to-end. The shape:
+Follow the procedure in the `orca-workflow-create` playbook (`orca_get_playbook` MCP tool) end-to-end. The shape:
 
 ```
 UNDERSTAND GOAL → DESIGN STATE MACHINE → DEFINE ISSUE FIELDS → WRITE YAML → WRITE PROMPTS → VALIDATE
@@ -64,7 +64,7 @@ Impact-assessment checklist:
 
 ## Audit mode
 
-Follow `.orca/playbooks/orca-workflow-review.md`. Three layers:
+Follow the `orca-workflow-review` playbook (`orca_get_playbook` MCP tool). Three layers:
 
 1. **Structural** — will it break? (broken transitions, unreachable states, outcome/on: mismatches)
 2. **Efficiency** — anti-patterns? (no fail-safe, wrong `max_workers`, missing bounds)
@@ -91,4 +91,4 @@ If yes, follow the `orca-workflow-run` skill (or the `orca-workflow-run.md` play
 
 ## Wrapper skill integration
 
-After the workflow is created (and optionally smoke-tested), offer a thin convenience wrapper skill so the team can invoke the workflow without knowing Orca exists. See Step 9 of `.orca/playbooks/orca-workflow-create.md` and the template at `.orca/playbooks/reference/wrapper-skill-template.md`. The wrapper is fire-and-forget — it composes `task.md` from natural-language input and starts the run via `orca_start_run` once. Always write both `.claude/skills/<name>/SKILL.md` and `.agents/skills/<name>/SKILL.md` so the wrapper works regardless of host CLI.
+After the workflow is created (and optionally smoke-tested), offer a thin convenience wrapper skill so the team can invoke the workflow without knowing Orca exists. See Step 9 of the `orca-workflow-create` playbook and the template at `reference/wrapper-skill-template` — both fetched via `orca_get_playbook`. The wrapper is fire-and-forget — it composes `task.md` from natural-language input and starts the run via `orca_start_run` once. Always write both `.claude/skills/<name>/SKILL.md` and `.agents/skills/<name>/SKILL.md` so the wrapper works regardless of host CLI.

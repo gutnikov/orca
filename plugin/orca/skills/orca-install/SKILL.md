@@ -62,10 +62,9 @@ Then tell the user to reload MCP servers (e.g. `/mcp` then restart). Verify the 
 
 ```bash
 mkdir -p .orca/prompts
-orca init
 ```
 
-`orca init` copies the bundled playbooks into `.orca/playbooks/` — these teach coding agents how to build, audit, and run workflows.
+Playbooks (the reference docs that teach coding agents how to build, audit, and run workflows) are served via the `orca_get_playbook` MCP tool — they're bundled inside the installed orca package, no per-project copy needed. Call `orca_list_playbooks` to see what's available.
 
 ## 6. Write a starter workflow
 
@@ -154,4 +153,4 @@ Monitor with `orca_get_run`. If anything fails, check `orca_get_worker_log`, fix
 
 ## After setup
 
-Manage runs from the CLI (`orca tui`, `orca runs`, `orca logs`) or keep using MCP through your coding agent. The `.orca/playbooks/` directory stays in the repo — whenever the workflow needs to evolve, tell your agent to read those playbooks and make the change.
+Manage runs from the CLI (`orca tui`, `orca runs`, `orca logs`) or keep using MCP through your coding agent. Playbooks live inside the installed orca package and are served via the `orca_get_playbook` MCP tool — whenever the workflow needs to evolve, tell your agent to fetch the relevant playbook and make the change.

@@ -22,17 +22,17 @@ Infer the mode from context:
 
 ## Required reading (you, the agent — not the user)
 
-Read these before doing anything. They live under `.orca/playbooks/` (created by `orca init`):
+Fetch these via the `orca_get_playbook` MCP tool before doing anything. Pass the name without `.md`. Markdown links inside any returned playbook (e.g. `[orca-glossary](reference/orca-glossary.md)`) are also playbook names — follow them by calling the tool again with the link target.
 
-- `orca-test-create.md` — end-to-end procedure for **Create** and **Update** mode
-- `orca-test-review.md` — audit checklist for **Audit** mode
-- `reference/orca-config-reference.md` — full workflow schema (tests are workflows)
+- `orca-test-create` — end-to-end procedure for **Create** and **Update** mode
+- `orca-test-review` — audit checklist for **Audit** mode
+- `reference/orca-config-reference` — full workflow schema (tests are workflows)
 
-If `.orca/playbooks/` isn't present, the user hasn't run `orca init` — suggest they do, then re-trigger this skill.
+If `orca_get_playbook` is not available, the orca MCP server isn't running or is on an older version — tell the user to run `orca daemon start` (or `pipx upgrade orca && orca daemon restart` if the tool genuinely doesn't exist).
 
 ## Create mode
 
-Follow the procedure in `.orca/playbooks/orca-test-create.md` end-to-end. The shape:
+Follow the procedure in the `orca-test-create` playbook (`orca_get_playbook` MCP tool) end-to-end. The shape:
 
 ```
 DECIDE SLICE -> SKETCH SCENARIO -> SCAFFOLD -> WRITE input.md -> COPY BODY STATES -> TUNE SETUP -> TUNE EVALUATE -> WRITE evaluations.md -> SEED FIXTURES -> RUN
@@ -51,7 +51,7 @@ Key decisions to surface to the user (do not decide silently):
 READ EXISTING -> UNDERSTAND CHANGE -> RE-VERIFY SLICE INTEGRITY -> APPLY -> RUN
 ```
 
-**Critical rule:** if a production workflow's `result_format` changes, every test that copied that state is now drifted. Re-run [`orca-test-review.md`](orca-test-review.md) after any production workflow edit.
+**Critical rule:** if a production workflow's `result_format` changes, every test that copied that state is now drifted. Re-run the `orca-test-review` playbook after any production workflow edit.
 
 Impact-assessment checklist:
 
@@ -62,7 +62,7 @@ Impact-assessment checklist:
 
 ## Audit mode
 
-Follow `.orca/playbooks/orca-test-review.md`. Eight phases:
+Follow the `orca-test-review` playbook (`orca_get_playbook` MCP tool). Eight phases:
 
 1. **Inventory** — build the state-map and evaluations-map.
 2. **Structural** — bookended shape (setup/evaluate), no reserved-name misuse, body sits between.
