@@ -75,7 +75,7 @@ class Worker(Protocol):
         run_context: dict[str, Any] | None = None,
         unblock_event: asyncio.Event | None = None,
         unblock_message: list[str] | None = None,
-        on_blocked: Callable[[str], None] | None = None,
+        on_blocked: Callable[[str, dict[str, Any] | None], None] | None = None,
         on_unblocked: Callable[[str], None] | None = None,
         prompt_text: str | None = None,
     ) -> WorkerOutcome: ...
@@ -146,7 +146,7 @@ class CliAgentWorker:
         run_context: dict[str, Any] | None = None,
         unblock_event: asyncio.Event | None = None,
         unblock_message: list[str] | None = None,
-        on_blocked: Callable[[str], None] | None = None,
+        on_blocked: Callable[[str, dict[str, Any] | None], None] | None = None,
         on_unblocked: Callable[[str], None] | None = None,
         prompt_text: str | None = None,
     ) -> WorkerOutcome:
@@ -243,8 +243,9 @@ class CliAgentWorker:
                             extra={"event": "worker_waiting", "issue_id": effect.issue_id},
                         )
                         reason = candidate.get("reason", "")
+                        form_schema = candidate.get("form")
                         if on_blocked is not None:
-                            on_blocked(reason)
+                            on_blocked(reason, form_schema)
 
                         # Blocked sub-loop: wait for unblock or session death
                         while True:
