@@ -32,6 +32,34 @@ from orca.orchestrator.worktree import WorktreeManager
 logger = logging.getLogger(__name__)
 
 
+def _notify_form_pending(run_id: str, issue_id: str) -> None:
+    """Log the form URL and try to open the user's browser.
+
+    The daemon's localhost TCP listener serves the React form app; this
+    helper builds a URL pointing at it and best-effort opens the user's
+    default browser. Both the log line and the browser open are safe to
+    fail (e.g. headless SSH session — the URL is still in the log).
+    """
+    raw = os.environ.get("ORCA_DAEMON_TCP_PORT", "7891")
+    if raw.strip().lower() in ("", "0", "off", "false"):
+        return
+    try:
+        port = int(raw)
+    except ValueError:
+        return
+    from urllib.parse import quote
+
+    url = f"http://127.0.0.1:{port}/forms/{quote(run_id, safe='')}/{quote(issue_id, safe='')}"
+    logger.info("⏳ Form pending for issue %s — open %s", issue_id, url)
+    try:
+        import webbrowser
+
+        webbrowser.open(url)
+    except Exception:
+        # Headless / no display — URL is still in the log.
+        pass
+
+
 def _slugify(title: str, max_len: int = 60) -> str:
     """Convert an issue title to a git-branch-safe slug."""
     slug = title.lower()
@@ -481,6 +509,12 @@ class Orchestrator:
                 self.now,
             )
             self.persistence.save(self._state)
+            if form is not None:
+                # Derive run_id (branch:workflow) from the persistence state path.
+                state_path = self.persistence.state_path
+                branch = state_path.parent.parent.name
+                workflow = state_path.parent.name
+                _notify_form_pending(f"{branch}:{workflow}", effect.issue_id)
 
         def _on_unblocked(message: str) -> None:
             from orca.engine.types import WorkerResumedEvent

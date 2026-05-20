@@ -9,38 +9,65 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as FormsRunIdIssueIdRouteImport } from './routes/forms.$runId.$issueId'
 
+const InboxRoute = InboxRouteImport.update({
+  id: '/inbox',
+  path: '/inbox',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const FormsRunIdIssueIdRoute = FormsRunIdIssueIdRouteImport.update({
+  id: '/forms/$runId/$issueId',
+  path: '/forms/$runId/$issueId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/inbox': typeof InboxRoute
+  '/forms/$runId/$issueId': typeof FormsRunIdIssueIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/inbox': typeof InboxRoute
+  '/forms/$runId/$issueId': typeof FormsRunIdIssueIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/inbox': typeof InboxRoute
+  '/forms/$runId/$issueId': typeof FormsRunIdIssueIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/inbox' | '/forms/$runId/$issueId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/inbox' | '/forms/$runId/$issueId'
+  id: '__root__' | '/' | '/inbox' | '/forms/$runId/$issueId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  InboxRoute: typeof InboxRoute
+  FormsRunIdIssueIdRoute: typeof FormsRunIdIssueIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/inbox': {
+      id: '/inbox'
+      path: '/inbox'
+      fullPath: '/inbox'
+      preLoaderRoute: typeof InboxRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -48,11 +75,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/forms/$runId/$issueId': {
+      id: '/forms/$runId/$issueId'
+      path: '/forms/$runId/$issueId'
+      fullPath: '/forms/$runId/$issueId'
+      preLoaderRoute: typeof FormsRunIdIssueIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  InboxRoute: InboxRoute,
+  FormsRunIdIssueIdRoute: FormsRunIdIssueIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
