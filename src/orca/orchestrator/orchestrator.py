@@ -192,6 +192,22 @@ class Orchestrator:
         event.set()
         return True
 
+    def is_waiting(self, issue_id: str) -> bool:
+        """True if a worker for this issue is currently blocked awaiting unblock."""
+        return issue_id in self._waiting_workers
+
+    def mark_form_submitted(self, issue_id: str, ts: str) -> None:
+        """Stamp `pending_form_submitted_at` on an issue and persist.
+
+        Subsequent GETs on the form endpoint will return 410 until the worker
+        actually resumes (which clears both pending_form fields).
+        """
+        issue = self._state.issues.get(issue_id)
+        if issue is None:
+            return
+        issue.pending_form_submitted_at = ts
+        self.persistence.save(self._state)
+
     def _is_terminal(self, issue_id: str) -> bool:
         """Return True if the issue's current state is terminal in config."""
         issue = self._state.issues.get(issue_id)

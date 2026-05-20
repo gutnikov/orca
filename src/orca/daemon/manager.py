@@ -682,6 +682,80 @@ class RunManager:
             msg = f"Issue '{issue_id}' is not waiting in run '{run_id}'"
             raise ValueError(msg)
 
+    def get_pending_form(self, run_id: str, issue_id: str) -> dict[str, Any] | None:
+        """Return form context for an issue or None if no form was ever set.
+
+        Shape: {schema, submitted_at, state, reason, started_waiting_at}.
+        `schema` may be None when the form has been cleared post-resume but
+        before this entry was reaped — submitted_at distinguishes 410 from 404.
+        """
+        run_info = self._runs.get(run_id)
+        if run_info is None or run_info.orchestrator is None:
+            return None
+        issue = run_info.orchestrator.state.issues.get(issue_id)
+        if issue is None:
+            return None
+        if issue.pending_form is None and issue.pending_form_submitted_at is None:
+            return None
+        reason = ""
+        started_at = ""
+        for entry in reversed(issue.event_log):
+            if entry.type == "worker_waiting":
+                reason = entry.data.get("reason", "") if isinstance(entry.data, dict) else ""
+                started_at = entry.timestamp
+                break
+        return {
+            "schema": issue.pending_form,
+            "submitted_at": issue.pending_form_submitted_at,
+            "state": issue.state,
+            "reason": reason,
+            "started_waiting_at": started_at,
+        }
+
+    def list_pending_forms(self) -> list[dict[str, Any]]:
+        """Return one entry per active pending form across all running runs."""
+        out: list[dict[str, Any]] = []
+        for run_info in self._runs.values():
+            if run_info.orchestrator is None:
+                continue
+            for issue_id, issue in run_info.orchestrator.state.issues.items():
+                if issue.pending_form is None or issue.pending_form_submitted_at is not None:
+                    continue
+                started_at = ""
+                for entry in reversed(issue.event_log):
+                    if entry.type == "worker_waiting":
+                        started_at = entry.timestamp
+                        break
+                out.append(
+                    {
+                        "run_id": run_info.run_id,
+                        "issue_id": issue_id,
+                        "state": issue.state,
+                        "title": issue.pending_form.get("title", "Untitled"),
+                        "started_waiting_at": started_at,
+                        "url": f"/forms/{run_info.run_id}/{issue_id}",
+                    }
+                )
+        return out
+
+    def submit_form(self, run_id: str, issue_id: str, envelope: dict[str, Any]) -> str:
+        """Validate and submit a form. Returns one of: ok, not_found, gone, not_waiting."""
+        import json as _json
+
+        run_info = self._runs.get(run_id)
+        if run_info is None or run_info.orchestrator is None:
+            return "not_found"
+        issue = run_info.orchestrator.state.issues.get(issue_id)
+        if issue is None or issue.pending_form is None:
+            return "not_found"
+        if issue.pending_form_submitted_at is not None:
+            return "gone"
+        if not run_info.orchestrator.is_waiting(issue_id):
+            return "not_waiting"
+        run_info.orchestrator.mark_form_submitted(issue_id, _now())
+        run_info.orchestrator.unblock_worker(issue_id, _json.dumps(envelope))
+        return "ok"
+
     def retry_issue(self, run_id: str, issue_id: str) -> None:
         """Retry a failed issue. If the orchestrator loop has finished, restart it."""
         run_info = self._runs.get(run_id)
