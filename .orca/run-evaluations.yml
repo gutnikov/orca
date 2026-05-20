@@ -1,0 +1,36 @@
+# One-step flow that scans `.orca/evals/` and asks the user — via the
+# web-form UI built in the docs/superpowers/specs/2026-05-20-orca-web-forms
+# design — to pick one of the discovered directories.
+#
+# Drive with: orca run task.md -w run-evaluations
+
+issue:
+  fields:
+    title:
+      type: string
+      description: "Issue title (ignored — this flow has no per-issue state)"
+    description:
+      type: string
+      description: "Issue description (ignored)"
+
+initial: select-eval
+
+states:
+
+  # Single state: list .orca/evals subdirectories, ask the user which one to
+  # run via the web form, write the choice as the outcome.
+  select-eval:
+    worker:
+      kind: claude-code
+      prompt: prompts/select-eval.md
+      timeout: 1800            # 30 minutes — generous since a human is in the loop
+      result_format:
+        outcome:
+          type: enum
+          values: [done]
+          description: "Selection step completed"
+        selected:
+          type: string
+          description: "Which evaluation the user picked ('cancelled' if they declined; 'none' if the directory was empty)"
+    on:
+      done: done
