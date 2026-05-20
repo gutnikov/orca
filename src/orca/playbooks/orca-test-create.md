@@ -16,7 +16,7 @@ This playbook is **conversational**. Walk the user through every step, show your
 
 Before asking the user anything:
 
-- [`reference/prompt-design.md`](reference/prompt-design.md) — the assertions-first paradigm; explains *why* tests anchor prompt design and how to draft assertions before any prompt
+- [`reference/assertions-design.md`](reference/assertions-design.md) — the assertions-first paradigm; explains *why* tests anchor prompt design and how to draft assertions before any prompt
 - [`orca-test-review.md`](orca-test-review.md) — the audit checklist you'll run at the end
 - [`reference/orca-config-reference.md`](reference/orca-config-reference.md) — full workflow schema (tests are workflows)
 - [`reference/orca-workflow-patterns.md`](reference/orca-workflow-patterns.md) — the building blocks you may reuse

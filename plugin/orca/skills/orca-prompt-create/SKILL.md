@@ -21,7 +21,8 @@ Infer the mode from context:
 
 Fetch these via the `orca_get_playbook` MCP tool before doing anything. Pass the name without `.md`. Markdown links inside any returned playbook (e.g. `[orca-glossary](reference/orca-glossary.md)`) are also playbook names — follow them by calling the tool again with the link target.
 
-- `reference/prompt-design` — the assertions-first paradigm; **foundational, read first**
+- `reference/assertions-design` — the assertions-first paradigm; **foundational, read first**
+- `reference/prompt-design` — prompt-side conventions (structured fields, explicit constraints, minimal-edit discipline)
 - `orca-prompt-create` — end-to-end procedure (Steps 1–8)
 - `reference/orca-config-reference` — template variables, `result_format` schema
 - `orca-test-create` — for writing the `assertions.md` and the test that grades the prompt
@@ -38,7 +39,7 @@ DRAFT assertions.md  →  SKETCH result_format from criteria  →  DRAFT prompt 
 
 Key decisions to surface to the user (do not decide silently):
 
-- **Assertions come first.** Never draft the prompt before assertions + `result_format`. If the user hasn't supplied either, run the 3-question bootstrap from the `reference/prompt-design` playbook §4 (one-sentence success / obvious failure / shape of result).
+- **Assertions come first.** Never draft the prompt before assertions + `result_format`. If the user hasn't supplied either, run the 3-question bootstrap from the `reference/assertions-design` playbook §5 (one-sentence success / obvious failure / shape of result).
 - **Single responsibility.** One state, one job. If the user wants the prompt to plan AND implement, refuse — push back to split into states.
 - **`result_format` is the evidence surface.** Every criterion needs a field; promote anything graded out of free-form `summary` into typed fields.
 - **Constraints near the end.** Scope boundaries, no-rename rules, and similar belong near the bottom of the prompt where the worker's attention is freshest.
@@ -50,7 +51,7 @@ Key decisions to surface to the user (do not decide silently):
 READ EXISTING prompt + assertions.md  →  UNDERSTAND CHANGE  →  ATTRIBUTE FAILURE  →  MINIMAL EDIT  →  RE-RUN TEST  →  ITERATE
 ```
 
-**Critical rule:** drift = new assertion first, then minimal prompt edit. Never grow the prompt without a failing criterion that justifies it. See `reference/prompt-design.md` §4.
+**Critical rule:** drift = new assertion first, then minimal prompt edit. Never grow the prompt without a failing criterion that justifies it. See `reference/assertions-design.md` §5.
 
 Impact-assessment checklist:
 
@@ -61,7 +62,7 @@ Impact-assessment checklist:
 
 ## Diagnose mode
 
-When the worker keeps producing wrong-shape output or ignoring scope, walk the failure-attribution taxonomy in `reference/prompt-design.md` §4 **before** editing the prompt:
+When the worker keeps producing wrong-shape output or ignoring scope, walk the failure-attribution taxonomy in `reference/assertions-design.md` §5 **before** editing the prompt:
 
 | Failure mode | Symptom | Fix |
 |---|---|---|

@@ -8,24 +8,25 @@ Write or update a single `.orca/prompts/{state}.md` template — the instruction
 
 ## Required reading (you, the agent — not the user)
 
-- [`reference/prompt-design.md`](reference/prompt-design.md) — the assertions-first paradigm. Prompts are downstream of user-curated assertions; read this before you write a line of prompt prose, otherwise you'll skip the design step that prevents prompt-rot.
+- [`reference/assertions-design.md`](reference/assertions-design.md) — the assertions-first paradigm and the methodology that anchors every prompt this playbook produces. Read this *first*; prompts are downstream of user-curated assertions.
+- [`reference/prompt-design.md`](reference/prompt-design.md) — the prompt-side conventions (structured fields, explicit constraints, minimal-edit discipline) used in this playbook.
 
 ## When to use this
 
 - During **[orca-workflow-create.md](orca-workflow-create.md)** step 5 (writing prompt templates).
 - When adding a new state to an existing workflow.
 - When **[orca-workflow-review.md](orca-workflow-review.md)** flags a prompt-quality issue you need to rewrite.
-- When a worker keeps producing wrong-shape output or ignoring scope — *sometimes* a prompt bug, but walk the failure-attribution taxonomy in [`reference/prompt-design.md`](reference/prompt-design.md) §4 before editing. Five of the six failure modes are not prompt bugs.
+- When a worker keeps producing wrong-shape output or ignoring scope — *sometimes* a prompt bug, but walk the failure-attribution taxonomy in [`reference/assertions-design.md`](reference/assertions-design.md) §5 before editing. Five of the six failure modes are not prompt bugs.
 
 ## Prerequisites
 
 - `.orca/{flow}.yml` exists and the target state is defined in it.
 - You know which state you're writing the prompt for (e.g., `implementing`, `reviewing`, `scoping`).
-- You've read [`reference/prompt-design.md`](reference/prompt-design.md). Under the assertions-first paradigm, `assertions.md` and `result_format` are drafted in Step 1 below — *before* any prompt prose. If a `result_format` already exists in the YAML, you'll reconcile against it in Step 1; if not, you'll design it.
+- You've read [`reference/assertions-design.md`](reference/assertions-design.md). Under the assertions-first paradigm, `assertions.md` and `result_format` are drafted in Step 1 below — *before* any prompt prose. If a `result_format` already exists in the YAML, you'll reconcile against it in Step 1; if not, you'll design it.
 
 ## Step 1 — Pin down the state's contract
 
-The contract is `assertions.md` + `result_format`. Both are drafted before any prompt prose — that is the assertions-first paradigm. See [`reference/prompt-design.md`](reference/prompt-design.md) §3 for the *why* and §4 for the bootstrap question set.
+The contract is `assertions.md` + `result_format`. Both are drafted before any prompt prose — that is the assertions-first paradigm. See [`reference/assertions-design.md`](reference/assertions-design.md) §3 for the link to `result_format` and §5 for the bootstrap question set.
 
 Settle these six points before drafting the prompt:
 
@@ -310,7 +311,7 @@ If your editor supports it, render the Jinja template with a sample issue and re
 
 For any non-trivial prompt:
 1. Print the draft prompt *alongside* the `assertions.md` it is supposed to satisfy.
-2. Ask the user to verify the **assertions** capture what they want — not whether the prompt prose reads well. The prompt is whatever passes the assertions; the assertions are the durable spec. See [`reference/prompt-design.md`](reference/prompt-design.md) §1.
+2. Ask the user to verify the **assertions** capture what they want — not whether the prompt prose reads well. The prompt is whatever passes the assertions; the assertions are the durable spec. See [`reference/assertions-design.md`](reference/assertions-design.md) §1.
 3. Adjust assertions if needed; adjust the prompt only as a downstream consequence.
 4. Write to `.orca/prompts/{state}.md`.
 
@@ -324,7 +325,7 @@ If you're inside the larger [orca-workflow-create.md](orca-workflow-create.md) f
 
 ## Step 8 — Run the test and iterate
 
-By Step 1 you drafted `assertions.md` and a matching `result_format`. By Steps 3–6 you wrote the prompt. Now run the test that exercises this prompt and iterate per the loop in [`reference/prompt-design.md`](reference/prompt-design.md) §4:
+By Step 1 you drafted `assertions.md` and a matching `result_format`. By Steps 3–6 you wrote the prompt. Now run the test that exercises this prompt and iterate per the loop in [`reference/assertions-design.md`](reference/assertions-design.md) §5:
 
 1. Run the test scaffolded under `.orca/tests/<scenario>/` (see [`orca-test-create.md`](orca-test-create.md) for `orca test` invocation). Read `report.md`.
 2. For every failing criterion, walk the failure-attribution taxonomy **before** editing anything. The taxonomy distinguishes Prompt / Assertion / Scenario / `result_format` / Model / Flow failures; each gets a different fix.
@@ -337,7 +338,7 @@ Skip this step only for genuinely trivial prompts (one-line decision states with
 
 ## Anti-patterns to refuse
 
-- **Drafting the prompt before drafting assertions and `result_format`.** The prompt has nothing to converge on. The paradigm requires Step 1 first — see [`reference/prompt-design.md`](reference/prompt-design.md). Refuse and bootstrap.
+- **Drafting the prompt before drafting assertions and `result_format`.** The prompt has nothing to converge on. The paradigm requires Step 1 first — see [`reference/assertions-design.md`](reference/assertions-design.md). Refuse and bootstrap.
 - **Adding prompt prose to fix drift without a failing assertion.** Drift = write a new criterion first, confirm it fails, then minimal-edit. "Just in case" prose is how prompts grow from 100 to 500 lines.
 - **Two-job prompts.** "First plan, then implement" in one prompt — refuse, ask to split states.
 - **Prose dump of "everything the worker should know".** Workers follow numbered steps; long paragraphs are skimmed.
