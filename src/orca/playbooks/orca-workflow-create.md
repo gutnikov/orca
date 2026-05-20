@@ -14,7 +14,7 @@ This playbook is **conversational**. Walk the user through each step. Do not sil
 
 Before you ask the user anything, read these:
 
-- [`reference/prompt-design.md`](reference/prompt-design.md) — the evaluations-first paradigm; the foundational discipline for every prompt this workflow will contain
+- [`reference/prompt-design.md`](reference/prompt-design.md) — the assertions-first paradigm; the foundational discipline for every prompt this workflow will contain
 - [`orca-glossary.md`](reference/orca-glossary.md) — definitions for terms used below (outcome vs target, `failed` ambiguity, bounds and timers)
 - [`orca-config-reference.md`](reference/orca-config-reference.md) — full schema, validation rules, recommended defaults
 - [`orca-workflow-patterns.md`](reference/orca-workflow-patterns.md) — single-type vs multi-type, decomposition, parallel fan-out, HITL
@@ -141,19 +141,19 @@ If yes, follow [orca-workflow-run.md](orca-workflow-run.md) with a tiny test tas
 
 Before declaring the workflow done, you **must** ask the user about creating tests for each active state. This ask is non-skippable — even if the user later declines, the question must be put in front of them. Ask verbatim:
 
-> "I'll create one orca test per active state, following the evaluations-first paradigm in [`reference/prompt-design.md`](reference/prompt-design.md). Each test is a single-state slice that grades the prompt against 3–5 objective criteria, so future prompt edits have something to validate against. Should I create them now?"
+> "I'll create one orca test per active state, following the assertions-first paradigm in [`reference/prompt-design.md`](reference/prompt-design.md). Each test is a single-state slice that grades the prompt against 3–5 objective criteria, so future prompt edits have something to validate against. Should I create them now?"
 
 If the user says **yes**:
 
 1. **Pick the scope.** Ask which states to cover. Default: every active state. For large workflows (5+ states), suggest starting with the highest-risk 1–2 (typically planning and implementing equivalents); the user can add more later.
-2. **Per state, follow [`orca-test-create.md`](orca-test-create.md) end-to-end.** Each test is a `setup -> {state} -> evaluate` single-state slice. The scenario, `evaluations.md`, and `result_format` should already have been drafted as part of Step 5 (per [`orca-prompt-create.md`](orca-prompt-create.md) Step 1) — re-use those artefacts rather than re-drafting from scratch.
+2. **Per state, follow [`orca-test-create.md`](orca-test-create.md) end-to-end.** Each test is a `setup -> {state} -> assert` single-state slice. The scenario, `assertions.md`, and `result_format` should already have been drafted as part of Step 5 (per [`orca-prompt-create.md`](orca-prompt-create.md) Step 1) — re-use those artefacts rather than re-drafting from scratch.
 3. **Run each test once after scaffolding.** Read the report. Iterate per [`reference/prompt-design.md`](reference/prompt-design.md) §4 — walk the failure-attribution taxonomy and apply the minimal edit. Continue until criteria pass, or the user accepts the remaining gaps.
 4. **Commit each test directory** under `.orca/tests/<scenario>/` only after the first run completes (passing or with user-accepted failures).
 
 If the user says **no**:
 
 - Note the decision in the final report. The workflow ships without a regression-catching surface; surface this risk plainly. Quote the user's reason if they gave one, so the next agent (or future-you) knows whether to re-ask later.
-- Optionally, offer the lighter alternative: a single end-to-end smoke test (`setup -> [every state] -> evaluate`) instead of per-state tests. Re-ask once.
+- Optionally, offer the lighter alternative: a single end-to-end smoke test (`setup -> [every state] -> assert`) instead of per-state tests. Re-ask once.
 
 A workflow without tests rots silently — the first prompt edit may break things invisibly, and there's no signal to catch it. This is why the *ask* is non-skippable, even though the *answer* can be "skip".
 

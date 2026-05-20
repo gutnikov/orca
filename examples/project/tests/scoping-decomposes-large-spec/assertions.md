@@ -1,4 +1,4 @@
-# Evaluations: scoping-decomposes-large-spec
+# Assertions: scoping-decomposes-large-spec
 
 A refactor spec that covers two unrelated subsystems (auth and payments)
 should be decomposed into sub-issues, not passed through as-is. The criteria

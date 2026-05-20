@@ -1,9 +1,9 @@
 # Test workflow: scoping-decomposes-large-spec
 #
-# Shape: scoping -> evaluate.
+# Shape: scoping -> assert.
 # Body state `scoping` is copied verbatim from examples/project/orca.yml
 # and references ../../prompts/scoping.md so the prompt under test is
-# exercised as-is. Both scoping outcomes route to `evaluate` — we're
+# exercised as-is. Both scoping outcomes route to `assert` — we're
 # grading the result, not running the rest of the flow.
 
 issue:
@@ -44,19 +44,19 @@ states:
           required_when: [decompose]
           description: "List of sub-issues to create"
     on:
-      decompose: evaluate
-      ready: evaluate
+      decompose: assert
+      ready: assert
 
-  evaluate:
+  assert:
     worker:
       kind: claude-code
       prompt:
         text: |
-          # Evaluate
+          # Assert
 
           You are grading the scoping state's output against a checklist.
 
-          1. Read `tests/{{ run.test_name }}/evaluations.md`. Each `### <id>`
+          1. Read `tests/{{ run.test_name }}/assertions.md`. Each `### <id>`
              heading is one pass/fail criterion; the prose under it is the
              criterion itself.
           2. Inspect the scoping state's result file under

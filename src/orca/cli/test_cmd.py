@@ -18,7 +18,7 @@ _KEBAB_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 
 _SKELETON_TEST_FLOW = """\
 # Test workflow scaffold — fill in the body states before running.
-# Shape: <slice under test> -> evaluate.
+# Shape: <slice under test> -> assert.
 # The worktree is checked out from the state_ref declared in input.md.
 
 issue:
@@ -39,15 +39,15 @@ states:
 
   # TODO: copy body states from the production workflow here.
   # Outgoing routes that would leave the slice (or go to `done`) must
-  # be rewritten to `evaluate`.
+  # be rewritten to `assert`.
 
-  evaluate:
+  assert:
     worker:
       kind: claude-code
       prompt:
         text: |
-          # Evaluate
-          Read tests/{{ run.test_name }}/evaluations.md, grade each criterion,
+          # Assert
+          Read tests/{{ run.test_name }}/assertions.md, grade each criterion,
           write {{ run.run_dir }}/report.md, then write {{ result_path }}.
 
           ```json
@@ -83,8 +83,8 @@ worktree is whatever `state_ref` above points at — edit the state
 under `.orca-state/test-states/<name>/` and commit with plain git.
 """
 
-_SKELETON_EVALUATIONS = """\
-# Evaluations: TODO
+_SKELETON_ASSERTIONS = """\
+# Assertions: TODO
 
 TODO: one paragraph describing what this test asserts overall.
 
@@ -202,7 +202,7 @@ def scaffold_test(repo_root: Path, name: str) -> Path:
     input_text = _SKELETON_INPUT.replace("TODO_STATE_REF", f"orca-test-state/{name}")
     (test_dir / "test-flow.yml").write_text(_SKELETON_TEST_FLOW)
     (test_dir / "input.md").write_text(input_text)
-    (test_dir / "evaluations.md").write_text(_SKELETON_EVALUATIONS)
+    (test_dir / "assertions.md").write_text(_SKELETON_ASSERTIONS)
     return test_dir
 
 

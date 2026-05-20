@@ -1,6 +1,6 @@
-# Prompt Design (Evaluations-First)
+# Prompt Design (Assertions-First)
 
-The methodology Orca uses to design state prompts: **evaluations come first, prompts are downstream.**
+The methodology Orca uses to design state prompts: **assertions come first, prompts are downstream.**
 
 This is a reference, not a procedural playbook. It explains *why* the codebase has [`orca-prompt-create.md`](../orca-prompt-create.md) and [`orca-test-create.md`](../orca-test-create.md), and how to use them under one consistent discipline. Read it before either playbook. The playbooks are the *how*; this doc is the *what for*.
 
@@ -10,19 +10,19 @@ This is a reference, not a procedural playbook. It explains *why* the codebase h
 
 A modern Orca prompt is 200–500 lines of carefully-stacked instructions, variable references, and constraints. It is agent-authored — the user almost never writes a prompt from scratch, and rarely reads one end-to-end. So when output drifts, the natural human moves are unproductive: rewriting from scratch loses prior wins; pasting more details makes the prompt longer, more entangled, and more brittle. Prompts rot.
 
-The antidote is **evaluations** — a small, human-readable, user-curated list of verifiable objectives that the prompt's result must satisfy. Where prompts are long, opaque, and agent-authored, evaluations are short, scannable, and human-authored. They are the durable specification of "what 'good output' means" for a given scenario.
+The antidote is **assertions** — a small, human-readable, user-curated list of verifiable objectives that the prompt's result must satisfy. Where prompts are long, opaque, and agent-authored, assertions are short, scannable, and human-authored. They are the durable specification of "what 'good output' means" for a given scenario.
 
 The paradigm has three consequences the agent must internalize:
 
-1. **You don't design a prompt in isolation. You design a prompt *to satisfy* a set of evaluations.** The evaluations exist before the prompt does. The prompt's job is to converge the worker on output that passes them.
+1. **You don't design a prompt in isolation. You design a prompt *to satisfy* a set of assertions.** The assertions exist before the prompt does. The prompt's job is to converge the worker on output that passes them.
 2. **When the result is wrong, the first move is reading the report — not editing the prompt.** The report names the failing criterion. The criterion points at the cause. Editing without reading presumes a cause.
-3. **"Looks fine to me" is not a valid state.** Either the result passes the evaluations, or it doesn't. If you find yourself eyeballing output to judge quality, you are missing a criterion — write it.
+3. **"Looks fine to me" is not a valid state.** Either the result passes the assertions, or it doesn't. If you find yourself eyeballing output to judge quality, you are missing a criterion — write it.
 
-Under this paradigm, tests do not come last. They come *first*, in stub form, and evolve alongside the prompt — see [`orca-prompt-create.md`](../orca-prompt-create.md) Step 1, where `evaluations.md` and `result_format` are drafted before any prompt prose.
+Under this paradigm, tests do not come last. They come *first*, in stub form, and evolve alongside the prompt — see [`orca-prompt-create.md`](../orca-prompt-create.md) Step 1, where `assertions.md` and `result_format` are drafted before any prompt prose.
 
-## 2. Anatomy of a good evaluation
+## 2. Anatomy of a good assertion
 
-Each test directory has `evaluations.md` — the user-curated checklist. Its shape is rigid by design.
+Each test directory has `assertions.md` — the user-curated checklist. Its shape is rigid by design.
 
 ### Structure
 
@@ -52,7 +52,7 @@ If answering the criterion requires reading the worker's mind, the user's intent
 | 5 | Set / boundary coverage | union of `files_modified` ⊆ `src/auth/` |
 | 6 | Pairwise constraint | no two findings share `(file, line)` |
 
-**Below the line — avoid:** subjective judgment ("title sounds good", "plan is comprehensive", "change makes sense"). Both `setup` and `evaluate` are LLM-driven; the double non-determinism amplifies flake. A criterion that flips run-to-run is worse than no criterion — it teaches you to ignore the report.
+**Below the line — avoid:** subjective judgment ("title sounds good", "plan is comprehensive", "change makes sense"). Both `setup` and `assert` are LLM-driven; the double non-determinism amplifies flake. A criterion that flips run-to-run is worse than no criterion — it teaches you to ignore the report.
 
 ### Good / bad rewrites
 
@@ -68,10 +68,10 @@ Side-effects (commits, edited files) are gradable too — but coarser than `resu
 
 ## 3. Designing prompts for checkability
 
-The link between evaluations and prompts is `result_format`. Every criterion needs evidence; every piece of evidence comes from a field in `result_format` or from a worktree side-effect. So the order of design is:
+The link between assertions and prompts is `result_format`. Every criterion needs evidence; every piece of evidence comes from a field in `result_format` or from a worktree side-effect. So the order of design is:
 
-1. **Draft `evaluations.md`** (with the user's help, per Section 4 bootstrap).
-2. **Sketch `result_format` *from the evaluations*** — every field a criterion references must be emitted.
+1. **Draft `assertions.md`** (with the user's help, per Section 4 bootstrap).
+2. **Sketch `result_format` *from the assertions*** — every field a criterion references must be emitted.
 3. **Then draft the prompt** — its job is to make the worker emit the `result_format` correctly.
 
 This inverts what feels natural ("write the prompt, then add a result schema"). The inversion is what prevents rot.
@@ -113,7 +113,7 @@ Now criteria can count findings, check that some finding points at the expected 
 
 A constraint stated only in the prompt is hope; a constraint reflected in the `result_format` (or in a worktree-readable side-effect) is verifiable.
 
-Example: "ONLY modify files under `issue.fields.scope_boundary`". The prompt should still say this. But you also want an evaluation:
+Example: "ONLY modify files under `issue.fields.scope_boundary`". The prompt should still say this. But you also want an assertion:
 
 ```markdown
 ### scope-boundary-respected
@@ -124,11 +124,11 @@ No files outside this prefix were modified.
 
 Now the constraint is double-bound: stated in the prompt, checked by the test.
 
-### H3. Sketch the result schema *while* drafting evaluations, not after
+### H3. Sketch the result schema *while* drafting assertions, not after
 
-While drafting each criterion, ask: *what field does this read?* If the answer is "I don't know yet", add the field to a running `result_format` sketch. The two artifacts grow together. By the time evaluations are complete, the schema is already designed — and the prompt has a concrete output contract to converge on.
+While drafting each criterion, ask: *what field does this read?* If the answer is "I don't know yet", add the field to a running `result_format` sketch. The two artifacts grow together. By the time assertions are complete, the schema is already designed — and the prompt has a concrete output contract to converge on.
 
-Cross-reference: [`orca-prompt-create.md`](../orca-prompt-create.md) Step 1 ("Pin down the state's contract") drafts `evaluations.md` and sketches `result_format` in its first two sub-items — the contract is pinned before any prompt prose.
+Cross-reference: [`orca-prompt-create.md`](../orca-prompt-create.md) Step 1 ("Pin down the state's contract") drafts `assertions.md` and sketches `result_format` in its first two sub-items — the contract is pinned before any prompt prose.
 
 ## 4. The iteration loop & failure attribution
 
@@ -136,7 +136,7 @@ The canonical loop:
 
 ```
 [ Bootstrap ]
-  2-3 questions  →  draft evaluations.md  →  draft result_format  →  draft stub prompt  →  run
+  2-3 questions  →  draft assertions.md  →  draft result_format  →  draft stub prompt  →  run
 
 [ Iterate ]
   read report  →  attribute failure  →  minimal edit  →  re-run
@@ -153,9 +153,9 @@ The agent asks at most 3 questions before writing anything:
 2. **What is an obvious failure mode?** ("it just returns `ready` without splitting", or "the sub_issues overlap")
 3. **What shape should the result have?** ("outcome + a list of sub_issues with title and scope_boundary")
 
-Then draft a minimal `evaluations.md` (2–3 criteria from the answers), a minimal `result_format` aligned with them, and a stub prompt. Run the test.
+Then draft a minimal `assertions.md` (2–3 criteria from the answers), a minimal `result_format` aligned with them, and a stub prompt. Run the test.
 
-**Cost note.** Every test run is N+2 LLM invocations (1 setup, N body states, 1 evaluate). A single-state slice is the cheapest starting point; default to it. See [`orca-test-create.md`](../orca-test-create.md).
+**Cost note.** Every test run is N+2 LLM invocations (1 setup, N body states, 1 assert). A single-state slice is the cheapest starting point; default to it. See [`orca-test-create.md`](../orca-test-create.md).
 
 ### Failure attribution
 
@@ -164,7 +164,7 @@ When the report shows a failed criterion, walk this taxonomy **before** editing 
 | Failure mode | Symptom | Fix |
 |---|---|---|
 | **Prompt** | Worker had access to a clear instruction in the prompt and didn't follow it. | Sharpen or add the relevant instruction. Minimal edit. |
-| **Evaluation** | Criterion is ambiguous, judgment-heavy, or references a key not in `result_format`. | Rewrite the criterion. |
+| **Assertion** | Criterion is ambiguous, judgment-heavy, or references a key not in `result_format`. | Rewrite the criterion. |
 | **Scenario** | Test input (`input.md`, fixtures) doesn't actually exercise the path the criterion grades. | Edit `input.md` / fixtures. |
 | **`result_format`** | The field the criterion needs isn't emitted. | Add the field to `result_format` AND update the prompt to emit it. |
 | **Model** | Output is correct in shape but consistently misses semantic detail across retries. | Swap model in YAML, or split the state into smaller responsibilities. |
@@ -176,14 +176,14 @@ The first three are the common ones. The fourth is the most-missed — it's the 
 
 Once attributed, the edit is the *minimum* needed to make the failing criterion pass. Not a broad rewrite. Resist "while we're at it" — that is the rot speaking.
 
-- One failing criterion → one targeted change (one sentence in the prompt, one field in the schema, one line in `evaluations.md`).
+- One failing criterion → one targeted change (one sentence in the prompt, one field in the schema, one line in `assertions.md`).
 - Group cleanups happen on their own pass with their own test runs, not bundled with a fix.
 
-### Drift = new evaluation first
+### Drift = new assertion first
 
 When the user reports a new kind of bad output not currently graded by any criterion, the agent's first move is **not** editing the prompt. It is:
 
-1. Write a criterion in `evaluations.md` that catches the new bad output.
+1. Write a criterion in `assertions.md` that catches the new bad output.
 2. Re-run the test — the new criterion should fail. If it passes, the user's complaint is already covered; ask them to point at a failing case.
 3. Now attribute the failure and apply the minimal edit.
 
@@ -205,7 +205,7 @@ End-to-end walkthrough for a `review` state that audits a Python pull request �
 - *What is an obvious failure mode?* → "It approves a PR with an obvious bug, or it requests changes without saying where the bug is."
 - *What shape should the result have?* → "outcome (approve / request_changes), plus a list of findings with file, line, severity, and message."
 
-**Draft `evaluations.md` first (3 criteria).** The scenario in `input.md` will be a PR that introduces a SQL injection at `src/api.py:42`.
+**Draft `assertions.md` first (3 criteria).** The scenario in `input.md` will be a PR that introduces a SQL injection at `src/api.py:42`.
 
 ```markdown
 ### outcome-is-request-changes
@@ -261,12 +261,12 @@ Every `findings[i].message` matches `^(Use|Remove|Replace|Fix|Add|Avoid)\b`.
 
 **Re-run.** 4 pass.
 
-The whole story: evaluations first, attribution second, minimal edit third. Drift creates new criteria, not new prompt prose. The prompt grew by *two sentences* across two improvements — not two paragraphs.
+The whole story: assertions first, attribution second, minimal edit third. Drift creates new criteria, not new prompt prose. The prompt grew by *two sentences* across two improvements — not two paragraphs.
 
 ## 6. Anti-patterns
 
-- **Drafting the prompt before the evaluations.** The prompt has nothing to converge on. Refuse and go back to bootstrap.
-- **Adding prompt prose to fix drift without a failing evaluation.** Drift = new criterion first, then minimal edit.
+- **Drafting the prompt before the assertions.** The prompt has nothing to converge on. Refuse and go back to bootstrap.
+- **Adding prompt prose to fix drift without a failing assertion.** Drift = new criterion first, then minimal edit.
 - **Criteria that grade process, not output** ("the worker should follow the plan"). The evaluator only sees results, not the worker's thinking.
 - **Judgment-heavy criteria** ("title sounds professional"). Replace with regex / closed-vocab, or drop. The bar: could two evaluator runs disagree on this? If yes, rewrite.
 - **More than 7 criteria in one test.** Split into multiple tests with different scenarios.
@@ -279,6 +279,6 @@ The whole story: evaluations first, attribution second, minimal edit third. Drif
 
 - [`orca-prompt-create.md`](../orca-prompt-create.md) — mechanics of writing a single state prompt (template variables, structure, pitfalls). Read after this doc.
 - [`orca-test-create.md`](../orca-test-create.md) — interactive procedure for authoring a test. The bootstrap step in Section 4 above maps to that playbook's Steps 1–8.
-- [`orca-test-review.md`](../orca-test-review.md) — audit checklist for an existing test. Use it to verify your evaluations are well-formed.
+- [`orca-test-review.md`](../orca-test-review.md) — audit checklist for an existing test. Use it to verify your assertions are well-formed.
 - [`orca-config-reference.md`](orca-config-reference.md) — full schema reference, including `result_format` field types.
 - [`orca-workflow-patterns.md`](orca-workflow-patterns.md) — reusable building blocks for workflows.

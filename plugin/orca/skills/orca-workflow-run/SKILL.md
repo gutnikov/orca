@@ -239,7 +239,7 @@ The worker's output at state `<state>` looks like a real failure mode
 worth catching next time. Two options:
 
   [A] Harden the existing test `<test-name>` by appending a criterion to
-      `.orca/tests/<test-name>/evaluations.md`. Quick — single heading +
+      `.orca/tests/<test-name>/assertions.md`. Quick — single heading +
       one prose paragraph. Best when the test's existing scenario covers
       this input shape.
 
@@ -256,9 +256,9 @@ Mark the moment `offered: true` once asked. If the user picks `skip`, leave `cap
 
 ### Hardening path (option A)
 
-Inline edit. The criterion is a small append to `evaluations.md`:
+Inline edit. The criterion is a small append to `assertions.md`:
 
-1. **Read** `.orca/tests/<test-name>/evaluations.md` to see existing criteria and pick a kebab-case `case-id` that doesn't collide and describes the failure (e.g. `rejects-cross-subsystem-scope-merge`, not `case-42`).
+1. **Read** `.orca/tests/<test-name>/assertions.md` to see existing criteria and pick a kebab-case `case-id` that doesn't collide and describes the failure (e.g. `rejects-cross-subsystem-scope-merge`, not `case-42`).
 2. **Anchor on state-branch bytes.** Per the test's state-branch contract, the criterion must reference stable facts: file paths, line numbers, enum values, regex, presence/count. If the criterion would need to reference run-time bytes not in the state branch, **stop** — that's option B territory. Surface this to the user and reconsider.
 3. **Draft** the new section:
    ```markdown

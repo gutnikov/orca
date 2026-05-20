@@ -45,14 +45,14 @@ class TestScaffoldTest:
         test_dir = tmp_path / ".orca" / "tests" / "my-test"
         assert (test_dir / "test-flow.yml").exists()
         assert (test_dir / "input.md").exists()
-        assert (test_dir / "evaluations.md").exists()
+        assert (test_dir / "assertions.md").exists()
         assert not (test_dir / "fixtures").exists()
 
     def test_test_flow_yml_is_skeleton(self, tmp_path: Path) -> None:
         scaffold_test(repo_root=_init_git_repo(tmp_path), name="my-test")
         content = (tmp_path / ".orca" / "tests" / "my-test" / "test-flow.yml").read_text()
         assert "setup:" not in content
-        assert "evaluate:" in content
+        assert "assert:" in content
         assert "TODO" in content
 
     def test_input_md_has_frontmatter(self, tmp_path: Path) -> None:
@@ -60,9 +60,9 @@ class TestScaffoldTest:
         content = (tmp_path / ".orca" / "tests" / "my-test" / "input.md").read_text()
         assert content.startswith("---")
 
-    def test_evaluations_md_has_criteria_section(self, tmp_path: Path) -> None:
+    def test_assertions_md_has_criteria_section(self, tmp_path: Path) -> None:
         scaffold_test(repo_root=_init_git_repo(tmp_path), name="my-test")
-        content = (tmp_path / ".orca" / "tests" / "my-test" / "evaluations.md").read_text()
+        content = (tmp_path / ".orca" / "tests" / "my-test" / "assertions.md").read_text()
         assert "## Criteria" in content
         assert "### " in content
 
@@ -214,7 +214,7 @@ class TestRunTestStateRef:
         test_dir.mkdir(parents=True)
         (test_dir / "test-flow.yml").write_text("initial: foo\nstates:\n  foo: {}\n")
         (test_dir / "input.md").write_text("---\ntitle: x\n---\n")
-        (test_dir / "evaluations.md").write_text("# evals\n")
+        (test_dir / "assertions.md").write_text("# evals\n")
 
         with pytest.raises(RuntimeError, match="state_ref"):
             run_test(repo, "no-marker")

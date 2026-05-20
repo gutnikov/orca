@@ -212,9 +212,9 @@ Orca recognizes `.orca/tests/<name>/test-flow.yml` as a test workflow.
     scoping.md
   tests/
     scoping-decomposes-large-spec/
-      test-flow.yml          # bookended workflow: setup -> slice -> evaluate
+      test-flow.yml          # bookended workflow: setup -> slice -> assert
       input.md               # scenario + YAML frontmatter (seeds issue.fields)
-      evaluations.md         # pass/fail checklist
+      assertions.md         # pass/fail checklist
       fixtures/              # optional — files setup may copy into the worktree
 ```
 
@@ -222,11 +222,11 @@ Recognized conventions:
 
 - The directory `<name>` is kebab-case and descriptive of the scenario.
 - The workflow file is named `test-flow.yml` (not `orca.yml`) so it's grep-distinguishable from production workflows.
-- The directory must also contain `input.md` (issue data + scenario) and `evaluations.md` (pass/fail checklist). `fixtures/` is optional.
-- The workflow follows a bookended shape: `setup -> <body slice> -> evaluate`. Body states are copied verbatim from the production workflow; `prompt:` paths use `../../prompts/<name>.md` and the loader resolves them at config-load time (workers never see `..` paths).
-- When the engine loads a config file at this path, it sets `run.test_name = <name>` in the Jinja template context. Setup and evaluate inline prompts use this to locate sibling files (`input.md`, `evaluations.md`, `fixtures/`).
+- The directory must also contain `input.md` (issue data + scenario) and `assertions.md` (pass/fail checklist). `fixtures/` is optional.
+- The workflow follows a bookended shape: `setup -> <body slice> -> assert`. Body states are copied verbatim from the production workflow; `prompt:` paths use `../../prompts/<name>.md` and the loader resolves them at config-load time (workers never see `..` paths).
+- When the engine loads a config file at this path, it sets `run.test_name = <name>` in the Jinja template context. Setup and assert inline prompts use this to locate sibling files (`input.md`, `assertions.md`, `fixtures/`).
 - `input.md` supports YAML frontmatter at the top. The engine parses it and seeds `issue.fields.*` before the setup state runs, so trivial setups are effectively judgment-free.
-- The `evaluate` state writes `report.md` into `{{ run.run_dir }}/report.md`. The source directory stays clean; reports live with the run.
+- The `assert` state writes `report.md` into `{{ run.run_dir }}/report.md`. The source directory stays clean; reports live with the run.
 
 See [`../orca-test-create.md`](../orca-test-create.md) for the authoring procedure and [`../orca-test-review.md`](../orca-test-review.md) for the audit checklist.
 
