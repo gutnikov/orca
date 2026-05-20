@@ -32,19 +32,19 @@ from orca.orchestrator.worktree import WorktreeManager
 logger = logging.getLogger(__name__)
 
 
-def _derive_test_name(config_path: Path) -> str | None:
-    """If config_path matches `.orca/tests/<name>/test-flow.yml`, return <name>.
+def _derive_eval_name(config_path: Path) -> str | None:
+    """If config_path matches `.orca/evals/<name>/eval-flow.yml`, return <name>.
 
     Otherwise return None. Matching is structural: at least three trailing
-    path parts where the third-to-last is "tests" and the last is
-    "test-flow.yml".
+    path parts where the third-to-last is "evals" and the last is
+    "eval-flow.yml".
     """
     parts = config_path.parts
     if len(parts) < 3:
         return None
-    if parts[-1] != "test-flow.yml":
+    if parts[-1] != "eval-flow.yml":
         return None
-    if parts[-3] != "tests":
+    if parts[-3] != "evals":
         return None
     return parts[-2]
 
@@ -68,8 +68,8 @@ def _git_ref_exists(repo_root: Path, ref: str) -> bool:
     return result.returncode == 0
 
 
-async def _reset_test_worktree(repo_root: Path, branch: str, worktree_path: Path) -> None:
-    """Tear down a prior test worktree + its short-lived branch.
+async def _reset_eval_worktree(repo_root: Path, branch: str, worktree_path: Path) -> None:
+    """Tear down a prior eval worktree + its short-lived branch.
 
     Idempotent: missing worktree / branch is not an error.
     """
@@ -168,18 +168,18 @@ class RunManager:
         if state_ref is not None and not _git_ref_exists(self.repo_root, state_ref):
             msg = (
                 f"state ref '{state_ref}' not found — create it "
-                f"(e.g. `orca test add <name>`) or fix the marker in input.md"
+                f"(e.g. `orca eval add <name>`) or fix the marker in input.md"
             )
             raise ValueError(msg)
 
-        # state_ref is only meaningful for test runs (`.orca/tests/<name>/test-flow.yml`).
-        # Reject early so a state_ref accidentally passed with a non-test config can't
+        # state_ref is only meaningful for eval runs (`.orca/evals/<name>/eval-flow.yml`).
+        # Reject early so a state_ref accidentally passed with a non-eval config can't
         # silently set up the run with a bogus run-branch.
-        test_name = _derive_test_name(config_path)
-        if state_ref is not None and test_name is None:
+        eval_name = _derive_eval_name(config_path)
+        if state_ref is not None and eval_name is None:
             msg = (
-                "state_ref is only supported for test runs — "
-                f"config_path '{config_path}' is not a test-flow.yml under .orca/tests/<name>/"
+                "state_ref is only supported for eval runs — "
+                f"config_path '{config_path}' is not an eval-flow.yml under .orca/evals/<name>/"
             )
             raise ValueError(msg)
 
@@ -194,13 +194,13 @@ class RunManager:
         if max_retries is not None:
             object.__setattr__(config, "max_worker_retries", max_retries)
 
-        # Resolve branch. For test runs we use a test-specific ephemeral branch
+        # Resolve branch. For eval runs we use an eval-specific ephemeral branch
         # so the run worktree branched from state_ref doesn't collide with the
         # user's current checkout (the iteration branch) and so the cleanup in
-        # _reset_test_worktree can't accidentally `git branch -D` user code.
+        # _reset_eval_worktree can't accidentally `git branch -D` user code.
         if branch is None:
-            if state_ref is not None and test_name is not None:
-                branch = f"orca-test-run-{test_name}"
+            if state_ref is not None and eval_name is not None:
+                branch = f"orca-eval-run-{eval_name}"
             else:
                 branch = resolve_branch()
 
@@ -277,7 +277,7 @@ class RunManager:
         if state_ref is not None:
             run_worktree = worktree_mgr.resolve(branch)
             # Reset any prior run's worktree + short-lived branch.
-            await _reset_test_worktree(self.repo_root, branch, run_worktree)
+            await _reset_eval_worktree(self.repo_root, branch, run_worktree)
             # Create the run worktree branched off the state ref's tip.
             # Orchestrator._ensure_worktree will find this path and reuse it.
             await worktree_mgr.create(
@@ -305,7 +305,7 @@ class RunManager:
             flow_root=flow_root,
             session_sync=session_sync,
             insights_enabled=insights,
-            test_name=_derive_test_name(config_path),
+            eval_name=_derive_eval_name(config_path),
         )
 
         # Create RunInfo and launch
@@ -540,7 +540,7 @@ class RunManager:
             flow_root=flow_root,
             session_sync=session_sync,
             insights_enabled=run_info.insights,
-            test_name=_derive_test_name(config_path),
+            eval_name=_derive_eval_name(config_path),
         )
         run_info.orchestrator = orchestrator
         run_info.issue_count = len(state.issues)

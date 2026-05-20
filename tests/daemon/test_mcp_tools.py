@@ -248,7 +248,7 @@ class TestListPlaybooksTool:
         assert isinstance(names, list)
         # Spot-check a few well-known playbooks.
         assert "orca-workflow-create" in names
-        assert "orca-test-create" in names
+        assert "orca-eval-create" in names
         assert "reference/orca-glossary" in names
         assert "reference/wrapper-skill-template" in names
 

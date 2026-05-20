@@ -213,7 +213,7 @@ def build_run_context(
     sessions: list[dict[str, Any]],
     branch: str,
     workflow: str,
-    test_name: str | None = None,
+    eval_name: str | None = None,
 ) -> dict[str, Any]:
     """Build the run context dict for Jinja2 templates."""
     insights_path = run_dir / "insights.json"
@@ -228,8 +228,8 @@ def build_run_context(
         "branch": branch,
         "workflow": workflow,
     }
-    if test_name is not None:
-        ctx["test_name"] = test_name
+    if eval_name is not None:
+        ctx["eval_name"] = eval_name
 
     # Sessions list
     ctx["sessions"] = []

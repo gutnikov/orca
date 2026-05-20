@@ -629,7 +629,7 @@ class TestBuildRunContext:
         assert "state" in ctx["formats"]
         assert "sessions" in ctx["formats"]
 
-    def test_test_name_included_when_provided(self, tmp_path: _Path) -> None:
+    def test_eval_name_included_when_provided(self, tmp_path: _Path) -> None:
         run_dir = tmp_path / "run"
         run_dir.mkdir()
         sessions_dir = tmp_path / "sessions"
@@ -643,13 +643,13 @@ class TestBuildRunContext:
             sessions_dir=sessions_dir,
             sessions=[],
             branch="b",
-            workflow="test-flow",
-            test_name="my-test",
+            workflow="eval-flow",
+            eval_name="my-eval",
         )
 
-        assert ctx["test_name"] == "my-test"
+        assert ctx["eval_name"] == "my-eval"
 
-    def test_test_name_absent_by_default(self, tmp_path: _Path) -> None:
+    def test_eval_name_absent_by_default(self, tmp_path: _Path) -> None:
         run_dir = tmp_path / "run"
         run_dir.mkdir()
         sessions_dir = tmp_path / "sessions"
@@ -666,4 +666,4 @@ class TestBuildRunContext:
             workflow="w",
         )
 
-        assert "test_name" not in ctx
+        assert "eval_name" not in ctx

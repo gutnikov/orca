@@ -48,7 +48,7 @@ class TestPidfile:
         remove_pidfile(pf)  # should not raise
 
 
-class TestPaths:
+class EvalPaths:
     def test_socket_path(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         fake_home = tmp_path / "home"
         fake_home.mkdir()

@@ -2,7 +2,7 @@
 # web-form UI built in the docs/superpowers/specs/2026-05-20-orca-web-forms
 # design — to pick one of the discovered directories.
 #
-# Drive with: orca run task.md -w run-evaluations
+# Drive with: orca run task.md -w run-evals
 
 issue:
   fields:
@@ -31,6 +31,6 @@ states:
           description: "Selection step completed"
         selected:
           type: string
-          description: "Which evaluation the user picked ('cancelled' if they declined; 'none' if the directory was empty)"
+          description: "Which eval the user picked ('cancelled' if they declined; 'none' if the directory was empty)"
     on:
       done: done

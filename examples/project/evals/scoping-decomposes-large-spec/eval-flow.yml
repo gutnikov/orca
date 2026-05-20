@@ -1,8 +1,8 @@
-# Test workflow: scoping-decomposes-large-spec
+# Eval workflow: scoping-decomposes-large-spec
 #
 # Shape: scoping -> assert.
 # Body state `scoping` is copied verbatim from examples/project/orca.yml
-# and references ../../prompts/scoping.md so the prompt under test is
+# and references ../../prompts/scoping.md so the prompt under eval is
 # exercised as-is. Both scoping outcomes route to `assert` — we're
 # grading the result, not running the rest of the flow.
 
@@ -56,7 +56,7 @@ states:
 
           You are grading the scoping state's output against a checklist.
 
-          1. Read `tests/{{ run.test_name }}/assertions.md`. Each `### <id>`
+          1. Read `evals/{{ run.eval_name }}/assertions.md`. Each `### <id>`
              heading is one pass/fail criterion; the prose under it is the
              criterion itself.
           2. Inspect the scoping state's result file under
@@ -79,7 +79,7 @@ states:
         outcome:
           type: enum
           values: [passed, failed, inconclusive]
-          description: "Overall test outcome"
+          description: "Overall eval outcome"
           values_description:
             passed: "Every criterion passed (or was not applicable)"
             failed: "At least one criterion failed; the slice ran and was graded"

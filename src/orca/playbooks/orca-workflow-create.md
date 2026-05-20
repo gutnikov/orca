@@ -19,7 +19,7 @@ Before you ask the user anything, read these:
 - [`orca-config-reference.md`](reference/orca-config-reference.md) — full schema, validation rules, recommended defaults
 - [`orca-workflow-patterns.md`](reference/orca-workflow-patterns.md) — single-type vs multi-type, decomposition, parallel fan-out, HITL
 - [`orca-prompt-create.md`](orca-prompt-create.md) — prompt template structure, Jinja conventions, output contracts
-- [`orca-test-create.md`](orca-test-create.md) — the per-state test scaffold you'll run in Step 8
+- [`orca-eval-create.md`](orca-eval-create.md) — the per-state eval scaffold you'll run in Step 8
 - [`orca-workflow-review.md`](orca-workflow-review.md) — what to verify at the end
 
 For a complete worked example to mirror, fetch `examples/project/orca.yml` and `examples/project/prompts/` from the orca repo (https://github.com/gutnikov/orca/tree/main/examples/project). If you can't fetch, the patterns reference doc has compositional snippets covering every shape used in that example.
@@ -35,7 +35,7 @@ Run the steps in order. After each step, **show your work to the user and get co
 Ask the user, in plain language:
 
 1. What does the workflow do? (one sentence — e.g. "implement a feature from a task description", "review a PR", "triage incoming bugs")
-2. What's the target project? (language, framework, test runner — affects worker prompts)
+2. What's the target project? (language, framework, eval runner — affects worker prompts)
 3. What does "done" look like? (a merged PR, a written report, a deployed change, a closed issue, …)
 4. What's the input? (a task file with fields, a PR number, an issue id, a free-form description)
 
@@ -109,7 +109,7 @@ For each active state, assemble a spec from what you already have:
 - **`result_format`** (already in the YAML from Step 4 — the prompt-creator reads it directly)
 - **Inputs** — which `issue.fields.*` and which upstream-state result fields the worker reads
 - **Constraints** — branch behaviour, scope boundaries, no-touch rules
-- **Verification** — concrete commands from the project's conventions (pytest / cargo test / npm test / etc.)
+- **Verification** — concrete commands from the project's conventions (pytest / cargo eval / npm eval / etc.)
 
 Pass that spec to `orca-prompt-create`. After it returns, show the prompt to the user and ask: *"Does this capture what `<state>` should do?"* If the user wants changes, re-invoke `orca-prompt-create` in Update mode with the specific instruction — do **not** edit the prompt directly here.
 
@@ -133,26 +133,26 @@ Once the workflow validates:
 
 This is an *optional* live run: a tiny task scoped to surface workflow bugs (not production work). The user may decline — but you must ask, and record their answer in the final report. If they accept, follow [orca-workflow-run.md](orca-workflow-run.md). If the run surfaces issues, loop back to step 4 or 5 — fix the config/prompts and rerun.
 
-Distinct from Step 8 below, which scaffolds *static* per-state structural tests without running anything.
+Distinct from Step 8 below, which scaffolds *static* per-state structural evals without running anything.
 
-### Step 8 — Auto-scaffold per-state structural tests
+### Step 8 — Auto-scaffold per-state structural evals
 
-For every active state, scaffold a per-state structural test under `.orca/tests/<state>-smoke/`. Announce that you're about to create the scaffolds and list the state names, then perform this step mechanically. Unlike Steps 1–7, you do not ask the user to design the tests, choose criteria, or opt out; the scaffolds are unconditional because they're cheap, schema-derived, and add value at zero cost. They do not exercise semantic correctness; that comes later as a separate phase via [`orca-test-create.md`](orca-test-create.md).
+For every active state, scaffold a per-state structural eval under `.orca/evals/<state>-smoke/`. Announce that you're about to create the scaffolds and list the state names, then perform this step mechanically. Unlike Steps 1–7, you do not ask the user to design the evals, choose criteria, or opt out; the scaffolds are unconditional because they're cheap, schema-derived, and add value at zero cost. They do not exercise semantic correctness; that comes later as a separate phase via [`orca-eval-create.md`](orca-eval-create.md).
 
 For each active state:
 
-1. **Invoke `orca test add <state>-smoke`.** This creates `.orca/tests/<state>-smoke/`, the `orca-test-state/<state>-smoke` branch, the persistent author worktree under `.orca-state/test-states/<state>-smoke/`, and stamps placeholder `test-flow.yml`, `input.md`, and `assertions.md`.
+1. **Invoke `orca eval add <state>-smoke`.** This creates `.orca/evals/<state>-smoke/`, the `orca-eval-state/<state>-smoke` branch, the persistent author worktree under `.orca-state/eval-states/<state>-smoke/`, and stamps placeholder `eval-flow.yml`, `input.md`, and `assertions.md`.
 
-2. **Edit `test-flow.yml`** to copy the production state verbatim — per the rewrite rules in [`orca-test-create.md`](orca-test-create.md) Step 5. `result_format` is reused as-is from the YAML; outgoing transitions from the body state route to `assert`.
+2. **Edit `eval-flow.yml`** to copy the production state verbatim — per the rewrite rules in [`orca-eval-create.md`](orca-eval-create.md) Step 5. `result_format` is reused as-is from the YAML; outgoing transitions from the body state route to `assert`.
 
 3. **Write a minimal `assertions.md`** mechanically derived from the state's `result_format`. No semantic judgment. The shape:
 
    ```markdown
    # Assertions: <state>-smoke
 
-   Structural smoke test for the `<state>` state. Verifies the worker produces a result that
+   Structural smoke eval for the `<state>` state. Verifies the worker produces a result that
    conforms to the schema in `.orca/{flow}.yml`. Semantic correctness criteria are added later
-   via `orca-test-create`.
+   via `orca-eval-create`.
 
    ## Criteria
 
@@ -170,13 +170,13 @@ For each active state:
    - Stop there. Do not add criteria that require domain reasoning ("the finding points at the right file", "the plan is comprehensive"). Those belong in the semantic phase.
    - Two to four criteria per state is the expected output. If `result_format` has no enums and no `required_when` constraints, write a single criterion: "the result file exists and parses as JSON matching the schema."
 
-4. **Leave `input.md` as the scaffold stub.** The smoke test is *scaffolded but not yet runnable end-to-end* — a real scenario (with seeded `issue.fields.*` and state-branch bytes) is the user's later job. Do not invent placeholder field values; they would mislead a future reader into thinking the test exercises a real case.
+4. **Leave `input.md` as the scaffold stub.** The smoke eval is *scaffolded but not yet runnable end-to-end* — a real scenario (with seeded `issue.fields.*` and state-branch bytes) is the user's later job. Do not invent placeholder field values; they would mislead a future reader into thinking the eval exercises a real case.
 
 After scaffolding every state, report the paths and explain the next step:
 
-> "Per-state structural test scaffolds created under `.orca/tests/`. Each one structurally verifies its state's output schema. To make them runnable, add a scenario to `input.md` and arrange the state branch (per `orca-test-create.md` Step 6). To add semantic correctness criteria, run `orca-test-create` for each test."
+> "Per-state structural eval scaffolds created under `.orca/evals/`. Each one structurally verifies its state's output schema. To make them runnable, add a scenario to `input.md` and arrange the state branch (per `orca-eval-create.md` Step 6). To add semantic correctness criteria, run `orca-eval-create` for each eval."
 
-Don't run the tests during this step. Don't iterate on results. Don't ask the user to opt out, choose scope, or pick an alternative shape. Do tell the user what files/branches were created. A workflow ships with at least its structural surface in place; users decide later how much semantic depth to add.
+Don't run the evals during this step. Don't iterate on results. Don't ask the user to opt out, choose scope, or pick an alternative shape. Do tell the user what files/branches were created. A workflow ships with at least its structural surface in place; users decide later how much semantic depth to add.
 
 ### Step 9 — Offer a convenience wrapper skill (optional)
 
@@ -219,6 +219,6 @@ Report to the user:
 - File paths written (`.orca/{flow}.yml`, `.orca/prompts/*.md`)
 - The final state-machine diagram
 - Whether an end-to-end smoke run was performed and its outcome (Step 7) — or "user declined" with the recorded reason
-- **Per-state structural tests** (Step 8): list of test directories created with paths. There is no "user declined" case here — Step 8 is unconditional.
+- **Per-state structural evals** (Step 8): list of eval directories created with paths. There is no "user declined" case here — Step 8 is unconditional.
 - **Wrapper skill** (Step 9): wrapper name plus both written paths (`.claude/skills/<name>/SKILL.md`, `.agents/skills/<name>/SKILL.md`), **or** "user declined"
-- What to do next: either run a real task ([orca-workflow-run.md](orca-workflow-run.md)) or commit the workflow + test files
+- What to do next: either run a real task ([orca-workflow-run.md](orca-workflow-run.md)) or commit the workflow + eval files

@@ -4,7 +4,7 @@ Audit `.orca/{flow}.yml` and its prompt templates against the three-layer checkl
 
 ## When to run this
 
-- After **[orca-workflow-create.md](orca-workflow-create.md)** — as the validation step before a test run.
+- After **[orca-workflow-create.md](orca-workflow-create.md)** — as the validation step before an eval run.
 - After a workflow change — adding a state, changing a `result_format`, renaming an outcome.
 - After a run surfaces a bug — to figure out whether the config or the prompts are at fault.
 - Periodically, as workflows accumulate edits and drift.
@@ -65,7 +65,7 @@ Anything failing here is **Critical**.
 - [ ] **Single responsibility per state** — no prompt does two distinct jobs (e.g. "plan and implement"). Phrases like "first do X, then do Y" where X and Y are different kinds of work → split into two states.
 - [ ] **Fail-safe outcomes present** — every active state has `blocked` or another escape hatch beyond happy-path outcomes. Workers can also use the built-in `waiting` outcome for human-in-the-loop.
 - [ ] **Merge/apply states serialized** — states that merge branches or write to shared resources have `max_workers: 1`.
-- [ ] **Run bounds are accounted for** — `max_hops` and `max_worker_retries` are launch-time limits in the current engine, not workflow YAML fields. CLI runs default to 10 / 3; wrappers, MCP callers, and tests need explicit supervision or caller-level limits because YAML alone will not bound them.
+- [ ] **Run bounds are accounted for** — `max_hops` and `max_worker_retries` are launch-time limits in the current engine, not workflow YAML fields. CLI runs default to 10 / 3; wrappers, MCP callers, and evals need explicit supervision or caller-level limits because YAML alone will not bound them.
 - [ ] **Timeouts set for long states** — heavy-work states (implementing, testing) have `timeout` or `inactivity_timeout`. Default inactivity timeout is 300s (5 min) which is often too short.
 - [ ] **Decomposition scope boundaries** — when a state decomposes, the prompt instructs the worker to define clear, non-overlapping `scope_boundary` fields for sub-issues. Overlap = workers stomping each other.
 - [ ] **No unnecessary serialization** — `max_workers: 1` only where genuinely needed (merging, deploying). Serializing independent work wastes wall-clock time.
@@ -80,7 +80,7 @@ For each prompt file, verify:
 - [ ] **`result_path` referenced** — prompt contains `{{ result_path }}` telling the worker where to write the result file.
 - [ ] **Constraints near end** — constraints are in a dedicated `## Constraints` section in the bottom half. Workers forget early constraints.
 - [ ] **No hardcoded issue-derived values** — values that vary by issue use `{{ issue.fields.* }}` or other template variables. Especially scope boundaries, branch names, and user-provided paths. Fixed project commands and fixed repository paths are fine when they are genuinely workflow constants.
-- [ ] **Verification step present** — prompt includes a step to verify work (tests, lint, typecheck) before committing.
+- [ ] **Verification step present** — prompt includes a step to verify work (evals, lint, typecheck) before committing.
 - [ ] **Commit before result** — prompt explicitly says commit all changes *before* writing the result file. The orchestrator kills the session ~30s after detecting a valid result.
 - [ ] **Scope boundary enforced** — if `scope_boundary` field exists, prompt has a constraint like *"ONLY modify files under `{{ issue.fields.scope_boundary }}`."*
 - [ ] **Conditional sections guarded** — sections referencing optional data (`depends_on`, `children`, `event_log`) use `{% if %}` guards.
@@ -149,21 +149,21 @@ Apply any diagnosed fix. Still:
 
 After applying fixes, **rerun phases 2–4** to verify nothing regressed. Report the second-pass result.
 
-## Phase 7 — Offer a test run
+## Phase 7 — Offer an eval run
 
 If the audit produced fixes (or even if it didn't and the user wants confidence):
 
-> "Audit complete. Want me to run a small smoke test via [orca-workflow-run.md](orca-workflow-run.md) to confirm nothing regressed?"
+> "Audit complete. Want me to run a small smoke eval via [orca-workflow-run.md](orca-workflow-run.md) to confirm nothing regressed?"
 
-If a test run surfaces new issues, loop back to the relevant phase — don't patch ad-hoc.
+If an eval run surfaces new issues, loop back to the relevant phase — don't patch ad-hoc.
 
-## Tests under `.orca/tests/`
+## Evals under `.orca/evals/`
 
-If `.orca/tests/` exists in the repo, the audit is incomplete without checking the tests. For each directory under `.orca/tests/`, delegate to [orca-test-review.md](orca-test-review.md) and fold its findings into your audit report alongside the workflow findings.
+If `.orca/evals/` exists in the repo, the audit is incomplete without checking the evals. For each directory under `.orca/evals/`, delegate to [orca-eval-review.md](orca-eval-review.md) and fold its findings into your audit report alongside the workflow findings.
 
-Tests are not optional once they exist — stale tests are worse than no tests, because they create false confidence. Treat a Critical finding in a test (e.g. drift between body `result_format` and production) as Critical for the workflow audit as a whole.
+Evals are not optional once they exist — stale evals are worse than no evals, because they create false confidence. Treat a Critical finding in an eval (e.g. drift between body `result_format` and production) as Critical for the workflow audit as a whole.
 
-If the user changed a production `result_format` in this audit pass, every test that copied that state is now drifted by definition. Surface this proactively rather than waiting for the next test run to fail.
+If the user changed a production `result_format` in this audit pass, every eval that copied that state is now drifted by definition. Surface this proactively rather than waiting for the next eval run to fail.
 
 ## Anti-patterns to refuse
 
@@ -179,4 +179,4 @@ Report:
 - Counts: Critical / Important / Minor
 - Whether fixes were applied (and which mode)
 - Whether the re-audit was clean
-- Next step (test run, commit, or escalate)
+- Next step (eval run, commit, or escalate)

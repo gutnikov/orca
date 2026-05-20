@@ -1,4 +1,4 @@
-"""orca test subcommand: list, run, scaffold tests under .orca/tests/."""
+"""orca eval subcommand: list, run, scaffold evals under .orca/evals/."""
 
 from __future__ import annotations
 
@@ -16,9 +16,9 @@ import aiohttp
 
 _KEBAB_RE = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 
-_SKELETON_TEST_FLOW = """\
-# Test workflow scaffold — fill in the body states before running.
-# Shape: <slice under test> -> assert.
+_SKELETON_EVAL_FLOW = """\
+# Eval workflow scaffold — fill in the body states before running.
+# Shape: <slice under eval> -> assert.
 # The worktree is checked out from the state_ref declared in input.md.
 
 issue:
@@ -44,7 +44,7 @@ states:
       prompt:
         text: |
           # Assert
-          Read {{ run.repo_root }}/.orca/tests/{{ run.test_name }}/assertions.md, grade each criterion,
+          Read {{ run.repo_root }}/.orca/evals/{{ run.eval_name }}/assertions.md, grade each criterion,
           write {{ run.run_dir }}/report.md, then write {{ result_path }}.
 
           ```json
@@ -66,7 +66,7 @@ states:
 
 _SKELETON_INPUT = """\
 ---
-title: "TODO: a one-line title for the test scenario"
+title: "TODO: a one-line title for the eval scenario"
 description: |
   TODO: a one-paragraph description of the situation the slice should handle.
 state_ref: TODO_STATE_REF
@@ -74,16 +74,16 @@ state_ref: TODO_STATE_REF
 
 # Scenario
 
-TODO: describe (for a human reader) what this test asserts and how the
+TODO: describe (for a human reader) what this eval asserts and how the
 state branch is arranged. The state branch checked out into the run
 worktree is whatever `state_ref` above points at — edit the state
-under `.orca-state/test-states/<name>/` and commit with plain git.
+under `.orca-state/eval-states/<name>/` and commit with plain git.
 """
 
 _SKELETON_ASSERTIONS = """\
 # Assertions: TODO
 
-TODO: one paragraph describing what this test asserts overall.
+TODO: one paragraph describing what this eval asserts overall.
 
 ## Criteria
 
@@ -93,13 +93,13 @@ TODO: a sentence stating one concrete, gradeable thing the result must satisfy.
 
 
 @dataclass(frozen=True)
-class TestPaths:
+class EvalPaths:
     config_path: Path
     task_file: Path
 
 
 def parse_state_ref(task_file: Path) -> str | None:
-    """Return the `state_ref` frontmatter value from a test input.md.
+    """Return the `state_ref` frontmatter value from an eval input.md.
 
     Returns None if the field is missing or still holds the `TODO_STATE_REF`
     placeholder used by old or hand-written skeletons.
@@ -116,7 +116,7 @@ def parse_state_ref(task_file: Path) -> str | None:
 
 
 def _create_state_branch_and_worktree(repo_root: Path, name: str) -> Path:
-    """Create `orca-test-state/<name>` as an orphan branch + worktree.
+    """Create `orca-eval-state/<name>` as an orphan branch + worktree.
 
     Returns the worktree path. Does NOT mutate the main repo's HEAD.
 
@@ -124,8 +124,8 @@ def _create_state_branch_and_worktree(repo_root: Path, name: str) -> Path:
     orphan branch inside it, clear the worktree, commit one empty commit.
     The main repo's working tree and HEAD are untouched throughout.
     """
-    branch = f"orca-test-state/{name}"
-    worktree_path = repo_root / ".orca-state" / "test-states" / name
+    branch = f"orca-eval-state/{name}"
+    worktree_path = repo_root / ".orca-state" / "eval-states" / name
 
     check = subprocess.run(
         ["git", "-C", str(repo_root), "rev-parse", "--verify", branch],
@@ -162,7 +162,7 @@ def _create_state_branch_and_worktree(repo_root: Path, name: str) -> Path:
                 "commit",
                 "--allow-empty",
                 "-m",
-                f"init: orca test state for {name}",
+                f"init: orca eval state for {name}",
             ],
             check=True,
             capture_output=True,
@@ -177,49 +177,49 @@ def _create_state_branch_and_worktree(repo_root: Path, name: str) -> Path:
     return worktree_path
 
 
-def scaffold_test(repo_root: Path, name: str) -> Path:
-    """Create `.orca/tests/<name>/` with skeleton files. Returns the directory.
+def scaffold_eval(repo_root: Path, name: str) -> Path:
+    """Create `.orca/evals/<name>/` with skeleton files. Returns the directory.
 
-    Also creates `orca-test-state/<name>` (orphan branch) and a persistent
-    author worktree at `.orca-state/test-states/<name>/`. The state_ref
+    Also creates `orca-eval-state/<name>` (orphan branch) and a persistent
+    author worktree at `.orca-state/eval-states/<name>/`. The state_ref
     marker pointing at that branch is stamped into input.md.
     """
     if not _KEBAB_RE.match(name):
-        msg = f"test name must be kebab-case (lowercase + hyphens), got {name!r}"
+        msg = f"eval name must be kebab-case (lowercase + hyphens), got {name!r}"
         raise ValueError(msg)
 
-    test_dir = repo_root / ".orca" / "tests" / name
-    if test_dir.exists():
-        msg = f"test directory already exists: {test_dir}"
+    eval_dir = repo_root / ".orca" / "evals" / name
+    if eval_dir.exists():
+        msg = f"eval directory already exists: {eval_dir}"
         raise FileExistsError(msg)
 
     _create_state_branch_and_worktree(repo_root, name)
 
-    test_dir.mkdir(parents=True)
-    input_text = _SKELETON_INPUT.replace("TODO_STATE_REF", f"orca-test-state/{name}")
-    (test_dir / "test-flow.yml").write_text(_SKELETON_TEST_FLOW)
-    (test_dir / "input.md").write_text(input_text)
-    (test_dir / "assertions.md").write_text(_SKELETON_ASSERTIONS)
-    return test_dir
+    eval_dir.mkdir(parents=True)
+    input_text = _SKELETON_INPUT.replace("TODO_STATE_REF", f"orca-eval-state/{name}")
+    (eval_dir / "eval-flow.yml").write_text(_SKELETON_EVAL_FLOW)
+    (eval_dir / "input.md").write_text(input_text)
+    (eval_dir / "assertions.md").write_text(_SKELETON_ASSERTIONS)
+    return eval_dir
 
 
-def list_tests(repo_root: Path) -> list[str]:
-    """Return sorted list of test names under .orca/tests/."""
-    tests_dir = repo_root / ".orca" / "tests"
-    if not tests_dir.is_dir():
+def list_evals(repo_root: Path) -> list[str]:
+    """Return sorted list of eval names under .orca/evals/."""
+    evals_dir = repo_root / ".orca" / "evals"
+    if not evals_dir.is_dir():
         return []
-    return sorted(d.name for d in tests_dir.iterdir() if d.is_dir() and (d / "test-flow.yml").exists())
+    return sorted(d.name for d in evals_dir.iterdir() if d.is_dir() and (d / "eval-flow.yml").exists())
 
 
-def resolve_test_paths(repo_root: Path, name: str) -> TestPaths:
-    """Resolve the canonical files for a test by name."""
-    test_dir = repo_root / ".orca" / "tests" / name
-    config_path = test_dir / "test-flow.yml"
+def resolve_eval_paths(repo_root: Path, name: str) -> EvalPaths:
+    """Resolve the canonical files for an eval by name."""
+    eval_dir = repo_root / ".orca" / "evals" / name
+    config_path = eval_dir / "eval-flow.yml"
     if not config_path.exists():
-        msg = f"test '{name}' not found: {config_path} does not exist"
+        msg = f"eval '{name}' not found: {config_path} does not exist"
         raise FileNotFoundError(msg)
-    task_file = test_dir / "input.md"
-    return TestPaths(config_path=config_path.resolve(), task_file=task_file.resolve())
+    task_file = eval_dir / "input.md"
+    return EvalPaths(config_path=config_path.resolve(), task_file=task_file.resolve())
 
 
 async def _submit_run(
@@ -258,35 +258,35 @@ async def _submit_run(
         return str(body["run_id"])
 
 
-def run_test(repo_root: Path, name: str) -> str:
-    """Submit a test run to the daemon. Returns the run_id."""
-    paths = resolve_test_paths(repo_root, name)
+def run_eval(repo_root: Path, name: str) -> str:
+    """Submit an eval run to the daemon. Returns the run_id."""
+    paths = resolve_eval_paths(repo_root, name)
     state_ref = parse_state_ref(paths.task_file)
     if state_ref is None:
         msg = (
-            f"test '{name}' has no state_ref in input.md frontmatter — add "
-            f"`state_ref: orca-test-state/{name}` and create the branch with "
-            f"`orca test add` (or fix the marker)."
+            f"eval '{name}' has no state_ref in input.md frontmatter — add "
+            f"`state_ref: orca-eval-state/{name}` and create the branch with "
+            f"`orca eval add` (or fix the marker)."
         )
         raise RuntimeError(msg)
     return asyncio.run(_submit_run(repo_root, paths.config_path, paths.task_file, state_ref))
 
 
-def test_command(args: Namespace, root: Path | None = None) -> None:
-    """Dispatch `orca test` based on args.args and args.all."""
+def eval_command(args: Namespace, root: Path | None = None) -> None:
+    """Dispatch `orca eval` based on args.args and args.all."""
     from orca.cli.daemon_cmd import _repo_root
 
     repo = _repo_root(root)
     sub_args: list[str] = list(args.args)
 
     if args.all:
-        names = list_tests(repo)
+        names = list_evals(repo)
         if not names:
-            print("No tests found under .orca/tests/.", file=sys.stderr)
+            print("No evals found under .orca/evals/.", file=sys.stderr)
             raise SystemExit(1)
         for name in names:
             try:
-                run_id = run_test(repo, name)
+                run_id = run_eval(repo, name)
             except (FileNotFoundError, RuntimeError) as exc:
                 print(f"{name}: error: {exc}", file=sys.stderr)
                 continue
@@ -295,41 +295,41 @@ def test_command(args: Namespace, root: Path | None = None) -> None:
 
     if sub_args and sub_args[0] == "add":
         if len(sub_args) != 2:
-            print("Usage: orca test add <name>", file=sys.stderr)
+            print("Usage: orca eval add <name>", file=sys.stderr)
             raise SystemExit(2)
         name = sub_args[1]
         try:
-            path = scaffold_test(repo, name)
+            path = scaffold_eval(repo, name)
         except (ValueError, FileExistsError) as exc:
             print(f"Error: {exc}", file=sys.stderr)
             raise SystemExit(1) from exc
-        wt = repo / ".orca-state" / "test-states" / name
+        wt = repo / ".orca-state" / "eval-states" / name
         print(f"Scaffolded: {path}")
-        print(f"State branch: orca-test-state/{name}")
+        print(f"State branch: orca-eval-state/{name}")
         print(f"Author worktree: {wt}")
         print()
         print("Next:")
         print(f"  cd {wt}")
-        print("  # arrange your test state, then:")
+        print("  # arrange your eval state, then:")
         print('  git add . && git commit -m "seed: <describe scenario>"')
-        print(f"  # then: orca test {name}")
+        print(f"  # then: orca eval {name}")
         return
 
     if sub_args:
         if len(sub_args) != 1:
-            print("Usage: orca test <name>", file=sys.stderr)
+            print("Usage: orca eval <name>", file=sys.stderr)
             raise SystemExit(2)
         try:
-            run_id = run_test(repo, sub_args[0])
+            run_id = run_eval(repo, sub_args[0])
         except (FileNotFoundError, RuntimeError) as exc:
             print(f"Error: {exc}", file=sys.stderr)
             raise SystemExit(1) from exc
         print(f"Run started: {run_id}")
         return
 
-    names = list_tests(repo)
+    names = list_evals(repo)
     if not names:
-        print("No tests found under .orca/tests/.")
+        print("No evals found under .orca/evals/.")
         return
     for name in names:
         print(name)

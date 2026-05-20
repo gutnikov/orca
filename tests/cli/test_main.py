@@ -164,28 +164,28 @@ class TestUnblockParser:
             parser.parse_args(["unblock", "my-run:default", "issue-1"])
 
 
-class TestTestParser:
-    def test_parser_accepts_bare_test(self) -> None:
+class TestEvalParser:
+    def test_parser_accepts_bare_eval(self) -> None:
         parser = build_parser()
-        args = parser.parse_args(["test"])
-        assert args.subcommand == "test"
+        args = parser.parse_args(["eval"])
+        assert args.subcommand == "eval"
         assert args.args == []
         assert args.all is False
 
-    def test_parser_accepts_test_name(self) -> None:
+    def test_parser_accepts_eval_name(self) -> None:
         parser = build_parser()
-        args = parser.parse_args(["test", "my-test"])
-        assert args.subcommand == "test"
-        assert args.args == ["my-test"]
+        args = parser.parse_args(["eval", "my-eval"])
+        assert args.subcommand == "eval"
+        assert args.args == ["my-eval"]
 
-    def test_parser_accepts_test_add(self) -> None:
+    def test_parser_accepts_eval_add(self) -> None:
         parser = build_parser()
-        args = parser.parse_args(["test", "add", "my-test"])
-        assert args.subcommand == "test"
-        assert args.args == ["add", "my-test"]
+        args = parser.parse_args(["eval", "add", "my-eval"])
+        assert args.subcommand == "eval"
+        assert args.args == ["add", "my-eval"]
 
-    def test_parser_accepts_test_all(self) -> None:
+    def test_parser_accepts_eval_all(self) -> None:
         parser = build_parser()
-        args = parser.parse_args(["test", "--all"])
-        assert args.subcommand == "test"
+        args = parser.parse_args(["eval", "--all"])
+        assert args.subcommand == "eval"
         assert args.all is True

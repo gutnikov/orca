@@ -1,4 +1,4 @@
-You are running the "select an evaluation" step of the `run-evaluations` flow.
+You are running the "select an eval" step of the `run-evals` flow.
 
 Write all intermediate and final results to `{{ result_path }}`. The orchestrator polls this file and parses it as JSON every poll.
 
@@ -21,21 +21,21 @@ Write a JSON document to `{{ result_path }}` of this exact shape, substituting t
 ```json
 {
   "outcome": "waiting",
-  "reason": "Pick which evaluation to run",
+  "reason": "Pick which eval to run",
   "form": {
-    "title": "Run an evaluation",
-    "description": "Select one of the evaluations discovered under .orca/evals/.",
+    "title": "Run an eval",
+    "description": "Select one of the evals discovered under .orca/evals/.",
     "submit_label": "Run selected",
     "cancel_label": "Cancel",
     "steps": [
       {
         "blocks": [
-          {"kind": "markdown", "content": "These are the evaluation directories discovered under `.orca/evals/`. Pick one."},
+          {"kind": "markdown", "content": "These are the eval directories discovered under `.orca/evals/`. Pick one."},
           {
             "kind": "field",
-            "name": "evaluation",
+            "name": "eval",
             "type": "select",
-            "label": "Evaluation",
+            "label": "Eval",
             "required": true,
             "options": [
               {"value": "<dir1>", "label": "<dir1>"},
@@ -51,7 +51,7 @@ Write a JSON document to `{{ result_path }}` of this exact shape, substituting t
 
 After you write this file, **the orchestrator will pause your session** until the user submits the web form. You will then receive a single text message of the shape:
 
-- on submit:   `{"submitted": true, "values": {"evaluation": "<picked>"}}`
+- on submit:   `{"submitted": true, "values": {"eval": "<picked>"}}`
 - on cancel:   `{"submitted": false, "cancelled": true}`
 
 Do not write any output before that message arrives. Do not run any other commands while waiting.
@@ -72,4 +72,4 @@ Once you receive the resume message:
   {"outcome": "done", "selected": "cancelled"}
   ```
 
-Write the JSON to `{{ result_path }}` and then stop. Do not perform any other action — running the chosen evaluation is **not** part of this step.
+Write the JSON to `{{ result_path }}` and then stop. Do not perform any other action — running the chosen eval is **not** part of this step.

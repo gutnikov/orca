@@ -8,7 +8,7 @@ below grade the scoping state's `result.json` and the surrounding worktree.
 
 ### outcome-is-decompose
 The scoping state's result `outcome` is `decompose` (not `ready`). The whole
-test premise is that a multi-subsystem refactor should not flow straight into
+eval premise is that a multi-subsystem refactor should not flow straight into
 planning.
 
 ### produces-multiple-sub-issues

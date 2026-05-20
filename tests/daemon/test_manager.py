@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from orca.daemon.manager import RunManager, RunStatus, _derive_test_name
+from orca.daemon.manager import RunManager, RunStatus, _derive_eval_name
 from orca.engine.types import DispatchWorkerEffect
 from orca.orchestrator.worker import WorkerOutcome, WorkerSuccess
 
@@ -228,7 +228,7 @@ class TestStartRunStateRef:
         """Second run starts from state_ref's tip, not the previous worktree state."""
         import subprocess as _subp
 
-        from orca.daemon.manager import _reset_test_worktree
+        from orca.daemon.manager import _reset_eval_worktree
 
         _subp.run(["git", "init", str(repo_root)], check=True, capture_output=True)
         _subp.run(
@@ -249,7 +249,7 @@ class TestStartRunStateRef:
             capture_output=True,
         )
         _subp.run(
-            ["git", "-C", str(repo_root), "checkout", "-b", "orca-test-state/foo"],
+            ["git", "-C", str(repo_root), "checkout", "-b", "orca-eval-state/foo"],
             check=True,
             capture_output=True,
         )
@@ -265,8 +265,8 @@ class TestStartRunStateRef:
             capture_output=True,
         )
 
-        # Simulate prior run: a worktree at the test branch with extra files.
-        wt = repo_root / ".orca-state" / "worktrees" / "test-foo"
+        # Simulate prior run: a worktree at the eval branch with extra files.
+        wt = repo_root / ".orca-state" / "worktrees" / "eval-foo"
         wt.parent.mkdir(parents=True, exist_ok=True)
         _subp.run(
             [
@@ -276,9 +276,9 @@ class TestStartRunStateRef:
                 "worktree",
                 "add",
                 "-b",
-                "test-foo",
+                "eval-foo",
                 str(wt),
-                "orca-test-state/foo",
+                "orca-eval-state/foo",
             ],
             check=True,
             capture_output=True,
@@ -292,20 +292,20 @@ class TestStartRunStateRef:
         )
         assert (wt / "junk.txt").exists()
 
-        await _reset_test_worktree(repo_root, branch="test-foo", worktree_path=wt)
+        await _reset_eval_worktree(repo_root, branch="eval-foo", worktree_path=wt)
 
         assert not wt.exists()
         rc = _subp.run(
-            ["git", "-C", str(repo_root), "rev-parse", "--verify", "test-foo"],
+            ["git", "-C", str(repo_root), "rev-parse", "--verify", "eval-foo"],
             capture_output=True,
         ).returncode
         assert rc != 0
 
     @pytest.mark.asyncio()
-    async def test_state_ref_rejected_for_non_test_config(self, repo_root: Path) -> None:
-        """state_ref is only meaningful for test runs; passing it with a non-test config errors.
+    async def test_state_ref_rejected_for_non_eval_config(self, repo_root: Path) -> None:
+        """state_ref is only meaningful for eval runs; passing it with a non-eval config errors.
 
-        Defense-in-depth: the CLI only sends state_ref for `orca test <name>`, but the daemon
+        Defense-in-depth: the CLI only sends state_ref for `orca eval <name>`, but the daemon
         should also refuse a hand-crafted request that pairs state_ref with `.orca/default.yml`.
         """
         import subprocess as _subp
@@ -330,30 +330,30 @@ class TestStartRunStateRef:
         )
         # Create a real branch named like a state branch so the existence check passes.
         _subp.run(
-            ["git", "-C", str(repo_root), "branch", "orca-test-state/foo"],
+            ["git", "-C", str(repo_root), "branch", "orca-eval-state/foo"],
             check=True,
             capture_output=True,
         )
 
         mgr = RunManager(repo_root)
         task_file = repo_root / "task.md"
-        with pytest.raises(ValueError, match="state_ref is only supported for test runs"):
-            await mgr.start_run(task_file, state_ref="orca-test-state/foo")
+        with pytest.raises(ValueError, match="state_ref is only supported for eval runs"):
+            await mgr.start_run(task_file, state_ref="orca-eval-state/foo")
 
     @pytest.mark.asyncio()
     async def test_state_ref_run_does_not_collide_with_current_branch(self, repo_root: Path) -> None:
         """Regression for issue #12.
 
-        When a user runs `orca test <name>` from their normal working branch,
+        When a user runs `orca eval <name>` from their normal working branch,
         `resolve_branch()` returns the current (iteration) branch. Previously the
-        daemon reused that branch as the test-run worktree's branch, which:
+        daemon reused that branch as the eval-run worktree's branch, which:
         - fails because `git worktree add <path> <iter-branch>` refuses when the
           iter-branch is checked out in the main repo, AND
         - risks `git branch -D <iter-branch>` deleting the user's work in
-          `_reset_test_worktree`.
+          `_reset_eval_worktree`.
 
-        After the fix, test runs use a test-specific ephemeral branch derived
-        from the test name, so the iteration branch is untouched.
+        After the fix, eval runs use an eval-specific ephemeral branch derived
+        from the eval name, so the iteration branch is untouched.
         """
         import subprocess as _subp
 
@@ -376,7 +376,7 @@ class TestStartRunStateRef:
             capture_output=True,
         )
 
-        # Build orca-test-state/foo with a DIFFERENT file (so we can tell state vs main apart).
+        # Build orca-eval-state/foo with a DIFFERENT file (so we can tell state vs main apart).
         tmp = repo_root / ".tmp-state"
         _subp.run(
             ["git", "-C", str(repo_root), "worktree", "add", "--detach", str(tmp), "HEAD"],
@@ -384,7 +384,7 @@ class TestStartRunStateRef:
             capture_output=True,
         )
         _subp.run(
-            ["git", "-C", str(tmp), "checkout", "--orphan", "orca-test-state/foo"],
+            ["git", "-C", str(tmp), "checkout", "--orphan", "orca-eval-state/foo"],
             check=True,
             capture_output=True,
         )
@@ -402,11 +402,11 @@ class TestStartRunStateRef:
             capture_output=True,
         )
 
-        # Scaffold the test config under .orca/tests/foo/ — derived test_name = "foo".
-        test_dir = repo_root / ".orca" / "tests" / "foo"
-        test_dir.mkdir(parents=True)
-        (test_dir / "test-flow.yml").write_text(SIMPLE_CONFIG_YAML)
-        (test_dir / "input.md").write_text("title: Test\ndescription: D\nstate_ref: orca-test-state/foo\n")
+        # Scaffold the eval config under .orca/evals/foo/ — derived eval_name = "foo".
+        eval_dir = repo_root / ".orca" / "evals" / "foo"
+        eval_dir.mkdir(parents=True)
+        (eval_dir / "eval-flow.yml").write_text(SIMPLE_CONFIG_YAML)
+        (eval_dir / "input.md").write_text("title: Test\ndescription: D\nstate_ref: orca-eval-state/foo\n")
 
         mgr = RunManager(repo_root)
         mock_worker = MockWorker(
@@ -420,9 +420,9 @@ class TestStartRunStateRef:
         # This is the realistic scenario the issue reports.
         with patch("orca.daemon.manager.CliAgentWorker", return_value=mock_worker):
             await mgr.start_run(
-                task_file=test_dir / "input.md",
-                workflow=str(test_dir / "test-flow.yml"),
-                state_ref="orca-test-state/foo",
+                task_file=eval_dir / "input.md",
+                workflow=str(eval_dir / "eval-flow.yml"),
+                state_ref="orca-eval-state/foo",
             )
             await mgr.stop_all()
 
@@ -434,8 +434,8 @@ class TestStartRunStateRef:
         assert rc == 0, "main (iteration branch) was deleted — data loss bug"
 
         # The run worktree must exist and contain the state branch's fixture, NOT main's.
-        # The fix uses a test-specific branch name `orca-test-run-foo`.
-        run_worktree = repo_root / ".orca-state" / "worktrees" / "orca-test-run-foo"
+        # The fix uses an eval-specific branch name `orca-eval-run-foo`.
+        run_worktree = repo_root / ".orca-state" / "worktrees" / "orca-eval-run-foo"
         assert run_worktree.exists(), f"expected run worktree at {run_worktree}"
         assert (run_worktree / "fixture.txt").exists(), "run worktree missing state branch fixture"
         assert (run_worktree / "fixture.txt").read_text() == "from state branch\n"
@@ -462,8 +462,8 @@ class TestStartRunStateRef:
 
         mgr = RunManager(repo_root)
         task_file = repo_root / "task.md"
-        with pytest.raises(ValueError, match="state ref 'orca-test-state/ghost' not found"):
-            await mgr.start_run(task_file, state_ref="orca-test-state/ghost")
+        with pytest.raises(ValueError, match="state ref 'orca-eval-state/ghost' not found"):
+            await mgr.start_run(task_file, state_ref="orca-eval-state/ghost")
 
 
 @pytest.fixture()
@@ -595,22 +595,22 @@ class TestExternalFlow:
 
 class TestDeriveTestName:
     def test_matches_tests_layout(self) -> None:
-        assert _derive_test_name(Path("/repo/.orca/tests/foo/test-flow.yml")) == "foo"
+        assert _derive_eval_name(Path("/repo/.orca/evals/foo/eval-flow.yml")) == "foo"
 
     def test_kebab_case_name(self) -> None:
-        assert _derive_test_name(Path("/repo/.orca/tests/scoping-decomposes/test-flow.yml")) == "scoping-decomposes"
+        assert _derive_eval_name(Path("/repo/.orca/evals/scoping-decomposes/eval-flow.yml")) == "scoping-decomposes"
 
     def test_returns_none_for_regular_workflow(self) -> None:
-        assert _derive_test_name(Path("/repo/.orca/develop.yml")) is None
+        assert _derive_eval_name(Path("/repo/.orca/develop.yml")) is None
 
     def test_returns_none_for_unexpected_filename(self) -> None:
-        assert _derive_test_name(Path("/repo/.orca/tests/foo/orca.yml")) is None
+        assert _derive_eval_name(Path("/repo/.orca/evals/foo/orca.yml")) is None
 
     def test_returns_none_for_path_outside_tests_dir(self) -> None:
-        assert _derive_test_name(Path("/repo/.orca/flows/foo/test-flow.yml")) is None
+        assert _derive_eval_name(Path("/repo/.orca/flows/foo/eval-flow.yml")) is None
 
     def test_returns_none_for_short_path(self) -> None:
-        assert _derive_test_name(Path("test-flow.yml")) is None
+        assert _derive_eval_name(Path("eval-flow.yml")) is None
 
 
 class TestScanInterruptedRuns:

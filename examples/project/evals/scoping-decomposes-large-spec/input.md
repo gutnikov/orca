@@ -12,18 +12,18 @@ description: |
   the payments refactor share no files — they are two unrelated stories that
   happened to land in the same ticket.
 scope_boundary: "src/auth/, src/payments/"
-state_ref: orca-test-state/scoping-decomposes-large-spec
+state_ref: orca-eval-state/scoping-decomposes-large-spec
 ---
 
 # Scenario
 
-This test exercises the `scoping` state with a deliberately broad refactor
+This eval exercises the `scoping` state with a deliberately broad refactor
 spec that spans two unrelated subsystems. The scoping agent should recognise
 the smell and decompose the issue into at least one sub-issue per subsystem,
 each with a non-overlapping `scope_boundary`.
 
-The worktree is checked out from `orca-test-state/scoping-decomposes-large-spec`,
+The worktree is checked out from `orca-eval-state/scoping-decomposes-large-spec`,
 which carries the two tangled legacy modules at `src/auth/legacy_auth.py`
 and `src/payments/legacy_payments.py`. Edit that state under
-`.orca-state/test-states/scoping-decomposes-large-spec/` and commit with
+`.orca-state/eval-states/scoping-decomposes-large-spec/` and commit with
 plain git when iterating.

@@ -50,7 +50,7 @@ states: { ... }
 - CLI defaults: `orca run` applies `--max-hops 10 --max-retries 3` unless overridden.
 - MCP / daemon submissions only apply these limits if the caller passes `max_hops` / `max_retries` through the daemon API. The public `orca_start_run` MCP tool currently does not expose those knobs.
 
-Recommended launch values: `--max-hops 10–20`, `--max-retries 3–5` for production; tests should usually fail faster.
+Recommended launch values: `--max-hops 10–20`, `--max-retries 3–5` for production; evals should usually fail faster.
 
 ## Type Definition
 
@@ -215,18 +215,18 @@ Examples: `.orca/develop.yml`, `.orca/prd.yml`, `.orca/qa-spec.yml`, `.orca/inve
 
 Select with `-w`: `orca run task.md -w develop` loads `.orca/develop.yml`. Default (no `-w`) loads `.orca/default.yml`.
 
-## Tests
+## Evals
 
-Orca recognizes `.orca/tests/<name>/test-flow.yml` as a test workflow.
+Orca recognizes `.orca/evals/<name>/eval-flow.yml` as an eval workflow.
 
 ```
 .orca/
   develop.yml                # production workflow
   prompts/
     scoping.md
-  tests/
+  evals/
     scoping-decomposes-large-spec/
-      test-flow.yml          # bookended workflow: <body slice> -> assert
+      eval-flow.yml          # bookended workflow: <body slice> -> assert
       input.md               # scenario + YAML frontmatter (seeds issue.fields, declares state_ref)
       assertions.md          # pass/fail checklist
 ```
@@ -234,22 +234,22 @@ Orca recognizes `.orca/tests/<name>/test-flow.yml` as a test workflow.
 Plus, outside `.orca/`:
 
 ```
-orca-test-state/<name>            # orphan git branch holding the worktree fixture bytes
-.orca-state/test-states/<name>/   # persistent author worktree checked out to that branch
+orca-eval-state/<name>            # orphan git branch holding the worktree fixture bytes
+.orca-state/eval-states/<name>/   # persistent author worktree checked out to that branch
 ```
 
 Recognized conventions:
 
 - The directory `<name>` is kebab-case and descriptive of the scenario.
-- The workflow file is named `test-flow.yml` (not `orca.yml`) so it's grep-distinguishable from production workflows.
+- The workflow file is named `eval-flow.yml` (not `orca.yml`) so it's grep-distinguishable from production workflows.
 - The directory must also contain `input.md` (issue data + scenario + `state_ref` marker) and `assertions.md` (pass/fail checklist).
-- The workflow follows a bookended shape: `<body slice> -> assert`. There is no `setup` state — the daemon checks the branch named by `input.md`'s `state_ref` frontmatter out into the run worktree before any body state runs. Body states are copied from the production workflow with test-harness rewrites: `prompt:` paths use `../../prompts/<name>.md`, internal transitions stay inside the slice, and outgoing transitions to states outside the slice route to `assert`.
-- When the engine loads a config file at this path, it sets `run.test_name = <name>` and `run.repo_root = <absolute repo root>` in the Jinja template context. The `assert` inline prompt uses these to locate `.orca/tests/<name>/assertions.md` on the iteration branch.
-- `input.md` supports YAML frontmatter at the top. The engine parses it and seeds `issue.fields.*` before the slice's entry state runs. The frontmatter must include a `state_ref:` line naming the git branch to check out into the worktree (typically `orca-test-state/<name>`).
+- The workflow follows a bookended shape: `<body slice> -> assert`. There is no `setup` state — the daemon checks the branch named by `input.md`'s `state_ref` frontmatter out into the run worktree before any body state runs. Body states are copied from the production workflow with eval-harness rewrites: `prompt:` paths use `../../prompts/<name>.md`, internal transitions stay inside the slice, and outgoing transitions to states outside the slice route to `assert`.
+- When the engine loads a config file at this path, it sets `run.eval_name = <name>` and `run.repo_root = <absolute repo root>` in the Jinja template context. The `assert` inline prompt uses these to locate `.orca/evals/<name>/assertions.md` on the iteration branch.
+- `input.md` supports YAML frontmatter at the top. The engine parses it and seeds `issue.fields.*` before the slice's entry state runs. The frontmatter must include a `state_ref:` line naming the git branch to check out into the worktree (typically `orca-eval-state/<name>`).
 - The `assert` state writes `report.md` into `{{ run.run_dir }}/report.md`. The source directory stays clean; reports live with the run.
-- The fixture bytes the slice will read live on the state-ref branch, not in a `fixtures/` directory and not under `.orca/tests/<name>/`. Author them by `cd`'ing into the persistent worktree at `.orca-state/test-states/<name>/` and committing with plain git. (A `fixtures/` directory under a test is a leftover from the pre-state-branch model — flag it via `orca-test-review.md`.)
+- The fixture bytes the slice will read live on the state-ref branch, not in a `fixtures/` directory and not under `.orca/evals/<name>/`. Author them by `cd`'ing into the persistent worktree at `.orca-state/eval-states/<name>/` and committing with plain git. (A `fixtures/` directory under an eval is a leftover from the pre-state-branch model — flag it via `orca-eval-review.md`.)
 
-See [`../orca-test-create.md`](../orca-test-create.md) for the authoring procedure and [`../orca-test-review.md`](../orca-test-review.md) for the audit checklist.
+See [`../orca-eval-create.md`](../orca-eval-create.md) for the authoring procedure and [`../orca-eval-review.md`](../orca-eval-review.md) for the audit checklist.
 
 ### Result Format Validation Scope
 
@@ -257,7 +257,7 @@ See [`../orca-test-create.md`](../orca-test-create.md) for the authoring procedu
 
 - `outcome` is required and must be one of `result_format.outcome.values`.
 - Fields with `required_when` must be present and non-empty when the outcome matches.
-- Nested `items` shapes, scalar subtypes such as `integer`, and object field details are not deeply validated by the engine. Use assertions/tests to grade those details.
+- Nested `items` shapes, scalar subtypes such as `integer`, and object field details are not deeply validated by the engine. Use assertions/evals to grade those details.
 
 ## Validation Rules
 
