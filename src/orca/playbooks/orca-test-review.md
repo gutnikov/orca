@@ -68,10 +68,10 @@ These catch drift between the test and its production counterpart — the most i
 These are the standard workflow-level checks, scoped to the test file.
 
 - [ ] **All `on:` targets exist.** Every transition target is either a state in `test-flow.yml`, the literal `assert`, or the built-in `done`/`failed`.
-- [ ] **Outcomes match `on:` keys.** Every key in `on:` must be a value in the state's `result_format.outcome.values`.
+- [ ] **Outcomes and routes agree.** Every key in `on:` must be a value in the state's `result_format.outcome.values`; every non-`waiting` outcome the body/assert worker may emit should route to another body state, `assert`, or `done`.
 - [ ] **All body states reachable.** Every body state must be reachable from `initial:` via the `on:` graph. Unreachable body states are dead code in the test.
 - [ ] **Worker `kind` valid.** `claude-code`, `codex`, or `opencode`.
-- [ ] **`max_hops` and `max_worker_retries` set.** Tests need bounds just like production. Recommended: `max_hops: 10`, `max_worker_retries: 2` (tests should fail fast).
+- [ ] **Run bounds accounted for.** `orca test` submits test-fast bounds (`max_hops=10`, `max_retries=2`). If a test is started through another caller, confirm equivalent daemon-level limits or supervise for loop/retry symptoms.
 
 **Severity:** failures here are **Critical** (config invalid) or **Important** (unbounded test could runaway).
 
@@ -96,13 +96,13 @@ The contract: every byte in the worktree comes from `state_ref`'s commit history
 All commands in this subsection assume the current directory is the repo root.
 
 - [ ] **`state_ref` is present in `input.md` frontmatter.** Grep: `grep -n '^state_ref:' .orca/tests/<name>/input.md` — should return exactly one line.
-- [ ] **`state_ref` is not the placeholder.** `TODO_STATE_REF` means the scaffold ran but the author never authored the state. Flag as Critical — the test cannot run.
+- [ ] **`state_ref` is not the placeholder.** `TODO_STATE_REF` means the test predates the current scaffold or was hand-written incompletely. Flag as Critical — the test cannot run.
 - [ ] **`state_ref` resolves to a real branch.** Run: `git rev-parse --verify $(yq '.state_ref' .orca/tests/<name>/input.md)`. Exit code 0 = ref exists. If not, the test cannot run.
 - [ ] **`state_ref` lives in the `orca-test-state/` namespace.** Branches outside the namespace (e.g. `main`, feature branches) tie the test to history that changes under your feet. Sharing within the namespace is fine; pointing at `main` is Important.
 
 ### Branch contents
 
-- [ ] **State branch contains no project chrome.** Run: `git ls-tree --name-only orca-test-state/<name>` — confirm no `.orca/`, `pyproject.toml`, `README.md`, or other top-level files unrelated to the scenario.
+- [ ] **State branch contains only scenario-relevant bytes.** Run: `git ls-tree --name-only orca-test-state/<name>` — confirm no `.orca/` and no top-level files unrelated to the scenario. `pyproject.toml` or similar config is acceptable only when the state under test reads it or needs it for verification.
 - [ ] **Assertion criteria anchor on bytes in the state branch.** For every criterion that references a literal file path, line number, function name, or fixed string, run `git show orca-test-state/<name>:<path>` (or similar) and verify the bytes match. Mismatches mean the state was edited but the criterion wasn't updated.
 - [ ] **No body state has its own `setup` re-implementation.** If a body state's prompt instructs the worker to copy files, run git commands, or seed scenario content, it's recreating the deleted setup step — fold those bytes into the state branch instead.
 
@@ -135,7 +135,7 @@ Use the same format as [`orca-workflow-review.md`](orca-workflow-review.md) so o
 ## Test audit: .orca/tests/<name>/
 
 ### Critical
-- [state-branch] input.md:L8 — `state_ref` is `TODO_STATE_REF`; author the state branch and update the marker.
+- [state-branch] input.md:L8 — `state_ref` is `TODO_STATE_REF`; create or retarget the state branch and update the marker.
 - [assertions] assertions.md:L24 — duplicate id `outcome-is-request-changes`.
 
 ### Important
@@ -143,7 +143,7 @@ Use the same format as [`orca-workflow-review.md`](orca-workflow-review.md) so o
 - [assertions] assertions.md:L34 — criterion "messages-are-actionable" asks a judgment question. Rewrite as a regex check (e.g., message starts with a verb from a fixed list).
 
 ### Minor
-- [state-branch] orca-test-state/<name> — contains `README.md` at root. Remove from the state branch; it's project chrome.
+- [state-branch] orca-test-state/<name> — contains unrelated `README.md` at root. Remove it from the state branch unless the scenario requires the worker to read it.
 ```
 
 Rules:

@@ -23,11 +23,11 @@ Run these checks in order:
    ```
    If not running: `orca daemon start`. If start fails, surface the error — do not try workarounds.
 
-2. **No existing run is in flight.** Orca enforces strictly serial execution per project.
+2. **No conflicting run is in flight.** Orca can track multiple run ids in one project, but this playbook supervises one run at a time, and concurrent runs can collide if they touch the same branch or files. The daemon rejects a duplicate running `run_id`; it does not prove two distinct run ids are safe to run together.
    ```bash
    orca runs
    ```
-   - If a `RUNNING` run exists → skip Phase B, jump to Phase C (supervise the existing run).
+   - If a `RUNNING` run exists → ask whether to supervise that run or start a separate one with a distinct branch/run id. Default to supervising the existing run unless the user explicitly wants parallel work.
    - If a `FAILED` / `INTERRUPTED` run exists → ask the user: resume it (`orca resume <run_id>`) or drop it (`orca drop <run_id>`)?
    - If a `STOPPED` run exists (user previously ran `orca stop`) → ask: resume (`orca resume`) or drop (`orca drop`)? Don't auto-resume — they stopped it for a reason.
    - If a `COMPLETED` run is sitting around → ask the user whether to drop it before starting new work.
@@ -77,8 +77,8 @@ Available flags (defaults shown):
 | `-b, --branch <name>` | auto-derived | Override the run branch. Auto-derivation pulls from issue fields and the current git state; pass this only when you need a specific branch name. |
 | `--base <ref>` | from config `base_branch`, else `origin/main` | What the new run branch is cut from. |
 | `--run-id <id>` | `<branch>:<workflow>` | Override the run identifier. Rarely needed. |
-| `--max-hops <N>` | 10 | Cap total state transitions per issue. Overrides what the workflow YAML sets. |
-| `--max-retries <N>` | 3 | Cap worker failures per issue per state. Overrides what the workflow YAML sets. |
+| `--max-hops <N>` | 10 | Cap total state transitions per issue. Overrides the CLI default; workflow YAML does not currently set this. |
+| `--max-retries <N>` | 3 | Cap worker failures per issue per state. Overrides the CLI default; workflow YAML does not currently set this. |
 | `--headless` | off | Suppress TUI output; useful for scripted invocations. |
 | `--insights` | off | Generate an insights log alongside the run (readable via `orca_get_insights`). |
 
@@ -97,7 +97,7 @@ If start fails, surface the error to the user — do not retry blindly.
 
 ## Phase C — Supervise (the watch loop)
 
-Discover the workflow's effective `max_worker_retries` and `max_hops`. `orca run` injects defaults of **3** retries and **10** hops unless the workflow YAML sets them or the user passed `--max-retries` / `--max-hops`. Pull the live values from `orca_get_run` (or read them off the loaded config) — call them `MAX_RETRIES` and `MAX_HOPS` below. You'll use these as health thresholds.
+Discover the workflow's effective `max_worker_retries` and `max_hops`. CLI `orca run` applies defaults of **3** retries and **10** hops unless the user passed `--max-retries` / `--max-hops`; workflow YAML does not currently set these limits. `orca test` submits 2 / 10. MCP starts may not expose effective limits, so if you cannot read them from the caller context, use 3 / 10 as supervision thresholds and note the assumption. Call them `MAX_RETRIES` and `MAX_HOPS` below.
 
 ### Loop
 

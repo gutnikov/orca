@@ -8,12 +8,12 @@ One-line definitions for terms that recur across the playbooks. Use this as a ti
 - **Type.** One self-contained state machine inside a workflow (e.g. `epic`, `task`). Each type has its own `fields`, `initial`, and `states`; the top-level `root_type` names which type root issues start as. Legacy single-type configs are auto-wrapped as type `default`.
 - **State.** A named position in a type's state machine. Has a `worker` (active) or doesn't (passive).
 - **Active state.** Has a `worker:` block. The worker runs, produces a result, and the result's outcome routes via `on:`.
-- **Passive state.** Has no `worker:` and no `on:`. Issue parks here until a manual `AdvanceEvent` (CLI / TUI / API). Used for human gates.
+- **Passive state.** Has no `worker:` and no `on:`. Issue parks here until a manual `AdvanceEvent` from the TUI/API surface. Used for human gates.
 - **Issue.** A single unit of work flowing through the state machine. Has fields, a current state, an event log, and (optionally) children. The starting issue of a run is the *root issue*.
 
 ## Test shape
 
-- **Slice.** The body of an orca test: one or more states copied verbatim from a production workflow YAML into `.orca/tests/<name>/test-flow.yml`. The slice's `result_format`, prompts, and internal transitions match production; outgoing transitions to states outside the slice are rewritten to `assert`. A slice may be single-state (unit), multi-state (subgraph), or the full workflow (end-to-end).
+- **Slice.** The body of an orca test: one or more states copied from a production workflow YAML into `.orca/tests/<name>/test-flow.yml`. The slice's `result_format`, production prompt targets, and internal transitions match production; prompt paths are made relative to the test workflow, and outgoing transitions to states outside the slice are rewritten to `assert`. A slice may be single-state (unit), multi-state (subgraph), or the full workflow (end-to-end).
 - **Assert (state).** The tail state of every orca test. Reads `assertions.md`, inspects the worktree and per-state results, grades each criterion, writes `report.md`, and emits a structured outcome (`passed` / `failed` / `inconclusive`). All three outcomes terminate the test by routing to `done`.
 - **State branch.** An orphan git branch under the `orca-test-state/` namespace whose tip is the worktree the slice's first state will see. Created by `orca test add <name>` and edited via the persistent worktree at `.orca-state/test-states/<name>/`. Referenced from a test's `input.md` frontmatter via the `state_ref:` line. Carries the deterministic fixture bytes; nothing produced at run time should depend on what the LLM did the previous time.
 
@@ -39,24 +39,24 @@ These three terms are routinely conflated. They are distinct:
 
 | Name | Scope | Counts | Recommended | Why it exists |
 |---|---|---|---|---|
-| `max_hops` | global | *Every* state transition per issue | 10–20 | Bounds long pipelines and `blocked` self-loops. |
-| `max_worker_retries` | global | Worker *failures* (crashes, timeouts, `failed` target) per issue in the same state | 3–5 | Bounds retry loops from a state crashing the worker. Does not count `blocked` results. |
+| `max_hops` | run limit | *Every* state transition per issue | 10–20 | Bounds long pipelines and `blocked` self-loops. Current workflow YAML does not set this; `orca run` defaults to 10 and `--max-hops` overrides it. |
+| `max_worker_retries` | run limit | Worker *failures* (crashes, timeouts, `failed` target) per issue in the same state | 3–5 | Bounds retry loops from a state crashing the worker. Does not count `blocked` results. Current workflow YAML does not set this; `orca run` defaults to 3 and `--max-retries` overrides it. |
 | `max_workers` | per (type, state) | Concurrent workers running in this state | `1` on merge/apply/deploy; omit for parallel-safe work | Serializes shared-resource writes. |
-| `timeout` | per worker | Wall-clock seconds | bound to worst case | Hard kill regardless of activity. |
+| `timeout` | per worker | Seconds without progress when `inactivity_timeout` is absent | bound to worst case | Compatibility fallback for `inactivity_timeout`; not currently a hard wall-clock cap. |
 | `inactivity_timeout` | per worker | Seconds without progress | 300 default | Kills wedged workers. **Paused while the worker's outcome is `waiting`.** |
 
 ## Decomposition
 
 - **Decompose action.** An `on:` rule with `{ action: decompose, ... }`. Spawns child issues from the `sub_issues` list the worker emits.
-- **Child type.** Optional `child_type:` on the decompose rule names the type for spawned children; defaults to `root_type`.
-- **`then:`.** Optional. Where the parent transitions after creating children. If omitted, parent blocks until every child reaches `done` (cascading unblock).
-- **`depends_on`.** A list of issue ids on a child's record. The child waits to start until each named predecessor reaches `done`. Sibling children without dependencies run in parallel up to `max_workers`.
+- **Child type.** `child_type:` on the decompose rule names the type for spawned children. Typed configs should set it unless every emitted child supplies its own `type`; legacy single-type configs default to `default`.
+- **`then:`.** Optional. Where the parent transitions after creating children. If omitted, parent blocks until every child reaches `done` (cascading unblock). Use `then:` only for deliberate fire-and-forget decomposition; if the root issue reaches `done`, the run loop terminates.
+- **`depends_on`.** In a decomposer's `sub_issues` output, a list of sibling child `key` values. The engine resolves those keys to real issue ids. In rendered prompts for already-created issues, `{{ issue.depends_on }}` contains the resolved issue ids.
 
 ## Auto-populated fields
 
 The orchestrator sets these on the issue at runtime. Declare them in `fields:` only so prompts can reference them via Jinja:
 
-- **`base_branch`.** The global `base_branch` config value, injected as `{{ issue.base_branch }}`.
+- **`base_branch`.** The live branch a worker should treat as its base: the run branch for root issues, or the parent issue's branch for child issues. Access it as `{{ issue.base_branch }}`. The top-level config `base_branch` is used when cutting the run branch.
 - **`failure_context`.** Error message from the last worker failure (or the message attached to a `failed` target transition). Read in retry prompts so the next attempt sees what broke.
 
 ## Run lifecycle states
@@ -87,6 +87,6 @@ Worker activity is reported separately: `worker_active: bool` indicates whether 
 - `.orca/{flow}.yml` — workflow config.
 - `.orca/prompts/{state}.md` — one prompt template per active state.
 - `.orca/tests/<name>/` — orca tests (`test-flow.yml`, `input.md`, `assertions.md`).
-- `orca-test-state/<name>` — orphan git branches that hold the worktree state for each test (created by `orca test add`). Never authored interactively; edited from a persistent worktree under `.orca-state/test-states/<name>/`.
+- `orca-test-state/<name>` — orphan git branches that hold the worktree state for each test (created by `orca test add`). Do not edit them from the main checkout; author them from the persistent worktree under `.orca-state/test-states/<name>/`.
 - `.orca-state/` — runtime data, worker logs, run/test worktrees. Gitignored.
 - Playbooks (the doc you're reading) ship inside the installed orca package and are served on demand via the `orca_get_playbook` / `orca_list_playbooks` MCP tools — there is no per-project `.orca/playbooks/` directory.

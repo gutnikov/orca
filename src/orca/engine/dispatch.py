@@ -217,7 +217,9 @@ def build_run_context(
 ) -> dict[str, Any]:
     """Build the run context dict for Jinja2 templates."""
     insights_path = run_dir / "insights.json"
+    repo_root = sessions_dir.parent.parent if sessions_dir.parent.name == ".orca-state" else sessions_dir.parent
     ctx: dict[str, Any] = {
+        "repo_root": str(repo_root),
         "run_dir": str(run_dir),
         "log": str(run_dir / "orca.log.jsonl"),
         "insights": str(insights_path) if insights_path.exists() else None,

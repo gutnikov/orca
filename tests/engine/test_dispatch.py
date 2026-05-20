@@ -492,6 +492,7 @@ class TestBuildRunContext:
         )
 
         assert ctx["run_dir"] == str(run_dir)
+        assert ctx["repo_root"] == str(tmp_path)
         assert ctx["log"] == str(run_dir / "orca.log.jsonl")
         assert ctx["state"] == str(run_dir / "state.json")
         assert ctx["sessions_dir"] == str(sessions_dir)

@@ -5,7 +5,7 @@ Install the `orca` CLI on this machine via pipx, verify it works, and (later) up
 Routing:
 - User says "install orca" or `orca` isn't on PATH → [Install](#install).
 - User says "update orca" or `orca` is already installed → [Update](#update).
-- Unclear → run `which orca && orca -v`. If both succeed, propose [Update](#update). If `which` fails, propose [Install](#install).
+- Unclear → run `command -v orca` and `orca -v`. If both succeed, propose [Update](#update). If `command -v orca` fails, propose [Install](#install).
 
 ---
 
@@ -22,16 +22,17 @@ Run these checks. If any fail, stop and tell the user what's missing — do **no
 | `git` is installed | `which git` | prints a path |
 | `tmux` is installed | `which tmux` | prints a path |
 | At least one agent CLI present | `which claude \|\| which codex \|\| which opencode` | prints a path |
-| SSH access to GitHub works | `ssh -T git@github.com` (non-fatal banner) | doesn't error on auth |
+| SSH access to GitHub works | `ssh -T git@github.com` | output proves auth (GitHub's successful-auth/no-shell banner is OK even if the command exits 1); `Permission denied` fails |
 
 If `pipx` is missing, suggest `brew install pipx && pipx ensurepath` (macOS) or the platform-appropriate equivalent. Do not run it without confirmation.
 
-If `pipx` is installed but its bin dir isn't on `PATH`, suggest `pipx ensurepath` and a shell restart **before** installing — otherwise `pipx install` succeeds silently but `which orca` won't find anything afterwards (the classic "I installed it, why doesn't it run" trap).
+If `pipx` is installed but its bin dir isn't on `PATH`, suggest `pipx ensurepath` and a shell restart **before** installing — otherwise `pipx install` succeeds silently but `command -v orca` won't find anything afterwards (the classic "I installed it, why doesn't it run" trap).
 
 ### Already installed? Skip to Update.
 
 ```bash
-which orca && orca -v
+command -v orca
+orca -v
 ```
 
 If both succeed, the CLI is installed. Ask the user whether they want to update instead — see the [Update](#update) section below.
@@ -54,7 +55,7 @@ orca --help      # full subcommand list (daemon, run, runs, resume, retry,
                  # stop, drop, logs, unblock, tui, mcp, init, clean, …)
 ```
 
-If `orca -v` works but `which orca` doesn't resolve in a new shell, `pipx ensurepath` may be needed (then restart the shell).
+If `orca -v` works but `command -v orca` doesn't resolve in a new shell, `pipx ensurepath` may be needed (then restart the shell).
 
 ### Bootstrap a project (per-project, optional here)
 
@@ -66,6 +67,14 @@ mkdir -p .orca/prompts
 orca daemon start
 orca daemon status    # should show running
 ```
+
+Also make sure runtime state is not committed:
+
+```bash
+grep -qxF '.orca-state/' .gitignore
+```
+
+If that check fails, offer to add `.orca-state/` to `.gitignore` and wait for confirmation before editing. This is project policy, not part of installing the binary.
 
 Playbooks no longer need to be copied into the project. Since v0.3.5 they ship with the installed orca package and are served on demand via the `orca_get_playbook` and `orca_list_playbooks` MCP tools. (If you find a legacy `.orca/playbooks/` directory left over from an older orca, `orca init` will remove it — but is otherwise a no-op.)
 
@@ -90,14 +99,14 @@ Upgrade the `orca` CLI to the latest commit on `main` of the upstream repo.
    ```bash
    pipx list | grep -i orca
    ```
-   If orca isn't listed but `which orca` resolves, it was installed by some other means (system pip, brew, source). **Stop and ask the user** — `pipx install --force` would clobber a non-pipx install.
+   If orca isn't listed but `command -v orca` resolves, it was installed by some other means (system pip, brew, source). **Stop and ask the user** — `pipx install --force` would clobber a non-pipx install.
 
 2. Capture the current version (for the report at the end):
    ```bash
    orca -v
    ```
 
-3. Check for active runs in any project the user cares about — updating restarts the daemon on next invocation. Ask the user before proceeding if any project has a `RUNNING` run:
+3. Check for active runs in known Orca project roots the user cares about — there is no global "all projects" registry. Updating restarts each daemon on next invocation. Ask the user before proceeding if any checked project has a `RUNNING` run:
    ```bash
    # in each orca project:
    orca runs

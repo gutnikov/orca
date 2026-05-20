@@ -11,7 +11,7 @@ Audit `.orca/{flow}.yml` and its prompt templates against the three-layer checkl
 
 ## Prerequisites
 
-- Working directory has `.orca/{flow}.yml` plus `prompts/*.md` referenced by its `worker.prompt` fields.
+- Working directory has `.orca/{flow}.yml` plus any `prompts/*.md` files referenced by file-based `worker.prompt` fields.
 - You (the agent) have read these once before auditing:
   - [`reference/orca-config-reference.md`](reference/orca-config-reference.md) — what valid config looks like
   - [`orca-prompt-create.md`](orca-prompt-create.md) — what good prompts look like
@@ -38,25 +38,25 @@ Identify exactly what you're auditing.
    - All state names
    - All `on:` rules (transitions)
    - All `result_format` outcomes per state
-   - All `worker.prompt` paths
+   - All `worker.prompt` sources (file or inline)
 4. Read each referenced prompt file.
 
-Build a small in-memory map of `state → outcomes → transitions → prompt path` before running checks. Many checks cross-reference these.
+Build a small in-memory map of `state → outcomes → transitions → prompt source` before running checks. Many checks cross-reference these.
 
 ## Phase 2 — Layer 1: Structural checks (will it break?)
 
 Run every item below. These catch config errors that cause runtime failures.
 
 - [ ] **All `on:` targets exist** — every transition target is a state name in `states:` or a built-in target (`done`, `failed`). The built-in `failed` is **not** a destination state but a directive that triggers worker-failure handling for that outcome. Check both simple transitions (`done: testing`) and decompose rules (`then: done`).
-- [ ] **Outcomes match `on:` keys** — every key in `on:` must be a value in `result_format.outcome.values`. Mismatch means config fails to load.
+- [ ] **Outcomes and routes agree** — every key in `on:` must be a value in `result_format.outcome.values`; every non-`waiting` outcome the worker may emit should have an `on:` route. Mismatched `on:` keys fail config load; unrouted emitted outcomes fail at runtime.
 - [ ] **At least one routable outcome** — every active state has ≥1 outcome with an `on:` rule. Otherwise the state cannot progress.
 - [ ] **Decompose has `sub_issues`** — any state with `on: { X: { action: decompose } }` must have `sub_issues: { type: list, items: "$issue" }` in its `result_format`.
-- [ ] **Decompose `child_type` exists** — if `child_type: task` is specified, `task` must be a key in `types:`.
+- [ ] **Decompose `child_type` exists** — if `child_type: task` is specified, `task` must be a key in `types:`. In typed configs, a decompose rule should set `child_type` unless the prompt explicitly emits `type` on every child.
 - [ ] **No reserved state names** — no states named `done` or `failed` in `states:`.
-- [ ] **All states reachable** — every non-initial, non-passive state is reachable from `initial` via `on:` rules. Passive states (no worker, no `on:`) are exempt.
+- [ ] **All active states reachable** — every non-initial active state is reachable from `initial` via `on:` rules. Passive states (no worker, no `on:`) are parser-exempt because humans can advance to them from another passive state; still confirm each passive state is an intentional manual target rather than leftover YAML.
 - [ ] **Worker `kind` valid** — `claude-code`, `codex`, or `opencode`.
 - [ ] **Worker `prompt` non-empty** — `prompt` field present and non-empty.
-- [ ] **Prompt files exist** — every `worker.prompt` path resolves to a real file. Verify with the filesystem, not trust.
+- [ ] **Prompt sources exist** — every file-based `worker.prompt` path resolves to a real file, and every inline prompt has non-empty `text`. Verify with the filesystem, not trust.
 
 Anything failing here is **Critical**.
 
@@ -65,8 +65,7 @@ Anything failing here is **Critical**.
 - [ ] **Single responsibility per state** — no prompt does two distinct jobs (e.g. "plan and implement"). Phrases like "first do X, then do Y" where X and Y are different kinds of work → split into two states.
 - [ ] **Fail-safe outcomes present** — every active state has `blocked` or another escape hatch beyond happy-path outcomes. Workers can also use the built-in `waiting` outcome for human-in-the-loop.
 - [ ] **Merge/apply states serialized** — states that merge branches or write to shared resources have `max_workers: 1`.
-- [ ] **`max_hops` is set** — global `max_hops` prevents infinite transition loops. Recommended: 10–20 depending on complexity.
-- [ ] **`max_worker_retries` is set** — prevents infinite failure retries. Recommended: 3–5.
+- [ ] **Run bounds are accounted for** — `max_hops` and `max_worker_retries` are launch-time limits in the current engine, not workflow YAML fields. CLI runs default to 10 / 3; wrappers, MCP callers, and tests need explicit supervision or caller-level limits because YAML alone will not bound them.
 - [ ] **Timeouts set for long states** — heavy-work states (implementing, testing) have `timeout` or `inactivity_timeout`. Default inactivity timeout is 300s (5 min) which is often too short.
 - [ ] **Decomposition scope boundaries** — when a state decomposes, the prompt instructs the worker to define clear, non-overlapping `scope_boundary` fields for sub-issues. Overlap = workers stomping each other.
 - [ ] **No unnecessary serialization** — `max_workers: 1` only where genuinely needed (merging, deploying). Serializing independent work wastes wall-clock time.
@@ -80,13 +79,13 @@ For each prompt file, verify:
 - [ ] **Concrete result example embedded** — prompt contains `{{ result_example | tojson(indent=2) }}` or a hand-written valid result example. Workers that copy the schema produce invalid results.
 - [ ] **`result_path` referenced** — prompt contains `{{ result_path }}` telling the worker where to write the result file.
 - [ ] **Constraints near end** — constraints are in a dedicated `## Constraints` section in the bottom half. Workers forget early constraints.
-- [ ] **No hardcoded values** — issue-derived values use `{{ issue.fields.* }}` template variables. Especially scope boundaries, branch names, file paths.
+- [ ] **No hardcoded issue-derived values** — values that vary by issue use `{{ issue.fields.* }}` or other template variables. Especially scope boundaries, branch names, and user-provided paths. Fixed project commands and fixed repository paths are fine when they are genuinely workflow constants.
 - [ ] **Verification step present** — prompt includes a step to verify work (tests, lint, typecheck) before committing.
 - [ ] **Commit before result** — prompt explicitly says commit all changes *before* writing the result file. The orchestrator kills the session ~30s after detecting a valid result.
 - [ ] **Scope boundary enforced** — if `scope_boundary` field exists, prompt has a constraint like *"ONLY modify files under `{{ issue.fields.scope_boundary }}`."*
 - [ ] **Conditional sections guarded** — sections referencing optional data (`depends_on`, `children`, `event_log`) use `{% if %}` guards.
 - [ ] **Single clear responsibility** — prompt describes one job. Two-job prompts → split.
-- [ ] **Result file is final action** — prompt says writing the result file is the last thing the worker does. No work after it.
+- [ ] **Result file is final action** — prompt says writing any non-`waiting` result file is the last thing the worker does. No work after it.
 
 Most items here are **Important**; missing `result_format` or `result_path` is **Critical**.
 
@@ -136,8 +135,8 @@ Apply fixes that have a single, mechanical answer. Escalate anything that needs 
 - Wrap conditional sections (`depends_on`, `children`, `event_log`) in `{% if %}` guards.
 - Replace hardcoded values with `{{ issue.fields.* }}` references **only if** the field already exists in the issue schema.
 
-**Partially mechanical (apply only the mechanical half, ask for the rest):**
-- *Missing `blocked` outcome.* Adding `blocked` to `result_format.outcome.values` is mechanical; choosing the `on: blocked: <target>` target is not. Apply the schema change; surface the routing decision to the user.
+**Partially mechanical (do not half-apply):**
+- *Missing `blocked` outcome.* Adding `blocked` to `result_format.outcome.values` is easy, but the workflow also needs a route and prompt instructions for what `blocked` means. Report the missing escape hatch and propose a target if one is obvious; ask before changing the workflow.
 
 **Never silent:**
 - State-machine restructure, splitting a prompt, changing `result_format` shape, renaming outcomes — escalate with the report and a proposed change. Do not apply.

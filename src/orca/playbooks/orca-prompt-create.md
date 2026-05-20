@@ -4,7 +4,7 @@ Write or update a single `.orca/prompts/{state}.md` template — the instruction
 
 > **Why this playbook is deliberately walled off from assertions.** By design, the prompt-creator does not see `assertions.md`, test reports, or grading rubrics — see the Three-Agent Principle in [`reference/assertions-design.md`](reference/assertions-design.md). If you find yourself wishing for that information, you're being asked to do the assertion-creator's job; push back and ask for a sharper spec instead.
 
-> **Passive states have no prompt.** A passive state is one with no `worker:` block — it waits for a manual `AdvanceEvent` (CLI / TUI / API). If the state you're writing for has no worker, you don't need this playbook; see the *Gate State* pattern in [`orca-workflow-patterns.md`](reference/orca-workflow-patterns.md).
+> **Passive states have no prompt.** A passive state is one with no `worker:` block — it waits for a manual `AdvanceEvent` from the TUI/API surface. If the state you're writing for has no worker, you don't need this playbook; see the *Gate State* pattern in [`orca-workflow-patterns.md`](reference/orca-workflow-patterns.md).
 
 > **Inline vs file prompts.** The `worker.prompt` field also accepts inline Jinja directly in the YAML — `prompt: { text: "..." }` — for very short single-state flows where a separate file is overhead. The structure and pitfalls in this playbook still apply; the prompt source just lives in the YAML instead of in `.orca/prompts/{state}.md`. Default to a file: it's easier to review, diff, and reuse. Use inline only when the prompt is small enough to skim without scrolling.
 
@@ -63,23 +63,24 @@ The full set of variables exposed to a prompt template:
 
 | Variable | Type | Description | When you need it |
 |---|---|---|---|
-| `{{ issue.fields.* }}` | varies | User-declared issue fields (title, description, scope_boundary, etc.) plus auto-populated `failure_context` if declared in the schema. | Always — every prompt reads at least `title`/`description` |
-| `{{ issue.base_branch }}` | string | Auto-populated at dispatch from the workflow's `base_branch` setting. **Top-level on `issue`, not under `fields`.** | If the worker needs to know the merge target |
+| `{{ issue.fields.* }}` | varies | User-declared issue fields (title, description, scope_boundary, etc.) plus auto-populated `failure_context` if declared in the schema. | Whenever the state needs issue input. Many workflows use `title`/`description`, but only reference fields declared in the schema. |
+| `{{ issue.base_branch }}` | string | Auto-populated at dispatch with the issue's live base branch: root issues see the run branch; child issues see their parent issue's branch. **Top-level on `issue`, not under `fields`.** | If the worker needs to know where its branch should merge/apply |
 | `{{ issue.depends_on }}` | list of issue ids | IDs of sibling issues this child waits on. Empty list for root issues. | If this state can only run after a predecessor |
 | `{{ issue.decomposed_from }}` | string \| null | Parent issue id if this is a decomposed child; null otherwise. | When a child task needs parent context |
 | `{{ issue.children }}` | list of dicts | Decomposed child issues. Each entry has keys `issue_id` (str), `fields` (dict), `state` (str), `event_log` (list). **No `id`, `title`, or `depends_on` at the child level** — access title via `child.fields.title`. | If this state operates over sub-issues |
 | `{{ issue.event_log }}` | list of dicts | Event history. Each entry has `timestamp` (ISO 8601), `type` (str), `data` (dict). | Retry-aware prompts that need past failures |
-| `{{ result_format }}` | dict | Schema Orca validates against | Advanced prompts that explain allowed outcomes |
+| `{{ result_format }}` | dict | Output contract and shallow runtime validation schema | Advanced prompts that explain allowed outcomes |
 | `{{ result_example }}` | dict | Concrete result JSON the worker can copy and fill in | **Always** — embed via `tojson(indent=2)` |
 | `{{ result_path }}` | string | Path to write result.json | **Always — and inside the `## Result` section, not only at the top of the prompt.** See pitfall P3. |
 | `{{ run.branch }}` | string | Git branch name | Prompts that orchestrate their own filesystem |
 | `{{ run.workflow }}` | string | Workflow name | Same as above (rare) |
+| `{{ run.repo_root }}` | string | Absolute project root path | Prompts that need to read test/config files from the iteration branch |
 | `{{ run.run_dir }}` | string | `.orca-state/runs/<branch>/<workflow>` | Same as above (rare) |
 | `{{ run.sessions }}` | list | Previous session summaries | Retry / continuation-aware prompts |
 | `{{ run.summary }}` | dict | Run statistics (states visited, outcomes, failures) | Retry / continuation-aware prompts |
 
 > Two auto-populated values have *different access paths* — the table above gets this right; it's worth restating because the schema doc treats them as siblings:
-> - `{{ issue.base_branch }}` — top-level on the issue dict.
+> - `{{ issue.base_branch }}` — top-level on the issue dict. This is the live parent/root branch, not necessarily the workflow YAML's `base_branch` value.
 > - `{{ issue.fields.failure_context }}` — **inside `fields`** (only present if the workflow declared `failure_context` in its issue schema, per the *Failure-Context Propagation* pattern).
 
 Anything optional (`depends_on`, `children`, `event_log`) must be wrapped in `{% if %}` — otherwise the rendered prompt has empty headers that confuse the worker.
@@ -111,22 +112,27 @@ Conditionals (always use these to avoid empty sections):
 Loops over decomposed children:
 
 ```jinja2
+{% if issue.children %}
 {% for child in issue.children %}
 - {{ child.fields.title }}: {{ child.fields.scope_boundary }}
 {% endfor %}
+{% endif %}
 ```
+
+Adjust `title` / `scope_boundary` to the fields this workflow actually declares.
 
 ## Step 3 — Draft the prompt with the canonical structure
 
 Use this skeleton — keep the section order; readers and workers both expect it.
 
-```markdown
+````markdown
 # Role & Mission
 
 You are a [ROLE] agent. Your job is to [SINGLE RESPONSIBILITY — one sentence].
 
 ## Context
 
+[Include only the fields this state actually reads. Examples:]
 **Title:** {{ issue.fields.title }}
 **Description:** {{ issue.fields.description }}
 **Scope Boundary:** {{ issue.fields.scope_boundary }}
@@ -165,9 +171,11 @@ If you cannot proceed without a human decision — an ambiguous spec, a destruct
 
 The orchestrator pauses the inactivity timer; a human will reply via `orca unblock`. Use `waiting` sparingly — most decisions belong in the next state, not mid-state.
 
+`waiting` is the exception to the normal "result file is final" rule: the worker writes a temporary `waiting` result, Orca deletes it after recording the wait, and the same live session resumes after `orca unblock`. For all non-`waiting` outcomes, writing the result file remains the final action.
+
 ## Constraints
 
-- ONLY modify files under: {{ issue.fields.scope_boundary }}
+- [If the workflow declares a scope boundary for this state:] ONLY modify files under: {{ issue.fields.scope_boundary }}
 - Do NOT modify [list specific things off-limits for this state]
 - [Add any state-specific constraint — e.g., "Do not introduce new dependencies", "Do not rename existing public functions"]
 
@@ -179,15 +187,15 @@ Write your result to `{{ result_path }}`:
 {{ result_example | tojson(indent=2) }}
 ```
 
-IMPORTANT: Writing the result file is the FINAL action. Complete ALL work and commits first.
-```
+IMPORTANT: For non-`waiting` outcomes, writing the result file is the FINAL action. Complete ALL work and commits first.
+````
 
 Why this structure:
 - **Role & mission first** anchors the worker's identity.
 - **Context next** loads the relevant variables before they're referenced.
 - **Instructions as numbered steps** — workers follow ordered lists more reliably than prose paragraphs.
 - **Constraints near the end** so they're fresh in the worker's attention when it acts.
-- **Result block last** because output writing is the worker's final action.
+- **Result block last** because non-`waiting` output writing is the worker's final action.
 
 ## Step 4 — Cross-check against the pitfalls
 
@@ -222,21 +230,21 @@ The framework auto-appends an end-of-prompt warning with the literal path, so a 
 ```markdown
 ## Result
 
-Writing the result file is the FINAL action. Commit every change first.
+Writing a non-`waiting` result file is the FINAL action. Commit every change first.
 ```
 
 **Good:**
 ```markdown
 ## Result
 
-Write the result JSON (schema above) to `{{ result_path }}`. Writing the result file is the FINAL action. Commit every change first — orca terminates the session ~30 s after detecting a valid result.
+Write the result JSON (schema above) to `{{ result_path }}`. Writing a non-`waiting` result file is the FINAL action. Commit every change first — orca terminates the session ~30 s after detecting a valid terminal result.
 ```
 
-#### P4. Writing the result file before committing
+#### P4. Writing the terminal result file before committing
 
 **Bad:** Write result → commit → session killed before commit finishes.
 
-**Good:** Commit all work → write result file as FINAL action. The orchestrator terminates the session ~30 seconds after detecting a valid result file.
+**Good:** Commit all work → write a non-`waiting` result file as FINAL action. The orchestrator terminates the session ~30 seconds after detecting a valid terminal result file.
 
 #### P5. Hardcoding values instead of template variables
 
@@ -299,15 +307,12 @@ result_format:
 
 #### W4. Unbounded transitions / retries
 
-Two distinct bounds, both worth setting:
+Two distinct bounds matter:
 
-- **`max_hops`** (global) caps *total* state transitions per issue. Without it, a `blocked → planning → blocked → planning …` cycle (or any long pipeline) can run forever. Recommended: 10–20.
-- **`max_worker_retries`** (global) caps worker *failures* in the same state. Without it, a crashing worker retries until your patience runs out. Recommended: 3–5.
+- **`max_hops`** caps *total* state transitions per issue. It bounds `blocked → planning → blocked → planning …` cycles and unexpectedly long pipelines. Recommended launch value: 10–20.
+- **`max_worker_retries`** caps worker *failures* in the same state. It bounds crash/timeout retry loops. Recommended launch value: 3–5.
 
-```yaml
-max_hops: 15
-max_worker_retries: 3
-```
+Current Orca treats these as launch-time limits, not workflow YAML fields. `orca run` defaults to `--max-hops 10 --max-retries 3`; override them on the CLI when a workflow needs different limits. If a wrapper or MCP caller starts the run, verify whether that caller can pass limits, because the public `orca_start_run` MCP tool currently exposes only the common start arguments.
 
 A self-looping `blocked` outcome is bounded by `max_hops` (each loop = one transition), not by `max_worker_retries` (which counts crashes, not `blocked` results).
 
@@ -338,7 +343,7 @@ Once the checks pass, write the file to `.orca/prompts/{state}.md`. Done — ret
 - **Generic verification.** "Run tests" without naming the test runner. Workers will pick the wrong one or skip it.
 - **Constraints buried in the introduction.** Workers forget early constraints. They belong near the end.
 - **Embedding `{{ result_format | tojson(indent=2) }}` as the result file.** That is the validation schema, not a valid worker result. Use `{{ result_example | tojson(indent=2) }}` or a concrete hand-written result example.
-- **Mentioning what to do *after* writing the result file.** The orchestrator kills the session ~30s after detecting a valid result. Anything after the result write won't run.
+- **Mentioning what to do *after* writing a non-`waiting` result file.** The orchestrator kills the session ~30s after detecting a valid terminal result. Anything after that result write won't run.
 
 ## Done
 

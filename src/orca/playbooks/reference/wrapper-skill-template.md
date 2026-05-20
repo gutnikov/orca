@@ -55,7 +55,7 @@ Generate the description, show it to the user, and ask: *"Will your team natural
 
 Fill placeholders marked `<...>` from the workflow being created. The same rendered content goes to both target paths.
 
-```markdown
+````markdown
 ---
 name: <wrapper-name>
 description: <authored per "Description authoring" above>
@@ -79,7 +79,7 @@ When this skill triggers:
 6. Report the `run_id` returned by the MCP tool to the user. Tell them they can ask to supervise it (which will route to the `orca-workflow-run` skill), or just wait for it to finish.
 
 This is a thin wrapper. **Do not** inline supervision, retries, merge handling, or progress polling — that lives in the `orca-workflow-run` skill. Call `orca_start_run` exactly once and exit.
-```
+````
 
 The wrapper deliberately uses the `orca_start_run` MCP tool rather than the `orca run` CLI — that's what the `orca-workflow-run` skill uses, and it avoids a shell hop. Both work; the MCP form is more uniform across host CLIs.
 
@@ -87,8 +87,8 @@ The wrapper deliberately uses the `orca_start_run` MCP tool rather than the `orc
 
 Some teams `.gitignore` `.agents/` or `.claude/` wholesale (treating them as scratch/local state). The wrapper needs to be checked in to reach teammates. After writing both files, grep the project's `.gitignore`:
 
-- If `.claude/` or `.claude/skills/` is ignored: add `!.claude/skills/` (or a narrower exception for the wrapper directory) and surface this to the user.
-- Same for `.agents/`.
+- If `.claude/` or `.claude/skills/` is ignored, add exceptions for each ignored parent and the wrapper file, for example: `!.claude/`, `!.claude/skills/`, `!.claude/skills/<name>/`, `!.claude/skills/<name>/SKILL.md`. Surface this to the user.
+- Same for `.agents/` / `.agents/skills/`.
 
 Don't silently un-ignore — show the user the proposed `.gitignore` edit and ask.
 

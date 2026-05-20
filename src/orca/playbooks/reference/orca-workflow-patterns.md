@@ -74,7 +74,6 @@ types:
           decompose:
             action: decompose
             child_type: task
-            then: done
           ready: done
   task:
     fields:
@@ -111,7 +110,7 @@ types:
 - Epic scoping creates child tasks with clear scope boundaries
 - Tasks run in parallel (no `max_workers` on implementing)
 - Applying serialized with `max_workers: 1` to prevent merge conflicts
-- Epic auto-unblocks when all tasks reach `done`
+- Epic stays blocked after decomposition and auto-unblocks when all tasks reach `done`
 - `conflict` here is a user-defined outcome value, not the built-in `failed` target. If you want a conflict to count toward worker-failure retries (and stop after `max_worker_retries`), route it to `failed` instead of `implementing`. See *Built-in Transition Targets* in `orca-config-reference.md`.
 
 ## Serialized Merge
@@ -124,7 +123,7 @@ applying:
   worker:
     kind: claude-code
     prompt: prompts/applying.md
-    timeout: 600
+    inactivity_timeout: 600
     result_format:
       outcome:
         type: enum
@@ -137,15 +136,13 @@ applying:
 **Notes:**
 - `max_workers: 1` queues issues — next pops when current finishes
 - Limit is per (type, state) pair — different types have separate queues
-- Set a reasonable `timeout` since queued issues wait
+- Set a reasonable `inactivity_timeout` for the apply work itself. Queued issues have not started their worker yet, so they do not consume worker inactivity time.
 
 ## Retry Loop with Escalation
 
 **When:** Work might fail and should be retried with context about the failure.
 
 ```yaml
-max_worker_retries: 3
-
 states:
   implementing:
     worker:
@@ -167,7 +164,7 @@ states:
 **Notes:**
 - `blocked` loops back to same state — worker gets another attempt
 - Define `failure_context` field so prompts can reference why previous attempt failed
-- `max_worker_retries` bounds total crash retries (prevents infinite loops)
+- `max_worker_retries` bounds total crash retries (prevents infinite loops). Set it at launch (`orca run --max-retries 3`); current workflow YAML does not apply it.
 - Worker failures (crashes/timeouts) also count toward the limit
 - Workers can write `{"outcome": "waiting"}` to pause for human input without consuming a retry
 
@@ -180,7 +177,7 @@ implementing:
   worker:
     kind: claude-code
     prompt: prompts/implementing.md
-    timeout: 3600              # long timeout since worker may be waiting
+    inactivity_timeout: 3600   # active-work no-progress timeout; paused while waiting
     result_format:
       outcome:
         type: enum
@@ -233,7 +230,6 @@ types:
           decompose:
             action: decompose
             child_type: story
-            then: done
   story:
     fields:
       title: { type: string }
@@ -257,7 +253,6 @@ types:
           decompose:
             action: decompose
             child_type: task
-            then: done
   task:
     fields:
       title: { type: string }
@@ -280,8 +275,8 @@ types:
 **Notes:**
 - Each type has its own state machine — epic plans, story implements or decomposes further, task codes
 - `child_type` controls what type decomposed issues become
-- Parent blocks until all children reach `done` (cascading unblock)
-- Sub-issues can have `depends_on` keys for ordering within a type
+- Parent issues block after decomposition until all children reach `done` (cascading unblock). Add `then:` only for deliberate fire-and-forget decomposition; if the root issue reaches `done`, the run loop terminates.
+- Sub-issues can have `depends_on` lists of sibling `key` values for ordering within a type
 
 ## Gate State
 
@@ -300,7 +295,7 @@ states:
 
 **Notes:**
 - Passive states have no worker and no `on:` rules
-- Issue is advanced manually (via API, TUI, or CLI)
+- Issue is advanced manually (via API or TUI)
 - Use for: code review gates, deployment approval, manual QA sign-off
 - Passive states are exempt from the "unreachable states" validation (they can be targets of on: rules)
 
@@ -347,24 +342,24 @@ Read this carefully — don't repeat the same mistake.
 **Notes:**
 - `failure_context` is set by the orchestrator on worker failure or when targeting the built-in `failed` state — see *Auto-Populated Fields* in `orca-config-reference.md`.
 - Declare it in `fields:` only so prompts can reference it via Jinja; you don't write to it.
-- Combine with `max_worker_retries` to bound how long this retry loop runs.
+- Combine with a launch-time `max_worker_retries` limit to bound how long this retry loop runs.
 
 ## Dependency-Ordered Sub-Issues
 
 **When:** Decomposition produces sub-issues that must run in a specific order — e.g., a database migration before the code that uses it.
 
-The decomposing prompt emits each child issue with a `depends_on` list referencing other children by id:
+The decomposing prompt emits each child issue with a stable `key`; `depends_on` references those keys. Orca resolves keys to real issue ids when it creates the child issues:
 
 ```json
 {
   "outcome": "decompose",
   "sub_issues": [
     {
-      "id": "001-migration",
+      "key": "001-migration",
       "fields": { "title": "Add column", "scope_boundary": "migrations/" }
     },
     {
-      "id": "002-code",
+      "key": "002-code",
       "fields": { "title": "Use column", "scope_boundary": "src/users/" },
       "depends_on": ["001-migration"]
     }
@@ -410,6 +405,6 @@ states:
 
 **Notes:**
 - `needs_rework` loops back to implementing with review feedback
-- Use `max_hops` to bound the cycle (e.g. 10 hops prevents infinite back-and-forth)
+- Use a launch-time `max_hops` limit to bound the cycle (e.g. 10 hops prevents infinite back-and-forth)
 - Review worker should produce specific, actionable feedback (not just "needs work")
 - Implementing worker should reference `{{ issue.event_log }}` to see previous review feedback

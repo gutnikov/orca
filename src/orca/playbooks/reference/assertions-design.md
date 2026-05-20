@@ -1,6 +1,6 @@
-# Assertion Design (Assertions-First)
+# Assertion Design
 
-The methodology Orca uses to anchor prompts to a durable, user-curated specification: **assertions come first, prompts are downstream.**
+The methodology Orca uses to anchor prompt behavior to a durable, user-curated specification: semantic fixes are driven by assertions, and prompts are downstream of the state/result contract.
 
 This is a reference, not a procedural playbook. It explains *why* the codebase has [`orca-test-create.md`](../orca-test-create.md) and [`orca-prompt-create.md`](../orca-prompt-create.md), and how to use them under one consistent discipline. Read it before either playbook. The playbooks are the *how*; this doc is the *what for*.
 
@@ -14,11 +14,11 @@ The antidote is **assertions** — a small, human-readable, user-curated list of
 
 The paradigm has three consequences the agent must internalize:
 
-1. **You don't design a prompt in isolation. You design a prompt *to satisfy* a set of assertions.** The assertions exist before the prompt does. The prompt's job is to converge the worker on output that passes them.
+1. **You don't tune a prompt in isolation. You tune a prompt *to satisfy* a set of assertions.** New workflows start from a confirmed state spec and `result_format`; semantic prompt improvements start from failing or missing assertions.
 2. **When the result is wrong, the first move is reading the report — not editing the prompt.** The report names the failing criterion. The criterion points at the cause. Editing without reading presumes a cause.
 3. **"Looks fine to me" is not a valid state.** Either the result passes the assertions, or it doesn't. If you find yourself eyeballing output to judge quality, you are missing a criterion — write it.
 
-Under this paradigm, tests do not come last. They come *first*, in stub form, and evolve alongside the prompt. The assertion-creator drafts `assertions.md` *and* the state's `result_format` schema in the workflow YAML before any prompt is written; the prompt-creator then reads `result_format` from the YAML and produces a prompt that makes the worker emit results matching it.
+Under this paradigm, tests do not come last. During workflow creation, structural smoke tests are scaffolded immediately from each state's `result_format`. During semantic iteration, the assertion is written before the prompt change that is supposed to satisfy it. The prompt-creator still reads only the state spec and `result_format`; it does not read `assertions.md` or reports.
 
 ## 1.5. The Three-Agent Principle
 
@@ -48,7 +48,7 @@ Each test directory has `assertions.md` — the user-curated checklist. Its shap
 
 - One `### <id>` heading per criterion. Id is kebab-case and stable across edits — it appears verbatim in `report.md` and in result JSON; renaming an id silently breaks history.
 - Prose under the heading IS the criterion. The evaluator reads it literally — it is not a description of the criterion, it *is* the criterion.
-- 3–7 criteria per test. Fewer → the test under-asserts. More → the test is doing too much; split it.
+- Aim for 3–7 criteria in a first semantic test. Fewer is fine when the slice is intentionally narrow. More usually means the test is doing too much; split it.
 
 ### Evidence access
 
@@ -88,19 +88,18 @@ Side-effects (commits, edited files) are gradable too — but coarser than `resu
 
 ## 3. The link to `result_format`
 
-The link between assertions and prompts is `result_format` — and the assertion-creator owns both. Every criterion needs evidence; every piece of evidence comes from a field in `result_format` or from a worktree side-effect. So the order of design is:
+The link between assertions and prompts is `result_format`. Every criterion needs evidence; every piece of evidence comes from a field in `result_format` or from a worktree side-effect. That creates two valid flows:
 
-1. **Draft `assertions.md`** (with the user's help, per Section 5 bootstrap). Save under `.orca/tests/<scenario>/assertions.md`.
-2. **Sketch `result_format` *from the assertions*** — every field a criterion references must be emitted. Write `result_format` into `.orca/{flow}.yml` under the relevant state.
-3. **Hand off to the prompt-creator.** Per the Three-Agent Principle (§1.5), the assertion-creator does **not** draft the prompt. It hands off a spec — state name, one-sentence job, the `result_format` now in the YAML, the input fields, and any constraints — and [`orca-prompt-create.md`](../orca-prompt-create.md) takes over. The prompt-creator never sees `assertions.md`.
+- **Workflow creation:** design the state machine and `result_format` first, write prompts from that contract, then scaffold structural assertions from the schema.
+- **Semantic test creation / drift repair:** draft or update `assertions.md`, check whether the needed evidence already exists in `result_format` or the worktree, and only then make the smallest coordinated change.
 
-This inverts what feels natural ("write the prompt, then add a result schema"). The inversion — plus the Chinese-wall isolation — is what prevents rot.
+If a new criterion needs a field the state does not emit, update `result_format` and the prompt together as a workflow change. Do not silently teach the evaluator to infer data that the worker never reports.
 
-### Sketch the result schema *while* drafting assertions, not after
+### Check evidence while drafting assertions
 
-While drafting each criterion, ask: *what field does this read?* If the answer is "I don't know yet", add the field to a running `result_format` sketch. The two artifacts grow together. By the time assertions are complete, the schema is already designed — and the prompt-creator has a concrete output contract to receive.
+While drafting each criterion, ask: *what field or file does this read?* If the answer is "I don't know yet", either rewrite the criterion to use available evidence or propose the `result_format` addition that would make it gradeable. By the time assertions are complete, the evidence path is explicit.
 
-Cross-reference: [`orca-test-create.md`](../orca-test-create.md) is the playbook for drafting `assertions.md` and the matching `result_format`. The handoff to the prompt-creator happens once `result_format` is committed to the YAML.
+Cross-reference: [`orca-test-create.md`](../orca-test-create.md) is the playbook for drafting `assertions.md` around a real scenario. If that process discovers a missing result field, route the coordinated schema/prompt edit through [`orca-workflow-create.md`](../orca-workflow-create.md) or [`orca-workflow-review.md`](../orca-workflow-review.md), depending on whether the workflow is new or existing.
 
 ### Structural vs semantic assertions — two phases
 
@@ -129,7 +128,7 @@ The canonical loop:
 
 ```
 [ Bootstrap ]
-  2-3 questions  →  draft assertions.md  →  draft result_format  →  draft stub prompt  →  run
+  2-3 questions  →  draft assertions.md  →  verify evidence/result_format  →  run
 
 [ Iterate ]
   read report  →  attribute failure  →  minimal edit  →  re-run
@@ -146,7 +145,7 @@ The agent asks at most 3 questions before writing anything:
 2. **What is an obvious failure mode?** ("it just returns `ready` without splitting", or "the sub_issues overlap")
 3. **What shape should the result have?** ("outcome + a list of sub_issues with title and scope_boundary")
 
-Then draft a minimal `assertions.md` (2–3 criteria from the answers), a minimal `result_format` aligned with them, and a stub prompt. Run the test.
+Then draft a minimal `assertions.md` (2–3 criteria from the answers) and verify the existing `result_format` exposes the evidence those criteria need. If it does not, stop and make the coordinated schema/prompt edit before running the test.
 
 **Cost note.** Every test run is N+1 LLM invocations (N body states, 1 assert). The worktree is set up by `git checkout` from the state branch, not by an LLM — there is no per-run setup cost. A single-state slice is the cheapest starting point; default to it. See [`orca-test-create.md`](../orca-test-create.md).
 
@@ -187,7 +186,7 @@ End-to-end walkthrough for a `review` state that audits a Python pull request �
 - *What is an obvious failure mode?* → "It approves a PR with an obvious bug, or it requests changes without saying where the bug is."
 - *What shape should the result have?* → "outcome (approve / request_changes), plus a list of findings with file, line, severity, and message."
 
-**Draft `assertions.md` first (3 criteria).** The scenario in `input.md` will be a PR that introduces a SQL injection at `src/api.py:42`.
+**Draft semantic `assertions.md` first (3 criteria).** The scenario in `input.md` will be a PR that introduces a SQL injection at `src/api.py:42`.
 
 ```markdown
 ### outcome-is-request-changes
@@ -200,7 +199,7 @@ Some `findings[i]` has `file == "src/api.py"` and `line` within 5 of 42.
 Every finding has a non-empty `file`, a positive integer `line`, a `severity` in `{critical, major, minor}`, and a non-empty `message`.
 ```
 
-**Design `result_format` to match:**
+**Ensure `result_format` exposes the evidence:**
 
 ```yaml
 outcome:
@@ -216,7 +215,7 @@ findings:
   required_when: [request_changes]
 ```
 
-**Draft a stub prompt** (~40 lines: role, context, 3 numbered steps — read diff, identify bugs, write result — and a result block, per [`orca-prompt-create.md`](../orca-prompt-create.md)).
+If the production state does not already emit that shape, add the missing fields to the workflow YAML and update the prompt through [`orca-prompt-create.md`](../orca-prompt-create.md) before running the test. The prompt-creator receives the state spec and result contract, not this `assertions.md`.
 
 **First run.** Report: 2 pass, 1 fail (`finding-points-at-the-bug`). The worker said *"the `get_user` function has a SQL injection risk"* but emitted `file: "src/api.py"`, `line: 1`.
 
@@ -243,11 +242,11 @@ Every `findings[i].message` matches `^(Use|Remove|Replace|Fix|Add|Avoid)\b`.
 
 **Re-run.** 4 pass.
 
-The whole story: assertions first, attribution second, minimal edit third. Drift creates new criteria, not new prompt prose. The prompt grew by *two sentences* across two improvements — not two paragraphs.
+The whole story: assertions first for semantic drift, attribution second, minimal edit third. Drift creates new criteria, not new prompt prose. The prompt grew by *two sentences* across two improvements — not two paragraphs.
 
 ## 7. Anti-patterns
 
-- **Drafting the prompt before the assertions.** The prompt has nothing to converge on. Refuse and go back to bootstrap.
+- **Tuning a prompt before the semantic assertion exists.** The edit has nothing objective to converge on. Write the criterion first.
 - **Adding prompt prose to fix drift without a failing assertion.** Drift = new criterion first, then minimal edit.
 - **Criteria that grade process, not output** ("the worker should follow the plan"). The evaluator only sees results, not the worker's thinking.
 - **Judgment-heavy criteria** ("title sounds professional"). Replace with regex / closed-vocab, or drop. The bar: could two evaluator runs disagree on this? If yes, rewrite.
@@ -257,7 +256,7 @@ The whole story: assertions first, attribution second, minimal edit third. Drift
 
 ## Cross-references
 
-- [`orca-prompt-create.md`](../orca-prompt-create.md) — mechanics of writing a single state prompt (template variables, structure, pitfalls). The bootstrap step in Section 5 above maps to that playbook's Step 1.
+- [`orca-prompt-create.md`](../orca-prompt-create.md) — mechanics of writing a single state prompt (template variables, structure, pitfalls).
 - [`orca-test-create.md`](../orca-test-create.md) — interactive procedure for authoring a test. The bootstrap step in Section 5 above maps to that playbook's Steps 1–8.
 - [`orca-test-review.md`](../orca-test-review.md) — audit checklist for an existing test. Use it to verify your assertions are well-formed.
 - [`orca-config-reference.md`](orca-config-reference.md) — full schema reference, including `result_format` field types.

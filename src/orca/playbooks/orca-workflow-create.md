@@ -14,7 +14,7 @@ This playbook is **conversational**. Walk the user through each step. Do not sil
 
 Before you ask the user anything, read these:
 
-- [`reference/assertions-design.md`](reference/assertions-design.md) — the assertions-first paradigm; the foundational discipline for every prompt this workflow will contain
+- [`reference/assertions-design.md`](reference/assertions-design.md) — the assertion design discipline that keeps prompt changes tied to testable behavior
 - [`orca-glossary.md`](reference/orca-glossary.md) — definitions for terms used below (outcome vs target, `failed` ambiguity, bounds and timers)
 - [`orca-config-reference.md`](reference/orca-config-reference.md) — full schema, validation rules, recommended defaults
 - [`orca-workflow-patterns.md`](reference/orca-workflow-patterns.md) — single-type vs multi-type, decomposition, parallel fan-out, HITL
@@ -64,8 +64,8 @@ Decision points to make explicit with the user:
 | Single-type vs multi-type | Does this workflow decompose one big task into many smaller ones (epic → tasks)? If yes → multi-type. Otherwise single-type. |
 | Where to decompose | Early decomposition = more parallelism but less control. Late = vice versa. |
 | `max_workers` per state | Merge/apply/deploy states should be `1`. Independent work states can omit it (unbounded). |
-| `max_hops`, `max_worker_retries` | Use the recommended defaults in [`orca-config-reference.md`](reference/orca-config-reference.md) (typically `max_hops: 10–20`, `max_worker_retries: 3–5`); raise only if the user has a reason. The CLI applies 10 / 3 if neither workflow YAML nor `--max-hops` / `--max-retries` sets a value. |
-| Branch strategy | The run branch is chosen at `orca run` time (auto-derived from the issue, or set via `-b/--branch`). The `base_branch` config controls what new branches are cut from and merged back into. There is no per-state "branch prefix" knob; check with the user whether each issue should land on its own branch (typical) or on a shared one. |
+| `max_hops`, `max_worker_retries` | These are launch-time limits, not workflow YAML fields in the current engine. `orca run` defaults to 10 / 3; use `--max-hops` / `--max-retries` only if the user has a reason. |
+| Branch strategy | The run branch is chosen at `orca run` time (auto-derived from the issue, or set via `-b/--branch`). The `base_branch` config controls what new run branches are cut from. Child issue branches are cut from their parent issue's branch. There is no per-state "branch prefix" knob; check with the user whether each issue should land on its own branch (typical) or on a shared one. |
 | Human-in-the-loop | Will any state need the `waiting` outcome (i.e., pause for human input)? Where? |
 
 Get the user to sign off on the diagram. **Do not write a single line of YAML until they do.**
@@ -80,7 +80,7 @@ For each field:
 - Required at start, or filled in by an earlier state?
 - One-line description (this shows up in the worker's prompt)
 
-Common fields: `title`, `description`, `acceptance_criteria`, `scope_boundary`, `summary`. Don't add `branch` — orca tracks git branches at the run level (`run.branch`) and auto-injects `issue.base_branch` for workers; user-defined fields shouldn't duplicate that. Don't invent fields the workflow doesn't actually use.
+Common fields when relevant: `title`, `description`, `acceptance_criteria`, `scope_boundary`, `summary`. Don't add `branch` — orca tracks git branches at the run level (`run.branch`) and auto-injects `issue.base_branch` for workers; user-defined fields shouldn't duplicate that. Don't invent fields the workflow doesn't actually use.
 
 Show the user the field list and confirm.
 
@@ -90,8 +90,8 @@ Write the YAML. Use the snippets in [`orca-workflow-patterns.md`](reference/orca
 
 - `initial` state exists in `states:`
 - Every `on:` target is either a real state in `states:` or a built-in target (`done`, `failed`). Note: `waiting` is a built-in *outcome*, not a transition target — it has no `on:` rule.
-- Every state's `result_format.outcome.values` covers every key in its `on:` map (and vice versa). `on:` keys are outcome values; the `decompose` action is what runs for that outcome — not a separate routing concept.
-- Every active state has `worker.prompt` pointing at a file under `prompts/`
+- Every key in an `on:` map is present in that state's `result_format.outcome.values`, and every non-`waiting` outcome the worker may emit has an `on:` route. `on:` keys are outcome values; the `decompose` action is what runs for that outcome — not a separate routing concept.
+- Every active state has `worker.prompt` pointing at a file under `prompts/`, or a deliberately tiny inline prompt.
 - Field references in prompts (`{{ issue.fields.X }}`) match the issue schema
 
 Filename: `.orca/{flow}.yml` (snake_case or hyphen-case; commonly `develop.yml`, `review.yml`, `triage.yml`).
@@ -137,7 +137,7 @@ Distinct from Step 8 below, which scaffolds *static* per-state structural tests 
 
 ### Step 8 — Auto-scaffold per-state structural tests
 
-For every active state, scaffold a per-state structural test under `.orca/tests/<state>-smoke/`. The steps in *this* step are mechanical and bounded; do them silently without asking — that's the deliberate contrast with Steps 1–7 (conversational) and Step 9 (offered). The scaffolds are unconditional because they're cheap, schema-derived, and add value at zero cost; an "opt out" prompt would only be friction. They do not exercise semantic correctness; that comes later as a separate phase via [`orca-test-create.md`](orca-test-create.md).
+For every active state, scaffold a per-state structural test under `.orca/tests/<state>-smoke/`. Announce that you're about to create the scaffolds and list the state names, then perform this step mechanically. Unlike Steps 1–7, you do not ask the user to design the tests, choose criteria, or opt out; the scaffolds are unconditional because they're cheap, schema-derived, and add value at zero cost. They do not exercise semantic correctness; that comes later as a separate phase via [`orca-test-create.md`](orca-test-create.md).
 
 For each active state:
 
@@ -176,7 +176,7 @@ After scaffolding every state, report the paths and explain the next step:
 
 > "Per-state structural test scaffolds created under `.orca/tests/`. Each one structurally verifies its state's output schema. To make them runnable, add a scenario to `input.md` and arrange the state branch (per `orca-test-create.md` Step 6). To add semantic correctness criteria, run `orca-test-create` for each test."
 
-Don't run the tests during this step. Don't iterate on results. Don't ask the user to opt out, choose scope, or pick an alternative shape. A workflow ships with at least its structural surface in place; users decide later how much semantic depth to add.
+Don't run the tests during this step. Don't iterate on results. Don't ask the user to opt out, choose scope, or pick an alternative shape. Do tell the user what files/branches were created. A workflow ships with at least its structural surface in place; users decide later how much semantic depth to add.
 
 ### Step 9 — Offer a convenience wrapper skill (optional)
 
@@ -198,7 +198,7 @@ If the user says **yes**, follow [`reference/wrapper-skill-template.md`](referen
 4. **Write both files** with identical content:
    - `.claude/skills/<wrapper-name>/SKILL.md` (Claude Code)
    - `.agents/skills/<wrapper-name>/SKILL.md` (Codex)
-5. **Check `.gitignore`.** If `.claude/skills/` or `.agents/skills/` is ignored wholesale, surface it and offer to add an exception (`!.claude/skills/`). Don't silently un-ignore.
+5. **Check `.gitignore`.** If `.claude/skills/` or `.agents/skills/` is ignored wholesale, surface it and offer to add parent-directory plus wrapper-directory exceptions (for example `.claude/`, `!.claude/skills/`, `!.claude/skills/<wrapper-name>/`, `!.claude/skills/<wrapper-name>/SKILL.md`). Don't silently un-ignore.
 6. **Report.** Print both paths plus: *"Wrapper ready. Next session, anyone in either CLI can say `<example phrase>` to kick off a run. To supervise an in-flight run, ask me to babysit it."*
 
 If the user says **no**, note it in the final report and move on.

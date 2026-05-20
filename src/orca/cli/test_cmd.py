@@ -30,9 +30,6 @@ issue:
       type: string
       description: "Issue description"
 
-max_hops: 10
-max_worker_retries: 2
-
 initial: TODO_BODY_STATE   # rename to the slice's entry state
 
 states:
@@ -47,13 +44,13 @@ states:
       prompt:
         text: |
           # Assert
-          Read tests/{{ run.test_name }}/assertions.md, grade each criterion,
+          Read {{ run.repo_root }}/.orca/tests/{{ run.test_name }}/assertions.md, grade each criterion,
           write {{ run.run_dir }}/report.md, then write {{ result_path }}.
 
           ```json
           {{ result_example | tojson(indent=2) }}
           ```
-      timeout: 600
+      inactivity_timeout: 600
       result_format:
         outcome:
           type: enum
@@ -104,8 +101,8 @@ class TestPaths:
 def parse_state_ref(task_file: Path) -> str | None:
     """Return the `state_ref` frontmatter value from a test input.md.
 
-    Returns None if the field is missing or still holds the placeholder
-    `TODO_STATE_REF` that the scaffold writes initially.
+    Returns None if the field is missing or still holds the `TODO_STATE_REF`
+    placeholder used by old or hand-written skeletons.
     """
     from orca.orchestrator.runner import parse_task_file
 
@@ -230,6 +227,8 @@ async def _submit_run(
     config_path: Path,
     task_file: Path,
     state_ref: str,
+    max_hops: int = 10,
+    max_retries: int = 2,
 ) -> str:
     """POST to the daemon to start a run. Returns the run_id."""
     from orca.daemon.lifecycle import socket_path
@@ -245,6 +244,8 @@ async def _submit_run(
         "headless": True,
         "insights": False,
         "state_ref": state_ref,
+        "max_hops": max_hops,
+        "max_retries": max_retries,
     }
     async with (
         aiohttp.ClientSession(connector=connector) as session,

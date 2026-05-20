@@ -8,7 +8,7 @@ An **orca test** is just an orca workflow with a fixed shape:
 [ 1..N states under test, copied from prod ] -> assert
 ```
 
-The body states are copied verbatim from a production workflow YAML so the prompts under test are exercised exactly as they would be in production. The worktree is checked out from the state branch declared in `input.md` frontmatter (`state_ref`); `assert` grades the result against `assertions.md` and writes `report.md` into the run directory.
+The body states are copied from a production workflow YAML with only test-harness rewrites: prompt paths are made relative to `test-flow.yml`, and routes leaving the slice are redirected to `assert`. The prompts under test are still the production prompt files. The worktree is checked out from the state branch declared in `input.md` frontmatter (`state_ref`); `assert` grades the result against `assertions.md` and writes `report.md` into the run directory.
 
 This playbook is **conversational**. Walk the user through every step, show your work, and ask before silently making decisions that change the shape of the test.
 
@@ -16,7 +16,7 @@ This playbook is **conversational**. Walk the user through every step, show your
 
 Before asking the user anything:
 
-- [`reference/assertions-design.md`](reference/assertions-design.md) — the assertions-first paradigm; explains *why* tests anchor prompt design and how to draft assertions before any prompt
+- [`reference/assertions-design.md`](reference/assertions-design.md) — explains why tests anchor prompt behavior and how semantic assertions drive prompt changes
 - [`orca-test-review.md`](orca-test-review.md) — the audit checklist you'll run at the end
 - [`reference/orca-config-reference.md`](reference/orca-config-reference.md) — full workflow schema (tests are workflows)
 - [`reference/orca-workflow-patterns.md`](reference/orca-workflow-patterns.md) — the building blocks you may reuse
@@ -41,7 +41,7 @@ You're starting from nothing — no `.orca/tests/<name>/` directory yet. Run all
 
 A test directory already exists and you're extending it. Two common arrivals:
 
-- **Adding semantic criteria to a scaffolded smoke test.** `orca-workflow-create` Step 8 ships a structural `<state>-smoke` test per active state (enum coverage, `required_when` presence). The directory, `test-flow.yml`, `result_format`, and a minimal structural `assertions.md` already exist. **Skip Step 3 (Scaffold) and most of Step 5 (Copy body states); jump to Step 4 (design a real scenario) and Step 8 (append semantic criteria).** Do not rewrite the structural criteria — they're still load-bearing.
+- **Adding semantic criteria to a scaffolded smoke test.** `orca-workflow-create` Step 8 ships a structural `<state>-smoke` test per active state (enum coverage, `required_when` presence). The directory, `test-flow.yml`, `result_format`, and a minimal structural `assertions.md` already exist. **Skip Step 3 (Scaffold) and most of Step 5 (Copy body states); use Step 2 to design the real scenario, then Step 4 (write `input.md`), Step 6 (author the state branch), and Step 8 (append semantic criteria).** Do not rewrite the structural criteria — they're still load-bearing.
 - **`orca-workflow-run` handed off a failure case.** Supervision surfaced a real-world failure mode worth capturing. You arrive with a context block (failing state, scenario summary, worker input/output, log tail). Use it as the seed for Step 1 (Decide the slice) and Step 2 (Sketch the scenario), then continue from Step 3 if no test directory exists yet, or jump to Step 4 if one does.
 
 In either Update-mode flow, walk the *Anti-patterns to refuse* checklist at the end before declaring done — it's the easiest place to introduce drift while editing.
@@ -120,7 +120,7 @@ This creates `.orca/tests/review-catches-sql-injection/` with skeleton `test-flo
 
 #### If `orca test add` errors
 
-- **`test directory already exists`** — the `.orca/tests/<name>/` directory already exists. Either pick a different name or, if you're recovering from an aborted attempt, remove the directory and the orphan branch (`git branch -D orca-test-state/<name> && git worktree remove .orca-state/test-states/<name>`) before retrying.
+- **`test directory already exists`** — the `.orca/tests/<name>/` directory already exists. Either pick a different name or, if you're recovering from an aborted attempt, remove the persistent worktree and then the orphan branch (`git worktree remove .orca-state/test-states/<name> && git branch -D orca-test-state/<name>`) before retrying.
 - **`state branch already exists: orca-test-state/<name>`** — the orphan branch is present but the test directory isn't. Either you're reusing a branch from a deleted test (sharing — see below) and you should hand-create the `.orca/tests/<name>/` skeleton instead of using `orca test add`, or there's leftover state to clean up first.
 
 #### Sharing a state branch across multiple tests
@@ -128,7 +128,7 @@ This creates `.orca/tests/review-catches-sql-injection/` with skeleton `test-flo
 Multiple tests may point `state_ref` at the same `orca-test-state/<branch>` if they exercise the same fixture. To share:
 
 1. Scaffold the first test normally with `orca test add`. Author the state branch from its persistent worktree.
-2. Scaffold the second test with `orca test add`, then edit its `input.md` to retarget `state_ref:` at the first test's branch. The second test's own orphan branch becomes unused — you can delete it (`git branch -D orca-test-state/<second-name>` and remove its worktree) or leave it as an empty seed.
+2. Scaffold the second test with `orca test add`, then edit its `input.md` to retarget `state_ref:` at the first test's branch. The second test's own orphan branch becomes unused — you can delete its worktree first and then the branch (`git worktree remove .orca-state/test-states/<second-name>` followed by `git branch -D orca-test-state/<second-name>`) or leave it as an empty seed.
 
 When the shared branch is updated, every test pointing at it picks up the new tip on the next run. That's the point — and the risk: a tweak that helps one test may break another. Run all sharing tests after any state-branch edit.
 
@@ -187,7 +187,7 @@ Rules:
 
 ### Step 5 — Copy slice states into `test-flow.yml`
 
-The skeleton has placeholders. Replace them with body states copied verbatim from production, plus the wiring rules below.
+The skeleton has placeholders. Replace them with body states copied from production, applying only the test-harness rewrites below.
 
 **Rewrite rules.** For each body state copied from production:
 
@@ -276,7 +276,7 @@ git add . && git commit -m "seed: <describe the scenario>"
 
 - **Stable facts go in commits, not in run-time prompts.** A criterion that says "line 42 contains the SQL injection" anchors on a byte that the state branch carries. There is no LLM that could move it.
 - **Minimum realistic context.** A state branch contains *just* enough plausible code to make the diff look like real work and to make the scenario interpretable. No filler.
-- **No project chrome.** Do not commit `.orca/`, `pyproject.toml`, or `README.md` to the state branch. The orchestrator reads workflow YAML and prompts from the iteration branch; the worktree only needs the bytes the slice will actually look at.
+- **Minimal project chrome.** Do not commit `.orca/` to the state branch. Avoid `pyproject.toml`, `README.md`, or other top-level files unless the state under test actually reads them or needs them for a verification command. The orchestrator reads workflow YAML and prompts from the iteration branch; the worktree should contain only scenario-relevant bytes.
 - **Sharing.** Multiple tests can point `state_ref` at the same branch. After `orca test add` creates `orca-test-state/<test-name>`, edit `input.md` to retarget the marker if you want this test to share an already-authored state.
 - **Iteration.** `cd` back into the author worktree, edit, commit. The next test run picks up the new tip automatically — `state_ref` is a ref name, not a commit hash.
 
@@ -286,23 +286,23 @@ If a criterion anchors on `src/api.py:42`, count the lines in the file the state
 
 ### Step 7 — Leave the assert prompt alone (usually)
 
-The assert state is an agent worker that reads `.orca/tests/{{ run.test_name }}/assertions.md`, inspects the worktree and per-state results, grades each criterion, writes `{{ run.run_dir }}/report.md`, and emits a structured result at `{{ result_path }}`.
+The assert state is an agent worker that reads `{{ run.repo_root }}/.orca/tests/{{ run.test_name }}/assertions.md`, inspects the worktree and per-state results, grades each criterion, writes `{{ run.run_dir }}/report.md`, and emits a structured result at `{{ result_path }}`.
 
 `orca test add` ships a minimal inline prompt that does exactly this. It's deliberately terse:
 
-```yaml
+````yaml
     worker:
       kind: claude-code
       prompt:
         text: |
           # Assert
-          Read tests/{{ run.test_name }}/assertions.md, grade each criterion,
+          Read {{ run.repo_root }}/.orca/tests/{{ run.test_name }}/assertions.md, grade each criterion,
           write {{ run.run_dir }}/report.md, then write {{ result_path }}.
 
           ```json
           {{ result_example | tojson(indent=2) }}
           ```
-      timeout: 600
+      inactivity_timeout: 600
       result_format:
         outcome:
           type: enum
@@ -314,7 +314,7 @@ The assert state is an agent worker that reads `.orca/tests/{{ run.test_name }}/
       passed: done
       failed: done
       inconclusive: done
-```
+````
 
 **Keep the scaffold as-is for most tests.** The evaluator agent knows how to read assertions and produce a report from a short instruction; over-specifying the prompt risks the evaluator overfitting to a particular report shape and missing criteria that don't fit it. The terseness is intentional, not provisional.
 
@@ -380,7 +380,7 @@ Rules:
 
 - One `### <id>` per criterion. `<id>` is kebab-case. The id appears verbatim in `report.md` and the result JSON — keep it stable.
 - Prose under each heading **is** the criterion. The evaluator reads it literally.
-- **Prefer objective criteria over judgment-heavy ones.** Counts, presence, regexes, enum equality are reproducible. "Is this prose good?" flip-flops between runs (both setup and assert are LLM-driven — the double non-determinism amplifies).
+- **Prefer objective criteria over judgment-heavy ones.** Counts, presence, regexes, enum equality are reproducible. "Is this prose good?" flip-flops between runs (both the body worker and assert evaluator are LLM-driven — the double non-determinism amplifies).
 - No ordering. No severity/weighting. Pass/fail only in v1.
 - Optional `## Setup notes` or `## Context` sections at the top are passed through as background and not graded.
 
@@ -392,7 +392,7 @@ Aim for **3–7 criteria** for a first draft. Fewer is fine if the test is narro
 orca test review-catches-sql-injection
 ```
 
-The CLI submits the run to the daemon and prints the run id. The CLI is currently fire-and-forget in v1 — it does not block until completion. Use `orca runs` or the TUI to watch progress.
+The CLI submits the run to the daemon with test-fast bounds (`max_hops=10`, `max_retries=2`) and prints the run id. The CLI is currently fire-and-forget in v1 — it does not block until completion. Use `orca runs` or the TUI to watch progress.
 
 After the run completes, read the report:
 
@@ -400,7 +400,7 @@ After the run completes, read the report:
 cat .orca-state/runs/<branch>/<workflow>/report.md
 ```
 
-The layout is `.orca-state/runs/<branch>/<workflow>/` — the `<branch>` segment is whatever orca derived for the test run (defaults to the current branch at submission time; tests submitted from `main` end up under `runs/main/...`). The `<workflow>` segment is the test name. The path printed by the assert state at end-of-run is the canonical one — copy from there if you're unsure.
+The layout is `.orca-state/runs/<branch>/<workflow>/` — for `orca test <name>`, the `<branch>` segment defaults to `orca-test-run-<name>` and the `<workflow>` segment is the test name. The path printed by the assert state at end-of-run is the canonical one — copy from there if you're unsure.
 
 **Iterate.** First runs usually surface one of three problems:
 
@@ -414,7 +414,7 @@ The layout is `.orca-state/runs/<branch>/<workflow>/` — the `<branch>` segment
 
 ## Anti-patterns to refuse
 
-- **State branches that include project chrome.** Committing `.orca/`, `pyproject.toml`, or other top-level files to `orca-test-state/<name>` makes the branch confusing to inspect and risks the worker reading state from the wrong place. The state branch should contain only the bytes the slice will actually read.
+- **State branches bloated with project chrome.** Committing `.orca/` or unrelated top-level files to `orca-test-state/<name>` makes the branch confusing to inspect and risks the worker reading state from the wrong place. Keep only the bytes the slice will actually read, plus minimal config files required by the state's verification commands.
 - **`state_ref` pointing at a branch outside the `orca-test-state/` namespace.** Tests pointing at `main` or a feature branch run against arbitrary history that may change underfoot. Use the dedicated namespace; share within it freely.
 - **More than one `assert` state.** The shape is body→assert — exactly one assert. If you need branching, branch in the body.
 - **Body states whose `result_format` differs from production.** That defeats the point of the test. If you need a different schema, you're not testing the prompt — you're testing something else. Stop and ask the user what they actually want to test.
