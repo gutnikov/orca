@@ -11,7 +11,7 @@ Start an orca run from a task description, then supervise it through to a termin
 
 ## Scope of this playbook
 
-This playbook is self-contained: it covers pre-flight, task composition, the watch loop (Phase C), the post-completion merge plan, and wrap-up. With the orca plugin installed, the `orca-workflow-run` skill auto-triggers on phrases like *"supervise the run"* or *"babysit orca"* — it runs the watch loop directly (no task composition), useful when the user is already mid-run and just wants oversight. The logic is the same — what's in Phase C below is the canonical version.
+This playbook is self-contained: it covers pre-flight (Phase A), task composition (Phase B), the watch loop (Phase C), the post-completion merge plan (Phase D), and wrap-up (Phase E). With the orca plugin installed, the `orca-workflow-run` skill auto-triggers on phrases like *"supervise the run"* or *"babysit orca"* — it runs the watch loop directly (no task composition), useful when the user is already mid-run and just wants oversight. The skill invokes the same Phase C as a fresh run; the implementation here is the canonical version.
 
 ## Phase A — Pre-flight
 
@@ -29,6 +29,7 @@ Run these checks in order:
    ```
    - If a `RUNNING` run exists → skip Phase B, jump to Phase C (supervise the existing run).
    - If a `FAILED` / `INTERRUPTED` run exists → ask the user: resume it (`orca resume <run_id>`) or drop it (`orca drop <run_id>`)?
+   - If a `STOPPED` run exists (user previously ran `orca stop`) → ask: resume (`orca resume`) or drop (`orca drop`)? Don't auto-resume — they stopped it for a reason.
    - If a `COMPLETED` run is sitting around → ask the user whether to drop it before starting new work.
 
 3. **Pick the workflow.** Read `.orca/`:
@@ -65,13 +66,28 @@ git commit -m "chore: add input for <id>"
 
 Via CLI:
 ```bash
-orca run <task-file>
+orca run <task-file> [flags]
 ```
+
+Available flags (defaults shown):
+
+| Flag | Default | What it does |
+|---|---|---|
+| `-w, --workflow <name>` | `default` | Pick a non-default workflow under `.orca/`. Pass the filename without `.yml` (e.g. `-w develop` loads `.orca/develop.yml`). |
+| `-b, --branch <name>` | auto-derived | Override the run branch. Auto-derivation pulls from issue fields and the current git state; pass this only when you need a specific branch name. |
+| `--base <ref>` | from config `base_branch`, else `origin/main` | What the new run branch is cut from. |
+| `--run-id <id>` | `<branch>:<workflow>` | Override the run identifier. Rarely needed. |
+| `--max-hops <N>` | 10 | Cap total state transitions per issue. Overrides what the workflow YAML sets. |
+| `--max-retries <N>` | 3 | Cap worker failures per issue per state. Overrides what the workflow YAML sets. |
+| `--headless` | off | Suppress TUI output; useful for scripted invocations. |
+| `--insights` | off | Generate an insights log alongside the run (readable via `orca_get_insights`). |
 
 Or via MCP (if invoked through Claude Code / Cursor / etc.):
 ```
-orca_start_run(root="<absolute path>", task_file="<task-file>", workflow="<flow-name>")
+orca_start_run(root="<absolute path>", task_file="<task-file>", workflow="<flow-name>", branch=None, run_id=None)
 ```
+
+The MCP form exposes only the four common arguments (`root`, `task_file`, `workflow`, `branch`, `run_id`). For `--base`, `--max-hops`, `--max-retries`, `--headless`, `--insights` you need the CLI form.
 
 `workflow` is optional — omit it to load `.orca/default.yml`. Pass it only when the project has multiple workflows under `.orca/` and you need a specific one.
 
@@ -81,7 +97,7 @@ If start fails, surface the error to the user — do not retry blindly.
 
 ## Phase C — Supervise (the watch loop)
 
-Discover the workflow's `max_worker_retries` from the loaded config (defaults to **5** if unset) — call this `MAX_RETRIES` below. Also note `max_hops` (defaults to **20** if unset); call this `MAX_HOPS`. You'll use these as health thresholds.
+Discover the workflow's effective `max_worker_retries` and `max_hops`. `orca run` injects defaults of **3** retries and **10** hops unless the workflow YAML sets them or the user passed `--max-retries` / `--max-hops`. Pull the live values from `orca_get_run` (or read them off the loaded config) — call them `MAX_RETRIES` and `MAX_HOPS` below. You'll use these as health thresholds.
 
 ### Loop
 
@@ -203,9 +219,28 @@ Project-setup commands (out of scope for this playbook, but listed for completen
 
 | Command | Use |
 |---|---|
-| `orca init` | Copy bundled playbooks into `.orca/playbooks/` (per-project) |
+| `orca init` | Deprecated; no-op except for removing a legacy `.orca/playbooks/` directory if present |
 | `orca clean` | Remove terminal-state runs and accumulated artifacts |
 | `orca daemon {start,stop,status}` | Manage the per-project daemon |
 | `orca mcp` | MCP stdio bridge (for editor integrations) |
 
-MCP tool equivalents (when invoked through a coding agent): `orca_start_run`, `orca_get_run`, `orca_list_runs`, `orca_get_worker_log`, `orca_unblock_worker`, `orca_retry_issue`, `orca_resume_run`, `orca_drop_run`, `orca_stop_run`, `orca_daemon_status`.
+MCP tool equivalents (when invoked through a coding agent):
+
+| MCP tool | Closest CLI | Notes |
+|---|---|---|
+| `orca_daemon_status` | `orca daemon status` | |
+| `orca_start_run` | `orca run` | Subset of CLI flags — see Phase B step 4. |
+| `orca_list_runs` | `orca runs` | |
+| `orca_get_run` | (no CLI) | Use `compact=true` while polling to save context tokens. |
+| `orca_get_issue` | (no CLI) | Inspect a single issue by id. Useful inside multi-issue runs. |
+| `orca_get_insights` | (no CLI) | Read the insights log when the run was started with `--insights`. |
+| `orca_get_worker_log` | `orca logs <run_id> <issue_id>` | Pass `tail=N` for trailing lines; the CLI's `--tail N` does the same. |
+| `orca_unblock_worker` | `orca unblock <run_id> <issue_id> -m "msg"` | |
+| `orca_retry_issue` | `orca retry <run_id> <issue_id>` | |
+| `orca_resume_run` | `orca resume <run_id>` | |
+| `orca_drop_run` | `orca drop <run_id>` | |
+| `orca_stop_run` | `orca stop <run_id>` | |
+| `orca_get_playbook` | (no CLI) | Read a playbook by name (e.g. "orca-workflow-run"). Used by the orca plugins to load instructions. |
+| `orca_list_playbooks` | (no CLI) | Enumerate available playbooks. |
+
+If you're driving from a shell rather than a host CLI, the `orca logs <run_id> [issue_id] [--tail N]` command is the shell fallback for tailing worker output — same content as `orca_get_worker_log`. Omit `issue_id` to list issues in the run; pass `--tail` to bound output.

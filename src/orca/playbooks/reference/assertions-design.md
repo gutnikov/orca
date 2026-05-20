@@ -72,7 +72,7 @@ If answering the criterion requires reading the worker's mind, the user's intent
 | 5 | Set / boundary coverage | union of `files_modified` ⊆ `src/auth/` |
 | 6 | Pairwise constraint | no two findings share `(file, line)` |
 
-**Below the line — avoid:** subjective judgment ("title sounds good", "plan is comprehensive", "change makes sense"). Both `setup` and `assert` are LLM-driven; the double non-determinism amplifies flake. A criterion that flips run-to-run is worse than no criterion — it teaches you to ignore the report.
+**Below the line — avoid:** subjective judgment ("title sounds good", "plan is comprehensive", "change makes sense"). Both the worker and the `assert` evaluator are LLM-driven; the double non-determinism amplifies flake. A criterion that flips run-to-run is worse than no criterion — it teaches you to ignore the report.
 
 ### Good / bad rewrites
 
@@ -148,7 +148,7 @@ The agent asks at most 3 questions before writing anything:
 
 Then draft a minimal `assertions.md` (2–3 criteria from the answers), a minimal `result_format` aligned with them, and a stub prompt. Run the test.
 
-**Cost note.** Every test run is N+2 LLM invocations (1 setup, N body states, 1 assert). A single-state slice is the cheapest starting point; default to it. See [`orca-test-create.md`](../orca-test-create.md).
+**Cost note.** Every test run is N+1 LLM invocations (N body states, 1 assert). The worktree is set up by `git checkout` from the state branch, not by an LLM — there is no per-run setup cost. A single-state slice is the cheapest starting point; default to it. See [`orca-test-create.md`](../orca-test-create.md).
 
 ### Failure attribution
 
@@ -158,10 +158,10 @@ When the report shows a failed criterion, walk this taxonomy **before** editing 
 |---|---|---|
 | **Prompt** | Worker had access to a clear instruction in the prompt and didn't follow it. | Sharpen or add the relevant instruction. Minimal edit. See [`orca-prompt-create.md`](../orca-prompt-create.md). |
 | **Assertion** | Criterion is ambiguous, judgment-heavy, or references a key not in `result_format`. | Rewrite the criterion. |
-| **Scenario** | Test input (`input.md`, fixtures) doesn't actually exercise the path the criterion grades. | Edit `input.md` / fixtures. |
+| **Scenario** | Test input (`input.md` and the state-branch worktree) doesn't actually exercise the path the criterion grades. | Edit `input.md`, or amend the commit on `orca-test-state/<name>`. |
 | **`result_format`** | The field the criterion needs isn't emitted. | Add the field to `result_format` AND update the prompt to emit it. |
 | **Model** | Output is correct in shape but consistently misses semantic detail across retries. | Swap model in YAML, or split the state into smaller responsibilities. |
-| **Flow** | Slice's entry state expected a field that upstream (setup or another state) didn't seed. | Update setup's `result_format` (or the upstream state in production). |
+| **Flow** | Slice's entry state expected a field that nothing upstream seeded. | Add the field to `input.md` frontmatter (so it's seeded into `issue.fields.*`), or fix the upstream production state that should have produced it. |
 
 The first three are the common ones. The fourth is the most-missed — it's the one that quietly causes "every criterion fails" reports.
 

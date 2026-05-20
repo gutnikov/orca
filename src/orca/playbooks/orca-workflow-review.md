@@ -127,13 +127,20 @@ Only proceed if autonomy mode permits.
 Stop after Phase 5. Print the report. Done.
 
 ### `supervised`
-- Apply fixes for items that are a direct violation of a checklist rule **and** have an unambiguous remediation:
-  - Add missing `{{ result_example | tojson(indent=2) }}` / `{{ result_path }}` blocks
-  - Add missing `blocked` outcome and a corresponding `on:` rule (with `then: failed` or a sensible target — but **ask the user** what the target should be)
-  - Add `max_workers: 1` to a state the user named as a merge/apply state
-  - Wrap conditional sections in `{% if %}` guards
-  - Replace hardcoded values with `{{ issue.fields.* }}` references **only if** the field exists in the issue schema
-- For anything novel — a state-machine restructure, splitting a prompt, changing `result_format` shape — escalate to the user with the report and a proposed change. Don't apply silently.
+
+Apply fixes that have a single, mechanical answer. Escalate anything that needs user input first.
+
+**Mechanical (apply directly):**
+- Add missing `{{ result_example | tojson(indent=2) }}` / `{{ result_path }}` blocks where the section exists but the variable is absent.
+- Add `max_workers: 1` to a state the user *has already named* as a merge/apply state.
+- Wrap conditional sections (`depends_on`, `children`, `event_log`) in `{% if %}` guards.
+- Replace hardcoded values with `{{ issue.fields.* }}` references **only if** the field already exists in the issue schema.
+
+**Partially mechanical (apply only the mechanical half, ask for the rest):**
+- *Missing `blocked` outcome.* Adding `blocked` to `result_format.outcome.values` is mechanical; choosing the `on: blocked: <target>` target is not. Apply the schema change; surface the routing decision to the user.
+
+**Never silent:**
+- State-machine restructure, splitting a prompt, changing `result_format` shape, renaming outcomes — escalate with the report and a proposed change. Do not apply.
 
 ### `full`
 Apply any diagnosed fix. Still:

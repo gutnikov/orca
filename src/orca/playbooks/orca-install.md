@@ -43,7 +43,7 @@ pipx install "git+ssh://git@github.com/gutnikov/orca.git"
 ```
 
 Notes:
-- The repo is private; the `git+ssh://` form requires the SSH prereq above. If the user lacks SSH access, do not silently fall back to HTTPS — ask.
+- The `git+ssh://` form requires the SSH prereq above. If the user lacks SSH access, do not silently fall back to HTTPS — ask whether they're authorized to clone over HTTPS instead.
 - pipx isolates orca in its own venv, so it won't collide with project Pythons.
 
 ### Verify
@@ -63,12 +63,11 @@ Installation alone doesn't set up any project. Inside a project that should use 
 ```bash
 cd <project>
 mkdir -p .orca/prompts
-orca init             # copies playbooks into .orca/playbooks/ for the coding agent to read
 orca daemon start
 orca daemon status    # should show running
 ```
 
-`orca init` is what makes future agent sessions able to find these playbooks under `.orca/playbooks/`. Without it, agents fall back to reading the playbooks shipped with the orca install (less convenient and not editable per project).
+Playbooks no longer need to be copied into the project. Since v0.3.5 they ship with the installed orca package and are served on demand via the `orca_get_playbook` and `orca_list_playbooks` MCP tools. (If you find a legacy `.orca/playbooks/` directory left over from an older orca, `orca init` will remove it — but is otherwise a no-op.)
 
 If the user is not in an orca-enabled project yet, skip this — direct them to [orca-workflow-create.md](orca-workflow-create.md). With the orca plugin installed, the `orca-install` skill auto-triggers on phrases like *"set up orca"* and runs the same end-to-end setup; in environments without the plugin, follow the playbook by reading it directly.
 

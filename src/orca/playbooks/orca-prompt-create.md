@@ -1,6 +1,8 @@
 # Playbook: Create a State Prompt
 
-Write or update a single `.orca/prompts/{state}.md` template — the instructions a worker reads when running a specific state of the workflow. Each **active** state in `.orca/{flow}.yml` has exactly one prompt file. This playbook is a pure procedure: given a state specification, produce a prompt that conforms to orca conventions and won't surprise the worker at runtime. It does not iterate, does not run tests, and does not interact with the user about quality.
+Write or update a single `.orca/prompts/{state}.md` template — the instructions a worker reads when running a specific state of the workflow. Each **active** state in `.orca/{flow}.yml` has exactly one prompt file. This playbook is a pure procedure: given a state specification, produce a prompt that conforms to orca conventions and won't surprise the worker at runtime. It enforces structural correctness (variables resolve, sections in the right place, no obvious pitfalls) but does not iterate, does not run tests, and does not judge whether the prompt is *good* — that lives in [`reference/assertions-design.md`](reference/assertions-design.md) under a Chinese-wall isolation. If a quality concern surfaces while you're here, finish writing the structurally-correct file and hand the concern back to the caller.
+
+> **Why this playbook is deliberately walled off from assertions.** By design, the prompt-creator does not see `assertions.md`, test reports, or grading rubrics — see the Three-Agent Principle in [`reference/assertions-design.md`](reference/assertions-design.md). If you find yourself wishing for that information, you're being asked to do the assertion-creator's job; push back and ask for a sharper spec instead.
 
 > **Passive states have no prompt.** A passive state is one with no `worker:` block — it waits for a manual `AdvanceEvent` (CLI / TUI / API). If the state you're writing for has no worker, you don't need this playbook; see the *Gate State* pattern in [`orca-workflow-patterns.md`](reference/orca-workflow-patterns.md).
 
@@ -15,6 +17,20 @@ Write or update a single `.orca/prompts/{state}.md` template — the instruction
 - During **[orca-workflow-create.md](orca-workflow-create.md)** step 5 (writing prompt templates), invoked with a state specification that already includes `result_format`.
 - When adding a new state to an existing workflow, after the state's `result_format` is in the YAML.
 - When given an explicit instruction to modify an existing prompt (add a constraint, rephrase a step, swap a template variable).
+
+## Modes
+
+This playbook runs in one of two modes. The caller indicates which.
+
+### Create mode (default)
+
+The state has no prompt file yet — `.orca/prompts/{state}.md` does not exist (or exists but is the skeleton). The caller hands over a fresh state spec. Run Steps 1–5 end to end and write the file.
+
+### Update mode
+
+The state's prompt file already exists and the caller wants a targeted change (a new constraint, a rephrased step, a swapped template variable). Read the existing file first, apply only the instructed delta, and re-run Step 4 (pitfall checks) on the result before writing. Do not regenerate from scratch — Update mode preserves prior tuning that the file has accumulated, including hand-edited prose the original spec didn't anticipate.
+
+A correct Update-mode invocation looks like: "in `.orca/prompts/implementing.md`, after Step 2 add a constraint that the worker must not introduce new dependencies." Anything vaguer is a Create-mode rewrite in disguise — push back and ask for the specific delta.
 
 ## Prerequisites
 
@@ -47,20 +63,24 @@ The full set of variables exposed to a prompt template:
 
 | Variable | Type | Description | When you need it |
 |---|---|---|---|
-| `{{ issue.fields.* }}` | varies | Issue data defined in config fields | Always — title, description, state-specific fields |
-| `{{ issue.depends_on }}` | list | IDs of issues this one depends on | If this state can only run after a predecessor |
-| `{{ issue.children }}` | list | Child issues (after decomposition) | If this state operates over sub-issues |
-| `{{ issue.event_log }}` | list | Event history (timestamps, types, data) | Retry-aware prompts that need past failures |
-| `{{ issue.base_branch }}` | string | Git branch for merging | If the worker needs to know the merge target |
-| `{{ issue.decomposed_from }}` | string | Parent issue ID (if child) | When a child task needs parent context |
+| `{{ issue.fields.* }}` | varies | User-declared issue fields (title, description, scope_boundary, etc.) plus auto-populated `failure_context` if declared in the schema. | Always — every prompt reads at least `title`/`description` |
+| `{{ issue.base_branch }}` | string | Auto-populated at dispatch from the workflow's `base_branch` setting. **Top-level on `issue`, not under `fields`.** | If the worker needs to know the merge target |
+| `{{ issue.depends_on }}` | list of issue ids | IDs of sibling issues this child waits on. Empty list for root issues. | If this state can only run after a predecessor |
+| `{{ issue.decomposed_from }}` | string \| null | Parent issue id if this is a decomposed child; null otherwise. | When a child task needs parent context |
+| `{{ issue.children }}` | list of dicts | Decomposed child issues. Each entry has keys `issue_id` (str), `fields` (dict), `state` (str), `event_log` (list). **No `id`, `title`, or `depends_on` at the child level** — access title via `child.fields.title`. | If this state operates over sub-issues |
+| `{{ issue.event_log }}` | list of dicts | Event history. Each entry has `timestamp` (ISO 8601), `type` (str), `data` (dict). | Retry-aware prompts that need past failures |
 | `{{ result_format }}` | dict | Schema Orca validates against | Advanced prompts that explain allowed outcomes |
 | `{{ result_example }}` | dict | Concrete result JSON the worker can copy and fill in | **Always** — embed via `tojson(indent=2)` |
 | `{{ result_path }}` | string | Path to write result.json | **Always — and inside the `## Result` section, not only at the top of the prompt.** See pitfall P3. |
 | `{{ run.branch }}` | string | Git branch name | Prompts that orchestrate their own filesystem |
 | `{{ run.workflow }}` | string | Workflow name | Same as above (rare) |
-| `{{ run.run_dir }}` | string | `.orca-state/runs/BRANCH/WORKFLOW` | Same as above (rare) |
+| `{{ run.run_dir }}` | string | `.orca-state/runs/<branch>/<workflow>` | Same as above (rare) |
 | `{{ run.sessions }}` | list | Previous session summaries | Retry / continuation-aware prompts |
 | `{{ run.summary }}` | dict | Run statistics (states visited, outcomes, failures) | Retry / continuation-aware prompts |
+
+> Two auto-populated values have *different access paths* — the table above gets this right; it's worth restating because the schema doc treats them as siblings:
+> - `{{ issue.base_branch }}` — top-level on the issue dict.
+> - `{{ issue.fields.failure_context }}` — **inside `fields`** (only present if the workflow declared `failure_context` in its issue schema, per the *Failure-Context Propagation* pattern).
 
 Anything optional (`depends_on`, `children`, `event_log`) must be wrapped in `{% if %}` — otherwise the rendered prompt has empty headers that confuse the worker.
 
@@ -196,16 +216,14 @@ Write your result to `{{ result_path }}`:
 
 #### P3. Omitting `{{ result_path }}` in the `## Result` section
 
+The framework auto-appends an end-of-prompt warning with the literal path, so a forgotten `{{ result_path }}` is no longer fatal — but it makes the worker seek back to the last line of a long prompt at the moment it's about to write. Put the path next to the schema instead.
+
 **Bad:**
 ```markdown
 ## Result
 
-Writing the result file is the FINAL action. Commit every change first — orca terminates the session ~30 s after detecting a valid result.
+Writing the result file is the FINAL action. Commit every change first.
 ```
-
-The worker reads "the result file" and has no path in this section. Historically this caused real zombies — late in the run, the worker would start an unbounded sub-investigation to *find* the path (often reading `.orca-state/runs/.../state.json` or grepping the repo), burn through `--max-turns` or context budget, and the session would end without `result.json` ever being written. Orca then records `worker_failed: result file not found after session exited`.
-
-The framework now interpolates the path into the auto-appended end-of-prompt warning, so the worker can still recover it from the very last line of the rendered prompt. That makes this pitfall a clarity issue rather than a fatal one — but workers don't always read prompts linearly, especially long ones, and an explicit path in the `## Result` section avoids the seek-back-to-the-bottom pattern entirely.
 
 **Good:**
 ```markdown
@@ -213,10 +231,6 @@ The framework now interpolates the path into the auto-appended end-of-prompt war
 
 Write the result JSON (schema above) to `{{ result_path }}`. Writing the result file is the FINAL action. Commit every change first — orca terminates the session ~30 s after detecting a valid result.
 ```
-
-The literal path is right there at the moment the worker is about to act on it. No lookup, no guessing.
-
-**Rule of thumb:** Mentioning `{{ result_path }}` once at the top of the prompt is not enough — long prompts (200+ lines) push the path out of the worker's attention window by the time it reaches the result-writing step. The path belongs in the section the worker is reading *when it writes*. If you also embed a schema block earlier with `Write your result to \`{{ result_path }}\`:` (P2), the `## Result` reminder can be a one-liner pointing back to it.
 
 #### P4. Writing the result file before committing
 
@@ -305,7 +319,13 @@ Before writing:
 2. **All field references exist.** Every `{{ issue.fields.X }}` in the prompt must be declared in the workflow's `issue.fields` block (or set by an upstream state's `result_format`). Grep the prompt for `issue.fields.` and cross-check.
 3. **`{% if %}` guards on optional sections.** Anything that depends on optional data (`depends_on`, `children`, etc.) must be guarded — otherwise the rendered prompt has dangling empty headers.
 4. **JSON template renders cleanly.** Mentally render the bottom block with the actual `result_format` and check that the JSON is what you want the worker to produce.
-5. **`{{ result_path }}` appears in the `## Result` section** — not only at the top of the prompt. Run `grep -A2 '^## Result' .orca/prompts/{state}.md | grep -q '{{ result_path }}'`. The framework also interpolates the path into the auto-appended end-of-prompt warning, so a forgotten `{{ result_path }}` is no longer fatal — but the `## Result` section is the logical home for it, and the worker is more likely to write the file correctly when the path sits next to the schema rather than at the very end of a 200+ line prompt. Treat this as defense-in-depth, not a single point of failure.
+5. **`{{ result_path }}` appears inside the `## Result` section** — not only at the top of the prompt. Pull the section body and check for the variable:
+
+   ```bash
+   awk '/^## Result/{flag=1; next} /^## /{flag=0} flag' .orca/prompts/{state}.md | grep -q '{{ result_path }}'
+   ```
+
+   `awk` keeps reading until the next `##` heading, so this matches the path anywhere in the Result section regardless of whitespace, prose preamble, or how many lines the schema block takes. The framework also interpolates the path into the auto-appended end-of-prompt warning, so a forgotten `{{ result_path }}` is no longer fatal — but the Result section is the logical home for it. Treat this as defense-in-depth, not a single point of failure.
 
 If your editor supports it, render the Jinja template with a sample issue and read the output — many bugs only show up post-render (orphan headers, missing fields, wrong indentation in the JSON block).
 

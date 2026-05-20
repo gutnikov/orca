@@ -29,9 +29,22 @@ Before asking the user anything:
 - At least one production workflow YAML exists under `.orca/` to test against — without one, there's no slice to copy.
 - You can name the test in kebab-case. The directory name *is* the test name.
 
-> Note: `orca-workflow-run` can hand off here when supervision surfaces a real-world failure mode worth capturing. If you arrived from a supervision session with a captured context block (failing state, scenario summary, worker input/output, log tail), use it as the starting point for Step 1 (Decide the slice) and Step 2 (Sketch the scenario) rather than starting from scratch.
+## Modes
 
-> Note: `orca-workflow-create` Step 8 auto-scaffolds a `<state>-smoke` test per active state with mechanical structural assertions (enum coverage, `required_when` presence). When you arrive here to add semantic correctness criteria to one of those scaffolds, you are in **Update mode**: the directory, `test-flow.yml`, `result_format`, and structural `assertions.md` already exist. Skip Step 3 (Scaffold) and most of Step 5 (Copy body states); jump to Step 4 (`input.md` — design a real scenario) and Step 8 (`assertions.md` — append semantic criteria to the existing file). Do not rewrite the structural criteria — they're still load-bearing.
+This playbook runs in one of two modes. Pick the right one *before* Step 1; the steps below assume you've made the call.
+
+### Create mode (default)
+
+You're starting from nothing — no `.orca/tests/<name>/` directory yet. Run all nine steps end to end.
+
+### Update mode
+
+A test directory already exists and you're extending it. Two common arrivals:
+
+- **Adding semantic criteria to a scaffolded smoke test.** `orca-workflow-create` Step 8 ships a structural `<state>-smoke` test per active state (enum coverage, `required_when` presence). The directory, `test-flow.yml`, `result_format`, and a minimal structural `assertions.md` already exist. **Skip Step 3 (Scaffold) and most of Step 5 (Copy body states); jump to Step 4 (design a real scenario) and Step 8 (append semantic criteria).** Do not rewrite the structural criteria — they're still load-bearing.
+- **`orca-workflow-run` handed off a failure case.** Supervision surfaced a real-world failure mode worth capturing. You arrive with a context block (failing state, scenario summary, worker input/output, log tail). Use it as the seed for Step 1 (Decide the slice) and Step 2 (Sketch the scenario), then continue from Step 3 if no test directory exists yet, or jump to Step 4 if one does.
+
+In either Update-mode flow, walk the *Anti-patterns to refuse* checklist at the end before declaring done — it's the easiest place to introduce drift while editing.
 
 ## Cost note — surface this before the first run
 
@@ -41,10 +54,12 @@ Every test run costs **N + 1 LLM invocations** (N body states + 1 assert). A 5-s
 
 Read this **before drafting any of the steps below**. It is the load-bearing discipline that keeps tests deterministic. Two roles, sharp boundaries:
 
-- **The state branch** (`orca-test-state/<name>`) is the source of every byte the worker will read. **Creativity lives here, and only here.**
+- **The state branch** (`orca-test-state/<name>`) is the source of every byte *in the worktree* that the worker will read. **Worktree creativity lives here, and only here.**
 - **Assertions** anchor on stable bytes in the state branch — literal line numbers, paths, function names. **They reference what the state branch contains, not what the orchestrator might produce.**
 
-The non-negotiable rule: every byte the slice's body state will read came from the state branch, not from any LLM decision at run time. If a criterion says `line within 5 of 42`, then line 42 is where the *state branch* puts the bug — pinned by a commit you reviewed before merging the test.
+The non-negotiable rule: every byte *the worker reads from its worktree* came from the state branch, not from any LLM decision at run time. If a criterion says `line within 5 of 42`, then line 42 is where the *state branch* puts the bug — pinned by a commit you reviewed before merging the test.
+
+(The prompts and `assertions.md` live on the iteration branch, not the state branch — they're test configuration, not worktree content. The "every byte" rule applies to worktree bytes only.)
 
 Why this is the rule: state-branch bytes are stable, version-controlled, and easy to inspect. Any byte produced by an LLM at run time varies run-to-run; criteria that depend on such bytes become flaky. The cure is to drain creativity out of run time and into git history — commits are bytes on disk; nobody reinterprets them.
 
@@ -102,6 +117,24 @@ orca test add review-catches-sql-injection
 ```
 
 This creates `.orca/tests/review-catches-sql-injection/` with skeleton `test-flow.yml`, `input.md`, `assertions.md`. It also creates the orphan branch `orca-test-state/review-catches-sql-injection` and a persistent author worktree at `.orca-state/test-states/review-catches-sql-injection/`. **Edit the skeleton in place** — don't write a fresh structure beside it.
+
+#### If `orca test add` errors
+
+- **`test directory already exists`** — the `.orca/tests/<name>/` directory already exists. Either pick a different name or, if you're recovering from an aborted attempt, remove the directory and the orphan branch (`git branch -D orca-test-state/<name> && git worktree remove .orca-state/test-states/<name>`) before retrying.
+- **`state branch already exists: orca-test-state/<name>`** — the orphan branch is present but the test directory isn't. Either you're reusing a branch from a deleted test (sharing — see below) and you should hand-create the `.orca/tests/<name>/` skeleton instead of using `orca test add`, or there's leftover state to clean up first.
+
+#### Sharing a state branch across multiple tests
+
+Multiple tests may point `state_ref` at the same `orca-test-state/<branch>` if they exercise the same fixture. To share:
+
+1. Scaffold the first test normally with `orca test add`. Author the state branch from its persistent worktree.
+2. Scaffold the second test with `orca test add`, then edit its `input.md` to retarget `state_ref:` at the first test's branch. The second test's own orphan branch becomes unused — you can delete it (`git branch -D orca-test-state/<second-name>` and remove its worktree) or leave it as an empty seed.
+
+When the shared branch is updated, every test pointing at it picks up the new tip on the next run. That's the point — and the risk: a tweak that helps one test may break another. Run all sharing tests after any state-branch edit.
+
+#### Should you push the `orca-test-state/<name>` branch?
+
+Yes — these branches are part of the test fixture and need to travel with the repo. Tests are unrunnable on a fresh clone if the branches are local-only. Push them alongside the test directory commit. Treat them like any other test asset; rebases on them are fine, but force-pushes will invalidate any in-flight CI runs that already checked out the prior tip.
 
 ### Step 4 — Write `input.md`
 
@@ -163,7 +196,7 @@ The skeleton has placeholders. Replace them with body states copied verbatim fro
 3. **Outgoing-to-outside-slice transitions are rewritten to `assert`.** If `implementing` in prod routes `done -> reviewing` but `reviewing` is *not* in the slice, rewrite to `done -> assert`. The same applies to any rule that targets the built-in `done` — rewrite to `assert` so the grader sees the final result.
 4. **`initial:` names the slice's entry state.** Replace the placeholder `initial: TODO_BODY_STATE` with the real entry state name (e.g. `initial: review`).
 
-Concrete example — copying a single `review` state from `.orca/review.yml`:
+Concrete example — copying a single `review` state from `.orca/review.yml`. Both YAML blocks below are shown under their own file's `states:` parent (the parent is included for context — do not double-nest when you copy).
 
 Before (in `.orca/review.yml`):
 
@@ -191,9 +224,10 @@ states:
       blocked: done
 ```
 
-After (in `.orca/tests/review-catches-sql-injection/test-flow.yml`, body section):
+After (in `.orca/tests/review-catches-sql-injection/test-flow.yml`):
 
 ```yaml
+states:
   review:
     worker:
       kind: claude-code
@@ -214,6 +248,8 @@ After (in `.orca/tests/review-catches-sql-injection/test-flow.yml`, body section
       approve: assert
       request_changes: assert
       blocked: assert
+  assert:
+    # ... see Step 7 below
 ```
 
 Notes:
@@ -248,76 +284,50 @@ git add . && git commit -m "seed: <describe the scenario>"
 
 If a criterion anchors on `src/api.py:42`, count the lines in the file the state branch carries and verify line 42 is the bug. The fact and the file must agree. Both live in git now, so a single mismatch becomes a deliberate commit you can review.
 
-### Step 7 — Tune the assert prompt
+### Step 7 — Leave the assert prompt alone (usually)
 
-The assert state is an agent worker that:
+The assert state is an agent worker that reads `.orca/tests/{{ run.test_name }}/assertions.md`, inspects the worktree and per-state results, grades each criterion, writes `{{ run.run_dir }}/report.md`, and emits a structured result at `{{ result_path }}`.
 
-- reads `.orca/tests/{{ run.test_name }}/assertions.md`,
-- inspects the worktree, the slice's per-state result files under `{{ run.run_dir }}/state-results/`, and the run summary,
-- grades each criterion `pass | fail | not_applicable`,
-- writes `{{ run.run_dir }}/report.md`,
-- writes a structured result JSON at `{{ result_path }}`.
-
-Concrete inline prompt:
+`orca test add` ships a minimal inline prompt that does exactly this. It's deliberately terse:
 
 ```yaml
+    worker:
+      kind: claude-code
+      prompt:
         text: |
           # Assert
-
-          You are the evaluator for test `{{ run.test_name }}`.
-
-          ## Step 1: Load the criteria
-          Read `.orca/tests/{{ run.test_name }}/assertions.md`. Each `### <id>`
-          heading is one criterion. The prose under the heading IS the criterion
-          — read it literally.
-
-          ## Step 2: Gather evidence
-          - Worktree state (current files).
-          - Per-state results in `{{ run.run_dir }}/state-results/`.
-          - Run summary: `{{ run.summary }}`.
-          - Session history: `{{ run.sessions }}`.
-
-          ## Step 3: Grade each criterion
-          For each `### <id>`, decide:
-          - `pass` — the criterion is satisfied.
-          - `fail` — the criterion is not satisfied.
-          - `not_applicable` — the slice didn't reach a point where this could
-            be evaluated (e.g. blocked early). Use sparingly.
-
-          One-sentence reason per criterion.
-
-          ## Step 4: Write report.md
-          Write `{{ run.run_dir }}/report.md` with this shape:
-
-          ```markdown
-          # Test report: {{ run.test_name }}
-
-          **Outcome:** <passed | failed | inconclusive>
-
-          ## Summary
-          <N> / <total> criteria passed.
-
-          ## Criteria
-          | ID | Status | Reason |
-          |---|---|---|
-          | <id-1> | pass | ... |
-          ```
-
-          ## Step 5: Emit the structured result (FINAL action)
-          Write `{{ result_path }}`:
+          Read tests/{{ run.test_name }}/assertions.md, grade each criterion,
+          write {{ run.run_dir }}/report.md, then write {{ result_path }}.
 
           ```json
           {{ result_example | tojson(indent=2) }}
           ```
-
-          Outcome rules:
-          - `passed` — every criterion reported `pass` or `not_applicable`.
-          - `failed` — at least one criterion reported `fail`.
-          - `inconclusive` — you couldn't grade reliably (slice crashed, setup
-            failed upstream, evidence missing).
+      timeout: 600
+      result_format:
+        outcome:
+          type: enum
+          values: [passed, failed, inconclusive]
+        criteria:
+          type: list
+          items: "string"
+    on:
+      passed: done
+      failed: done
+      inconclusive: done
 ```
 
-Default the skeleton's three outcomes (`passed`, `failed`, `inconclusive`) all to `done` — the test terminates after evaluation in every case.
+**Keep the scaffold as-is for most tests.** The evaluator agent knows how to read assertions and produce a report from a short instruction; over-specifying the prompt risks the evaluator overfitting to a particular report shape and missing criteria that don't fit it. The terseness is intentional, not provisional.
+
+Extend the prompt only when the scaffold demonstrably falls short — e.g. the evaluator is consistently failing to gather evidence from the right place, or you need a specific report layout for a downstream consumer. Reasonable extensions, in increasing order of intrusiveness:
+
+- Add a *gather evidence* line listing the dirs to inspect (worktree, `{{ run.run_dir }}/state-results/`, `{{ run.summary }}`, `{{ run.sessions }}`).
+- Add a *grading rubric* line defining `pass` / `fail` / `not_applicable`.
+- Add a *report shape* template if the report needs a fixed columnar layout.
+- Add explicit *outcome rules* (`passed = all pass-or-na`; `failed = any fail`; `inconclusive = ungradeable`).
+
+If you make any of these changes, add a one-line comment above the change naming the symptom it fixes — otherwise future you will trim it back as "extra".
+
+The skeleton's three outcomes (`passed`, `failed`, `inconclusive`) already route to `done`; leave that wiring alone — the test terminates after evaluation in every case.
 
 ### Step 8 — Write `assertions.md`
 
@@ -387,10 +397,10 @@ The CLI submits the run to the daemon and prints the run id. The CLI is currentl
 After the run completes, read the report:
 
 ```bash
-cat .orca-state/runs/orca/test-review-catches-sql-injection-*/report.md
+cat .orca-state/runs/<branch>/<workflow>/report.md
 ```
 
-Or use the path printed by the assert state.
+The layout is `.orca-state/runs/<branch>/<workflow>/` — the `<branch>` segment is whatever orca derived for the test run (defaults to the current branch at submission time; tests submitted from `main` end up under `runs/main/...`). The `<workflow>` segment is the test name. The path printed by the assert state at end-of-run is the canonical one — copy from there if you're unsure.
 
 **Iterate.** First runs usually surface one of three problems:
 

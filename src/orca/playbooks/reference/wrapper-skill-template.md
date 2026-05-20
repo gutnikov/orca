@@ -70,11 +70,11 @@ When this skill triggers:
    - `<field-1>`: <one-line guidance, taken from the workflow's issue.fields block>
    - `<field-2>`: <one-line guidance>
    - <... one bullet per issue field>
-3. Verify the orca daemon is running (use the `orca_daemon_status` MCP tool; if not running, call `orca_start_run` will fail with a clear message — start it via `orca daemon start` in a shell).
+3. Check the daemon. Call `orca_daemon_status`; if it reports the daemon is not running, tell the user to start it themselves with `orca daemon start` in a shell at the project root. Do not call `orca_start_run` until the daemon is up — it will return a clear error.
 4. Write `task.md` at the project's existing convention — `task.md` at repo root, or under `input/`/`tasks/` if the project already uses one of those. Match what's already there.
-5. Start the run via the MCP tool:
+5. Start the run via the MCP tool. The `workflow` argument is the workflow filename without `.yml` — that is `<workflow-file-stem>` below, **not** the wrapper-skill name (those usually match, but if the user renamed the wrapper they will not):
    ```
-   orca_start_run(root="<absolute repo path>", task_file="<task-file path>", workflow="<wrapper-name>")
+   orca_start_run(root="<absolute repo path>", task_file="<task-file path>", workflow="<workflow-file-stem>")
    ```
 6. Report the `run_id` returned by the MCP tool to the user. Tell them they can ask to supervise it (which will route to the `orca-workflow-run` skill), or just wait for it to finish.
 

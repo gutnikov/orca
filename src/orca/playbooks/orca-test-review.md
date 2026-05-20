@@ -93,6 +93,8 @@ The contract: every byte in the worktree comes from `state_ref`'s commit history
 
 ### Marker & resolution
 
+All commands in this subsection assume the current directory is the repo root.
+
 - [ ] **`state_ref` is present in `input.md` frontmatter.** Grep: `grep -n '^state_ref:' .orca/tests/<name>/input.md` — should return exactly one line.
 - [ ] **`state_ref` is not the placeholder.** `TODO_STATE_REF` means the scaffold ran but the author never authored the state. Flag as Critical — the test cannot run.
 - [ ] **`state_ref` resolves to a real branch.** Run: `git rev-parse --verify $(yq '.state_ref' .orca/tests/<name>/input.md)`. Exit code 0 = ref exists. If not, the test cannot run.

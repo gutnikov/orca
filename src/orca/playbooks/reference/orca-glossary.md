@@ -4,12 +4,18 @@ One-line definitions for terms that recur across the playbooks. Use this as a ti
 
 ## Workflow shape
 
-- **Workflow.** A single `.orca/{flow}.yml` file plus its referenced prompt templates. A project may have many workflows under `.orca/`. Selected at run time with `orca run task.md -w <flow>`; `default.yml` is the default.
-- **Type.** One self-contained state machine inside a workflow (e.g. `epic`, `task`). In legacy single-type configs, the parser auto-wraps everything as type `default`. Each type has its own `fields`, `initial`, and `states`. The top-level `root_type` names which type root issues start as.
+- **Workflow.** A `.orca/{flow}.yml` file plus its prompt templates. Selected via `orca run -w <flow>`; `default.yml` is the default.
+- **Type.** One self-contained state machine inside a workflow (e.g. `epic`, `task`). Each type has its own `fields`, `initial`, and `states`; the top-level `root_type` names which type root issues start as. Legacy single-type configs are auto-wrapped as type `default`.
 - **State.** A named position in a type's state machine. Has a `worker` (active) or doesn't (passive).
 - **Active state.** Has a `worker:` block. The worker runs, produces a result, and the result's outcome routes via `on:`.
 - **Passive state.** Has no `worker:` and no `on:`. Issue parks here until a manual `AdvanceEvent` (CLI / TUI / API). Used for human gates.
 - **Issue.** A single unit of work flowing through the state machine. Has fields, a current state, an event log, and (optionally) children. The starting issue of a run is the *root issue*.
+
+## Test shape
+
+- **Slice.** The body of an orca test: one or more states copied verbatim from a production workflow YAML into `.orca/tests/<name>/test-flow.yml`. The slice's `result_format`, prompts, and internal transitions match production; outgoing transitions to states outside the slice are rewritten to `assert`. A slice may be single-state (unit), multi-state (subgraph), or the full workflow (end-to-end).
+- **Assert (state).** The tail state of every orca test. Reads `assertions.md`, inspects the worktree and per-state results, grades each criterion, writes `report.md`, and emits a structured outcome (`passed` / `failed` / `inconclusive`). All three outcomes terminate the test by routing to `done`.
+- **State branch.** An orphan git branch under the `orca-test-state/` namespace whose tip is the worktree the slice's first state will see. Created by `orca test add <name>` and edited via the persistent worktree at `.orca-state/test-states/<name>/`. Referenced from a test's `input.md` frontmatter via the `state_ref:` line. Carries the deterministic fixture bytes; nothing produced at run time should depend on what the LLM did the previous time.
 
 ## Outcomes vs transitions vs targets
 
@@ -24,7 +30,7 @@ These three terms are routinely conflated. They are distinct:
 | Name | Kind | What it does |
 |---|---|---|
 | `done` | built-in target | Terminal. Issue stays here permanently and triggers cascading unblock of parents/dependents. |
-| `failed` | built-in target | Not a destination state. Used as a target (`on: { irrecoverable: failed }`) to trigger worker-failure / retry semantics for that outcome. Increments `failure_count`; orca retries up to `max_worker_retries` then surfaces as stuck. |
+| `failed` | built-in target (control directive) | Not a final resting state. Routing `on: { irrecoverable: failed }` increments `failure_count` and the engine retries the same state up to `max_worker_retries` or surfaces a stuck issue. The issue does not move into `failed` — it stays where it is with a bumped counter. |
 | `waiting` | built-in outcome | Emitted by the worker (`{"outcome": "waiting", "reason": "..."}`) to pause for human input. No `on:` rule needed; do not declare in `values:`. Pauses the inactivity timer; resumes when unblocked via `orca unblock`. |
 
 **`failed` as an outcome value is not the same thing as the built-in `failed` target.** You may declare `values: [applied, failed]` and route `failed: implementing` — that's a regular user-defined outcome. What matters is the right-hand side of the `on:` rule.
@@ -80,5 +86,7 @@ Worker activity is reported separately: `worker_active: bool` indicates whether 
 
 - `.orca/{flow}.yml` — workflow config.
 - `.orca/prompts/{state}.md` — one prompt template per active state.
-- `.orca/playbooks/` — bundled playbooks (created by `orca init`; this file lives here in user projects).
-- `.orca-state/` — runtime data, worker logs, worktrees. Gitignored.
+- `.orca/tests/<name>/` — orca tests (`test-flow.yml`, `input.md`, `assertions.md`).
+- `orca-test-state/<name>` — orphan git branches that hold the worktree state for each test (created by `orca test add`). Never authored interactively; edited from a persistent worktree under `.orca-state/test-states/<name>/`.
+- `.orca-state/` — runtime data, worker logs, run/test worktrees. Gitignored.
+- Playbooks (the doc you're reading) ship inside the installed orca package and are served on demand via the `orca_get_playbook` / `orca_list_playbooks` MCP tools — there is no per-project `.orca/playbooks/` directory.

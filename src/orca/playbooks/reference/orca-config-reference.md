@@ -43,9 +43,9 @@ max_hops: 10
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `root_type` | string | yes (typed) | — | Must match a key in `types:` |
-| `max_hops` | positive int | no | unset (unbounded) | Max state transitions per issue. Prevents infinite loops. **Recommended: 10–20.** |
-| `max_worker_retries` | positive int | no | unset (unbounded) | Max worker failures per issue in the same state before giving up. **Recommended: 3–5.** |
-| `base_branch` | string | no | — | Default git branch new feature branches are cut from and merge back into. At runtime, orca injects this value into every issue context as `{{ issue.base_branch }}` (see *Auto-Populated Fields* below). |
+| `max_hops` | positive int | no | 10 (CLI-injected; engine itself is unbounded) | Max state transitions per issue. Prevents infinite loops. **Recommended: 10–20.** `orca run` injects 10 unless `--max-hops` is passed or the workflow YAML sets a value. |
+| `max_worker_retries` | positive int | no | 3 (CLI-injected; engine itself is unbounded) | Max worker failures per issue in the same state before giving up. **Recommended: 3–5.** `orca run` injects 3 unless `--max-retries` is passed or the workflow YAML sets a value. |
+| `base_branch` | string | no | `origin/main` | Default git branch new feature branches are cut from and merge back into. At runtime, orca injects this value into every issue context as `{{ issue.base_branch }}` (see *Auto-Populated Fields* below). |
 
 ## Type Definition
 
@@ -84,12 +84,14 @@ Collections of child issues use the special `sub_issues` form in `result_format`
 
 ### Auto-Populated Fields
 
-These are set by the orchestrator at runtime, not by the user. Declare them in `fields:` only if your prompts need to reference them via Jinja:
+These are set by the orchestrator at runtime, not by the user.
 
-| Field | Set When | Contains |
-|---|---|---|
-| `failure_context` | Worker fails or transitions to the built-in `failed` target | Error message from the last failure (use in retry prompts) |
-| `base_branch` | Worker dispatched | The global `base_branch` value, injected into the issue context as `{{ issue.base_branch }}` |
+| Name | Set When | Access path in prompts | Schema requirement |
+|---|---|---|---|
+| `failure_context` | Worker fails or transitions to the built-in `failed` target | `{{ issue.fields.failure_context }}` — **inside `fields`** | Must be declared in the type's `fields:` block (as `type: string`) for the orchestrator to set it. If not declared, the failure context is silently dropped. |
+| `base_branch` | Worker dispatched | `{{ issue.base_branch }}` — **top-level on `issue`, not under `fields`** | No declaration needed; always available when the workflow's `base_branch` is set. |
+
+The two access paths differ because `failure_context` is layered into the user-defined field schema (you opt in by declaring it), while `base_branch` is a runtime-only injection that doesn't live in the schema. The prompt-create playbook restates this where it bites — see [`../orca-prompt-create.md`](../orca-prompt-create.md) Step 2.
 
 ## State Definition
 
@@ -104,7 +106,8 @@ states:
                                # — or { text: "Inline Jinja {{ issue.fields.title }}..." } for inline source
       timeout: 1200          # Optional. Hard kill after N seconds of total wall-clock
       inactivity_timeout: 300  # Optional. Kill if no progress for N seconds. Default: 300.
-                               # Paused while the worker's last outcome is `waiting`.
+                               # Paused while the worker is in the `waiting` outcome
+                               # (see *Built-in Outcomes* below).
       model: claude-sonnet-4-6  # Optional. Override worker model
       args: ["--max-turns", "100"]  # Optional. Extra CLI args
       progress: true         # Optional. Enable PROGRESS: <pct> | <status> reporting
@@ -176,14 +179,16 @@ Requires `sub_issues` with `items: "$issue"` in `result_format`.
 
 ## Built-in Transition Targets
 
-Always-valid targets in any `on:` rule. Never define them under `states:` — the parser will reject it.
+Both targets are always-valid in any `on:` rule. Neither may be defined explicitly under `states:` — the parser will reject it.
 
 | Target | Behavior |
 |---|---|
-| `done` | Terminal. The issue stays here permanently and triggers a cascading unblock of parents/dependents. |
-| `failed` | Not a destination state — using `failed` as the target of an `on:` rule (e.g. `on: { irrecoverable: failed }`) triggers worker-failure/retry semantics for that outcome. The issue's `failure_count` increments and orca either retries (if under `max_worker_retries`) or surfaces a stuck issue. |
+| `done` | A terminal sink. The issue parks here permanently and triggers cascading unblock of parents/dependents. Routing an outcome to `done` ends the issue cleanly. |
+| `failed` | A *control directive*, not a destination state. Routing an outcome to `failed` (e.g. `on: { irrecoverable: failed }`) tells the engine to treat that outcome as a worker failure: it increments `failure_count`, and the engine either retries the same state (if under `max_worker_retries`) or surfaces a stuck issue. The issue does not "live" in `failed` — it stays in its current state, just with a bumped failure counter. |
 
-Note: an *outcome value* named `failed` is **not** the same thing as the built-in `failed` target. You may use `failed` as an outcome value (e.g. `values: [applied, failed]`) and route it to any state — what matters is the right-hand side of the `on:` rule, not the outcome name.
+The naming asymmetry is on purpose: `done` is where issues *end up*, `failed` is what happens *to them*. In the engine code both are members of a `BUILTIN_STATES` set (because both are valid right-hand sides of an `on:` rule), but only `done` is an actual final resting state.
+
+**Outcome value named `failed` ≠ built-in `failed` target.** You may declare `values: [applied, failed]` and route `failed: implementing` — that is a user-defined outcome going to a user-defined state, no special semantics. Only the right-hand side of the `on:` rule matters for triggering failure handling.
 
 ## Built-in Outcomes
 
@@ -212,21 +217,28 @@ Orca recognizes `.orca/tests/<name>/test-flow.yml` as a test workflow.
     scoping.md
   tests/
     scoping-decomposes-large-spec/
-      test-flow.yml          # bookended workflow: setup -> slice -> assert
-      input.md               # scenario + YAML frontmatter (seeds issue.fields)
-      assertions.md         # pass/fail checklist
-      fixtures/              # optional — files setup may copy into the worktree
+      test-flow.yml          # bookended workflow: <body slice> -> assert
+      input.md               # scenario + YAML frontmatter (seeds issue.fields, declares state_ref)
+      assertions.md          # pass/fail checklist
+```
+
+Plus, outside `.orca/`:
+
+```
+orca-test-state/<name>            # orphan git branch holding the worktree fixture bytes
+.orca-state/test-states/<name>/   # persistent author worktree checked out to that branch
 ```
 
 Recognized conventions:
 
 - The directory `<name>` is kebab-case and descriptive of the scenario.
 - The workflow file is named `test-flow.yml` (not `orca.yml`) so it's grep-distinguishable from production workflows.
-- The directory must also contain `input.md` (issue data + scenario) and `assertions.md` (pass/fail checklist). `fixtures/` is optional.
-- The workflow follows a bookended shape: `setup -> <body slice> -> assert`. Body states are copied verbatim from the production workflow; `prompt:` paths use `../../prompts/<name>.md` and the loader resolves them at config-load time (workers never see `..` paths).
-- When the engine loads a config file at this path, it sets `run.test_name = <name>` in the Jinja template context. Setup and assert inline prompts use this to locate sibling files (`input.md`, `assertions.md`, `fixtures/`).
-- `input.md` supports YAML frontmatter at the top. The engine parses it and seeds `issue.fields.*` before the setup state runs, so trivial setups are effectively judgment-free.
+- The directory must also contain `input.md` (issue data + scenario + `state_ref` marker) and `assertions.md` (pass/fail checklist).
+- The workflow follows a bookended shape: `<body slice> -> assert`. There is no `setup` state — the daemon checks the branch named by `input.md`'s `state_ref` frontmatter out into the run worktree before any body state runs. Body states are copied verbatim from the production workflow; `prompt:` paths use `../../prompts/<name>.md` and the loader resolves them at config-load time (workers never see `..` paths).
+- When the engine loads a config file at this path, it sets `run.test_name = <name>` in the Jinja template context. The `assert` inline prompt uses this to locate the sibling `assertions.md`.
+- `input.md` supports YAML frontmatter at the top. The engine parses it and seeds `issue.fields.*` before the slice's entry state runs. The frontmatter must include a `state_ref:` line naming the git branch to check out into the worktree (typically `orca-test-state/<name>`).
 - The `assert` state writes `report.md` into `{{ run.run_dir }}/report.md`. The source directory stays clean; reports live with the run.
+- The fixture bytes the slice will read live on the state-ref branch, not in a `fixtures/` directory and not under `.orca/tests/<name>/`. Author them by `cd`'ing into the persistent worktree at `.orca-state/test-states/<name>/` and committing with plain git. (A `fixtures/` directory under a test is a leftover from the pre-state-branch model — flag it via `orca-test-review.md`.)
 
 See [`../orca-test-create.md`](../orca-test-create.md) for the authoring procedure and [`../orca-test-review.md`](../orca-test-review.md) for the audit checklist.
 

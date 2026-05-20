@@ -64,8 +64,8 @@ Decision points to make explicit with the user:
 | Single-type vs multi-type | Does this workflow decompose one big task into many smaller ones (epic → tasks)? If yes → multi-type. Otherwise single-type. |
 | Where to decompose | Early decomposition = more parallelism but less control. Late = vice versa. |
 | `max_workers` per state | Merge/apply/deploy states should be `1`. Independent work states can omit it (unbounded). |
-| `max_hops`, `max_worker_retries` | Use the recommended defaults in [`orca-config-reference.md`](reference/orca-config-reference.md) (typically `max_hops: 10–20`, `max_worker_retries: 3–5`); raise only if the user has a reason. |
-| Branch strategy | Does each issue get its own feature branch (`branch_prefix`), or does everything happen on one branch? |
+| `max_hops`, `max_worker_retries` | Use the recommended defaults in [`orca-config-reference.md`](reference/orca-config-reference.md) (typically `max_hops: 10–20`, `max_worker_retries: 3–5`); raise only if the user has a reason. The CLI applies 10 / 3 if neither workflow YAML nor `--max-hops` / `--max-retries` sets a value. |
+| Branch strategy | The run branch is chosen at `orca run` time (auto-derived from the issue, or set via `-b/--branch`). The `base_branch` config controls what new branches are cut from and merged back into. There is no per-state "branch prefix" knob; check with the user whether each issue should land on its own branch (typical) or on a shared one. |
 | Human-in-the-loop | Will any state need the `waiting` outcome (i.e., pause for human input)? Where? |
 
 Get the user to sign off on the diagram. **Do not write a single line of YAML until they do.**
@@ -125,17 +125,19 @@ Run through the three-layer audit from [`orca-workflow-review.md`](orca-workflow
 
 Report findings as **Critical / Important / Minor**. Fix critical and important issues before proceeding. Confirm minor issues with the user — they may be intentional.
 
-### Step 7 — Offer a test run
+### Step 7 — Offer an end-to-end smoke run
 
 Once the workflow validates:
 
-> "Workflow is ready. Want me to write a small `task.md` and run it as a smoke test?"
+> "Workflow is ready. Want me to write a small `task.md` and kick off an end-to-end smoke run?"
 
-If yes, follow [orca-workflow-run.md](orca-workflow-run.md) with a tiny test task scoped to surface workflow bugs (not production work). If the test surfaces issues, loop back to step 4 or 5 — fix the config/prompts and rerun.
+This is an *optional* live run: a tiny task scoped to surface workflow bugs (not production work). The user may decline — but you must ask, and record their answer in the final report. If they accept, follow [orca-workflow-run.md](orca-workflow-run.md). If the run surfaces issues, loop back to step 4 or 5 — fix the config/prompts and rerun.
 
-### Step 8 — Auto-scaffold per-state smoke tests
+Distinct from Step 8 below, which scaffolds *static* per-state structural tests without running anything.
 
-For every active state, scaffold a structural smoke test under `.orca/tests/<state>-smoke/`. **No user interaction** — this is automatic, mechanical, and bounded. It does not exercise semantic correctness; that comes later as a separate phase via [`orca-test-create.md`](orca-test-create.md).
+### Step 8 — Auto-scaffold per-state structural tests
+
+For every active state, scaffold a per-state structural test under `.orca/tests/<state>-smoke/`. The steps in *this* step are mechanical and bounded; do them silently without asking — that's the deliberate contrast with Steps 1–7 (conversational) and Step 9 (offered). The scaffolds are unconditional because they're cheap, schema-derived, and add value at zero cost; an "opt out" prompt would only be friction. They do not exercise semantic correctness; that comes later as a separate phase via [`orca-test-create.md`](orca-test-create.md).
 
 For each active state:
 
@@ -172,9 +174,9 @@ For each active state:
 
 After scaffolding every state, report the paths and explain the next step:
 
-> "Smoke test scaffolds created under `.orca/tests/`. Each one structurally verifies its state's output schema. To make them runnable, add a scenario to `input.md` and arrange the state branch (per `orca-test-create.md` Step 6). To add semantic correctness criteria, run `orca-test-create` for each test."
+> "Per-state structural test scaffolds created under `.orca/tests/`. Each one structurally verifies its state's output schema. To make them runnable, add a scenario to `input.md` and arrange the state branch (per `orca-test-create.md` Step 6). To add semantic correctness criteria, run `orca-test-create` for each test."
 
-Do **not** run the tests during this step. Do **not** iterate on results. Do **not** ask the user to opt out, choose scope, or pick an alternative shape — the scaffolds are unconditional. A workflow ships with at least its structural surface in place; users decide later how much semantic depth to add.
+Don't run the tests during this step. Don't iterate on results. Don't ask the user to opt out, choose scope, or pick an alternative shape. A workflow ships with at least its structural surface in place; users decide later how much semantic depth to add.
 
 ### Step 9 — Offer a convenience wrapper skill (optional)
 
@@ -188,12 +190,14 @@ Pick the example phrase from Step 1's "what does it do" answer.
 
 If the user says **yes**, follow [`reference/wrapper-skill-template.md`](reference/wrapper-skill-template.md) end-to-end. The shape:
 
-1. **Confirm the name.** Default = the workflow's filename without `.yml`. The user may override.
+1. **Confirm two names.**
+   - **Wrapper name** — the SKILL.md directory name. Default = the workflow's filename without `.yml`. The user may override.
+   - **Workflow file stem** — the workflow's YAML filename without `.yml`, set in Step 4 (e.g. `develop` for `.orca/develop.yml`). The user does *not* override this; it's whatever Step 4 produced. The template's `orca_start_run(...workflow="<workflow-file-stem>")` call binds to this, not to the wrapper name. They usually match — but if the user renamed the wrapper, they don't, and the wrapper would otherwise point at a non-existent workflow.
 2. **Author the `description:` line.** This is the most important step — it's the *only* thing the host CLI uses to decide whether to route to the wrapper. Generate a description per the rules in the template doc (lead with `"Use when..."`, enumerate ≥3 concrete trigger phrases, name the action, ≤80 words, don't mention Orca). Show to the user and iterate until they confirm the phrasing matches how the team actually talks.
-3. **Fill the template** with workflow name, issue-schema fields (from Step 3), and the confirmed description.
+3. **Fill the template** with wrapper name, workflow file stem, issue-schema fields (from Step 3), and the confirmed description.
 4. **Write both files** with identical content:
-   - `.claude/skills/<name>/SKILL.md` (Claude Code)
-   - `.agents/skills/<name>/SKILL.md` (Codex)
+   - `.claude/skills/<wrapper-name>/SKILL.md` (Claude Code)
+   - `.agents/skills/<wrapper-name>/SKILL.md` (Codex)
 5. **Check `.gitignore`.** If `.claude/skills/` or `.agents/skills/` is ignored wholesale, surface it and offer to add an exception (`!.claude/skills/`). Don't silently un-ignore.
 6. **Report.** Print both paths plus: *"Wrapper ready. Next session, anyone in either CLI can say `<example phrase>` to kick off a run. To supervise an in-flight run, ask me to babysit it."*
 
@@ -201,7 +205,7 @@ If the user says **no**, note it in the final report and move on.
 
 ## Anti-patterns to refuse (or push back on)
 
-- **Declaring the workflow done without asking about tests.** Step 8's ask is non-skippable. The user may answer "no" — but they must be asked, and the answer recorded.
+- **Closing out the workflow without acting on Steps 7 and 8.** Step 8's per-state structural scaffolds are unconditional — they must exist before "done". Step 7's end-to-end smoke run is an *ask*: the user may decline, but they must be asked, and their answer recorded.
 - **No escape hatch.** Every active state needs `blocked` or `waiting` in addition to success outcomes. Refuse to write a state that can only succeed.
 - **Result format / prompt drift.** If you change `result_format`, update the prompt's output contract in the same edit. Never commit one without the other.
 - **Hidden fan-out on a merge state.** A merge/apply state must have `max_workers: 1`. Surface this explicitly to the user.
@@ -214,7 +218,7 @@ If the user says **no**, note it in the final report and move on.
 Report to the user:
 - File paths written (`.orca/{flow}.yml`, `.orca/prompts/*.md`)
 - The final state-machine diagram
-- Whether a smoke run was performed and its outcome (Step 7)
-- **Per-state tests** (Step 8): list of tests created with paths and pass/fail status, **or** "user declined" with the recorded reason
+- Whether an end-to-end smoke run was performed and its outcome (Step 7) — or "user declined" with the recorded reason
+- **Per-state structural tests** (Step 8): list of test directories created with paths. There is no "user declined" case here — Step 8 is unconditional.
 - **Wrapper skill** (Step 9): wrapper name plus both written paths (`.claude/skills/<name>/SKILL.md`, `.agents/skills/<name>/SKILL.md`), **or** "user declined"
 - What to do next: either run a real task ([orca-workflow-run.md](orca-workflow-run.md)) or commit the workflow + test files
