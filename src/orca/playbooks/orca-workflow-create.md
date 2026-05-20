@@ -100,24 +100,20 @@ Show the file to the user and ask: *"Does this match what you described?"* Don't
 
 ### Step 5 — Write prompt templates
 
-For each active state, create `.orca/prompts/{state}.md`. Follow [`orca-prompt-create.md`](orca-prompt-create.md) exactly:
+For each active state, create `.orca/prompts/{state}.md` via [`orca-prompt-create.md`](orca-prompt-create.md). That playbook is a **pure procedure** — it consumes a state specification and emits a prompt. It does not interact with the user; the user-interaction layer is here in workflow-create.
 
-- Lead with role and task context (`{{ issue.fields.title }}`, `{{ issue.fields.description }}`, etc.)
-- Spell out scope boundaries — what the worker is **not** allowed to do
-- List concrete steps (numbered)
-- Include verification (run tests, type-check, lint — match the project's actual conventions)
-- Output contract at the bottom:
-  ````
-  Write your result to `{{ result_path }}`:
+For each active state, assemble a spec from what you already have:
 
-  ```json
-  {{ result_example | tojson(indent=2) }}
-  ```
-  ````
+- **State name** (already in the YAML from Step 4)
+- **One-sentence job** (derive from the state's purpose in Step 2)
+- **`result_format`** (already in the YAML from Step 4 — the prompt-creator reads it directly)
+- **Inputs** — which `issue.fields.*` and which upstream-state result fields the worker reads
+- **Constraints** — branch behaviour, scope boundaries, no-touch rules
+- **Verification** — concrete commands from the project's conventions (pytest / cargo test / npm test / etc.)
 
-For multi-state workflows, prompts should reference what the previous state produced (e.g., a `plan` field set by a planning state).
+Pass that spec to `orca-prompt-create`. After it returns, show the prompt to the user and ask: *"Does this capture what `<state>` should do?"* If the user wants changes, re-invoke `orca-prompt-create` in Update mode with the specific instruction — do **not** edit the prompt directly here.
 
-Show each prompt to the user. Adjust per their feedback before writing the next one.
+For multi-state workflows, each prompt's spec should reference what the previous state produced (e.g., a `plan` field set by a planning state).
 
 ### Step 6 — Validate
 
@@ -146,7 +142,7 @@ Before declaring the workflow done, you **must** ask the user about creating tes
 If the user says **yes**:
 
 1. **Pick the scope.** Ask which states to cover. Default: every active state. For large workflows (5+ states), suggest starting with the highest-risk 1–2 (typically planning and implementing equivalents); the user can add more later.
-2. **Per state, follow [`orca-test-create.md`](orca-test-create.md) end-to-end.** Each test is a `setup -> {state} -> assert` single-state slice. The scenario, `assertions.md`, and `result_format` should already have been drafted as part of Step 5 (per [`orca-prompt-create.md`](orca-prompt-create.md) Step 1) — re-use those artefacts rather than re-drafting from scratch.
+2. **Per state, follow [`orca-test-create.md`](orca-test-create.md) end-to-end.** Each test is a `setup -> {state} -> assert` single-state slice. The state's `result_format` is already in the YAML from Step 4; the assertion-creator drafts `assertions.md` against it (the prompt-creator never sees assertions — see the Three-Agent Principle in [`reference/assertions-design.md`](reference/assertions-design.md) §1.5).
 3. **Run each test once after scaffolding.** Read the report. Iterate per [`reference/assertions-design.md`](reference/assertions-design.md) §5 — walk the failure-attribution taxonomy and apply the minimal edit. Continue until criteria pass, or the user accepts the remaining gaps.
 4. **Commit each test directory** under `.orca/tests/<scenario>/` only after the first run completes (passing or with user-accepted failures).
 

@@ -18,7 +18,27 @@ The paradigm has three consequences the agent must internalize:
 2. **When the result is wrong, the first move is reading the report — not editing the prompt.** The report names the failing criterion. The criterion points at the cause. Editing without reading presumes a cause.
 3. **"Looks fine to me" is not a valid state.** Either the result passes the assertions, or it doesn't. If you find yourself eyeballing output to judge quality, you are missing a criterion — write it.
 
-Under this paradigm, tests do not come last. They come *first*, in stub form, and evolve alongside the prompt — see [`orca-prompt-create.md`](../orca-prompt-create.md) Step 1, where `assertions.md` and `result_format` are drafted before any prompt prose.
+Under this paradigm, tests do not come last. They come *first*, in stub form, and evolve alongside the prompt. The assertion-creator drafts `assertions.md` *and* the state's `result_format` schema in the workflow YAML before any prompt is written; the prompt-creator then reads `result_format` from the YAML and produces a prompt that makes the worker emit results matching it.
+
+## 1.5. The Three-Agent Principle
+
+The methodology is split across three agents that **must not share procedures or read each other's artifacts**:
+
+| Agent | Reads | Writes | Cannot read |
+|---|---|---|---|
+| **Prompt-creator** | State spec (job, `result_format`, inputs, constraints, verification) from `.orca/{flow}.yml` | `.orca/prompts/{state}.md` | `assertions.md`, test reports, evaluator's prompt |
+| **Worker** (prompt executor) | The rendered prompt at runtime | `result.json` per the schema | `assertions.md`, the evaluator's prompt, how it's graded |
+| **Evaluator** (assertion grader) | `assertions.md`, worker's `result.json`, worktree side-effects | `report.md`, structured outcome | The prompt-creator's playbook, the worker's prompt |
+
+This is a deliberate Chinese-wall pattern. The rationale:
+
+- **A prompt-creator that can read assertions will optimize the prompt to pass them** instead of solving the underlying task — adding "remember to output X to satisfy criterion Y" rather than reasoning about why X matters. Prompts become assertion-shaped rather than task-shaped, and the assertions stop being an independent check.
+- **A worker that sees how it will be graded games the grading** — emitting just enough to satisfy each criterion literally, not what the task actually demanded. The prompt's instructions become irrelevant; the worker reverse-engineers the rubric.
+- **An evaluator that has seen the prompt may infer the worker's intent and rubber-stamp it** — judging "did the worker try to do what the prompt asked" instead of "did the result satisfy the criterion as written". Soft-grading creeps in.
+
+Each agent must be a pure function of its own inputs. When something goes wrong, attribution is done by a coordinator (a human or an upstream skill); the relevant agent then receives an updated spec or criterion and produces a fresh artifact, without ever seeing the others' work.
+
+For the prompt-creator specifically: [`orca-prompt-create.md`](../orca-prompt-create.md) is deliberately written without any reference to `assertions.md`, test execution, or the failure-attribution taxonomy. Don't link those concepts into a prompt the agent will read.
 
 ## 2. Anatomy of a good assertion
 
@@ -68,19 +88,19 @@ Side-effects (commits, edited files) are gradable too — but coarser than `resu
 
 ## 3. The link to `result_format`
 
-The link between assertions and prompts is `result_format`. Every criterion needs evidence; every piece of evidence comes from a field in `result_format` or from a worktree side-effect. So the order of design is:
+The link between assertions and prompts is `result_format` — and the assertion-creator owns both. Every criterion needs evidence; every piece of evidence comes from a field in `result_format` or from a worktree side-effect. So the order of design is:
 
-1. **Draft `assertions.md`** (with the user's help, per Section 5 bootstrap).
-2. **Sketch `result_format` *from the assertions*** — every field a criterion references must be emitted.
-3. **Then draft the prompt** — its job is to make the worker emit the `result_format` correctly. See [`orca-prompt-create.md`](../orca-prompt-create.md) for the authoring procedure.
+1. **Draft `assertions.md`** (with the user's help, per Section 5 bootstrap). Save under `.orca/tests/<scenario>/assertions.md`.
+2. **Sketch `result_format` *from the assertions*** — every field a criterion references must be emitted. Write `result_format` into `.orca/{flow}.yml` under the relevant state.
+3. **Hand off to the prompt-creator.** Per the Three-Agent Principle (§1.5), the assertion-creator does **not** draft the prompt. It hands off a spec — state name, one-sentence job, the `result_format` now in the YAML, the input fields, and any constraints — and [`orca-prompt-create.md`](../orca-prompt-create.md) takes over. The prompt-creator never sees `assertions.md`.
 
-This inverts what feels natural ("write the prompt, then add a result schema"). The inversion is what prevents rot.
+This inverts what feels natural ("write the prompt, then add a result schema"). The inversion — plus the Chinese-wall isolation — is what prevents rot.
 
 ### Sketch the result schema *while* drafting assertions, not after
 
-While drafting each criterion, ask: *what field does this read?* If the answer is "I don't know yet", add the field to a running `result_format` sketch. The two artifacts grow together. By the time assertions are complete, the schema is already designed — and the prompt has a concrete output contract to converge on.
+While drafting each criterion, ask: *what field does this read?* If the answer is "I don't know yet", add the field to a running `result_format` sketch. The two artifacts grow together. By the time assertions are complete, the schema is already designed — and the prompt-creator has a concrete output contract to receive.
 
-Cross-reference: [`orca-prompt-create.md`](../orca-prompt-create.md) Step 1 ("Pin down the state's contract") drafts `assertions.md` and sketches `result_format` in its first two sub-items — the contract is pinned before any prompt prose.
+Cross-reference: [`orca-test-create.md`](../orca-test-create.md) is the playbook for drafting `assertions.md` and the matching `result_format`. The handoff to the prompt-creator happens once `result_format` is committed to the YAML.
 
 ## 4. Lifting constraints into assertions
 

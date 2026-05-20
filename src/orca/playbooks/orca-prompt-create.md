@@ -1,6 +1,6 @@
 # Playbook: Create a State Prompt
 
-Write or update a single `.orca/prompts/{state}.md` template — the instructions a worker reads when running a specific state of the workflow. Each **active** state in `.orca/{flow}.yml` has exactly one prompt file. This playbook walks you through producing one that conforms to orca conventions and won't surprise the worker at runtime.
+Write or update a single `.orca/prompts/{state}.md` template — the instructions a worker reads when running a specific state of the workflow. Each **active** state in `.orca/{flow}.yml` has exactly one prompt file. This playbook is a pure procedure: given a state specification, produce a prompt that conforms to orca conventions and won't surprise the worker at runtime. It does not iterate, does not run tests, and does not interact with the user about quality.
 
 > **Passive states have no prompt.** A passive state is one with no `worker:` block — it waits for a manual `AdvanceEvent` (CLI / TUI / API). If the state you're writing for has no worker, you don't need this playbook; see the *Gate State* pattern in [`orca-workflow-patterns.md`](reference/orca-workflow-patterns.md).
 
@@ -8,35 +8,38 @@ Write or update a single `.orca/prompts/{state}.md` template — the instruction
 
 ## Required reading (you, the agent — not the user)
 
-- [`reference/assertions-design.md`](reference/assertions-design.md) — the assertions-first paradigm and the methodology that anchors every prompt this playbook produces. Read this *first*; prompts are downstream of user-curated assertions.
+- [`reference/orca-config-reference.md`](reference/orca-config-reference.md) — template variables, Jinja conventions, `result_format` schema.
 
 ## When to use this
 
-- During **[orca-workflow-create.md](orca-workflow-create.md)** step 5 (writing prompt templates).
-- When adding a new state to an existing workflow.
-- When **[orca-workflow-review.md](orca-workflow-review.md)** flags a prompt-quality issue you need to rewrite.
-- When a worker keeps producing wrong-shape output or ignoring scope — *sometimes* a prompt bug, but walk the failure-attribution taxonomy in [`reference/assertions-design.md`](reference/assertions-design.md) §5 before editing. Five of the six failure modes are not prompt bugs.
+- During **[orca-workflow-create.md](orca-workflow-create.md)** step 5 (writing prompt templates), invoked with a state specification that already includes `result_format`.
+- When adding a new state to an existing workflow, after the state's `result_format` is in the YAML.
+- When given an explicit instruction to modify an existing prompt (add a constraint, rephrase a step, swap a template variable).
 
 ## Prerequisites
 
-- `.orca/{flow}.yml` exists and the target state is defined in it.
-- You know which state you're writing the prompt for (e.g., `implementing`, `reviewing`, `scoping`).
-- You've read [`reference/assertions-design.md`](reference/assertions-design.md). Under the assertions-first paradigm, `assertions.md` and `result_format` are drafted in Step 1 below — *before* any prompt prose. If a `result_format` already exists in the YAML, you'll reconcile against it in Step 1; if not, you'll design it.
+- `.orca/{flow}.yml` exists and the target state is defined in it, **with `result_format` already specified**.
+- You have a state specification:
+  - **State name** (e.g., `implementing`, `reviewing`, `scoping`)
+  - **One-sentence job** describing what the state does
+  - **`result_format`** — already in the workflow YAML
+  - **Inputs** — which `issue.fields.*` the worker reads
+  - **Constraints** — branch behaviour, scope boundaries, no-touch rules
+  - **Verification** — concrete project commands ("pytest tests/", "cargo test", etc.)
 
-## Step 1 — Pin down the state's contract
+If any of these are missing from the spec, stop and request them. Do not invent.
 
-The contract is `assertions.md` + `result_format`. Both are drafted before any prompt prose — that is the assertions-first paradigm. See [`reference/assertions-design.md`](reference/assertions-design.md) §3 for the link to `result_format` and §5 for the bootstrap question set.
+## Step 1 — Confirm the state specification
 
-Settle these six points before drafting the prompt:
+Restate the spec in plain language as a sanity check that nothing is missing:
 
-1. **Draft `assertions.md` first.** Run the 3-question bootstrap (one-sentence success / obvious failure / shape of result). Write 3–5 objective, gradable criteria. Save them under `.orca/tests/<scenario>/assertions.md` per [`orca-test-create.md`](orca-test-create.md). If a scenario directory already exists, edit in place.
-2. **Sketch `result_format` from the criteria.** Every field a criterion references must be emitted. If the state already has a `result_format` in `.orca/{flow}.yml`, reconcile against it (add missing fields, flag judgment-heavy criteria that depend on prose-shape evidence). If not, design one and add it to the YAML. Cross-reference every enum value against the state's `on:` map — they must match.
-3. **Single responsibility.** What is this state's *one* job? Write it as one sentence. If you can't, the state needs to be split — go back to [orca-workflow-create.md](orca-workflow-create.md) and split it before writing this prompt.
-4. **Inputs.** Which `issue.fields.*` does the worker need? (Usually `title`, `description`, plus state-specific fields like `scope_boundary`, `plan`, `acceptance_criteria`.)
-5. **Branch behaviour.** Does this state expect to be on a feature branch? Does it commit? Does it merge? Note this — the constraints section will need to reflect it.
-6. **Verification.** What does "done correctly" mean in this project? (Tests pass? Lint clean? Types check? Specific command? Match the project's actual conventions, not a generic list.)
+- State name and one-sentence job
+- Required `issue.fields.*` (cross-checked against the workflow's `issue.fields` block)
+- `result_format` shape (read from the YAML)
+- Constraints (scope, branch behaviour, off-limits actions)
+- Verification commands
 
-Write these six answers down before drafting the prompt. If anything is unclear, ask the user. The prompt you draft in Step 3 has one job: make the worker emit a result that passes the criteria in (1) and matches the schema in (2).
+If a field referenced by the spec isn't declared in `.orca/{flow}.yml`'s `issue.fields` block — and isn't emitted by an upstream state's `result_format` — stop. The spec is inconsistent with the workflow.
 
 ## Step 2 — Pick the right template variables
 
@@ -294,9 +297,9 @@ max_worker_retries: 3
 
 A self-looping `blocked` outcome is bounded by `max_hops` (each loop = one transition), not by `max_worker_retries` (which counts crashes, not `blocked` results).
 
-## Step 5 — Verify the prompt renders
+## Step 5 — Verify the prompt renders, then write the file
 
-Before committing:
+Before writing:
 
 1. **File path matches the YAML.** Confirm `.orca/prompts/{state}.md` matches the `worker.prompt` path in `.orca/{flow}.yml`. The filename and the YAML reference must agree exactly.
 2. **All field references exist.** Every `{{ issue.fields.X }}` in the prompt must be declared in the workflow's `issue.fields` block (or set by an upstream state's `result_format`). Grep the prompt for `issue.fields.` and cross-check.
@@ -306,39 +309,10 @@ Before committing:
 
 If your editor supports it, render the Jinja template with a sample issue and read the output — many bugs only show up post-render (orphan headers, missing fields, wrong indentation in the JSON block).
 
-## Step 6 — Show the user the assertions, then write the file
-
-For any non-trivial prompt:
-1. Print the draft prompt *alongside* the `assertions.md` it is supposed to satisfy.
-2. Ask the user to verify the **assertions** capture what they want — not whether the prompt prose reads well. The prompt is whatever passes the assertions; the assertions are the durable spec. See [`reference/assertions-design.md`](reference/assertions-design.md) §1.
-3. Adjust assertions if needed; adjust the prompt only as a downstream consequence.
-4. Write to `.orca/prompts/{state}.md`.
-
-Skipping the show-the-assertions step is the most common way to produce a prompt the user later has to rewrite from scratch. The user reviewing the prompt directly is a fallback, not the default — at 200+ lines, prompts are not designed to be read.
-
-## Step 7 — Trigger a re-audit
-
-If you're editing an existing workflow, run **[orca-workflow-review.md](orca-workflow-review.md)** afterwards to confirm the change didn't break structural or efficiency rules. A single prompt edit can ripple — e.g., adding a new `{{ issue.fields.X }}` reference requires that field to exist in the schema.
-
-If you're inside the larger [orca-workflow-create.md](orca-workflow-create.md) flow, the audit is already part of step 6 there; don't double-run it.
-
-## Step 8 — Run the test and iterate
-
-By Step 1 you drafted `assertions.md` and a matching `result_format`. By Steps 3–6 you wrote the prompt. Now run the test that exercises this prompt and iterate per the loop in [`reference/assertions-design.md`](reference/assertions-design.md) §5:
-
-1. Run the test scaffolded under `.orca/tests/<scenario>/` (see [`orca-test-create.md`](orca-test-create.md) for `orca test` invocation). Read `report.md`.
-2. For every failing criterion, walk the failure-attribution taxonomy **before** editing anything. The taxonomy distinguishes Prompt / Assertion / Scenario / `result_format` / Model / Flow failures; each gets a different fix.
-3. Apply the **minimal** edit — one sentence in the prompt, one field in the schema, one rewrite of the criterion, depending on the attribution. Resist broad rewrites.
-4. Re-run. Repeat until all criteria pass, or the user explicitly accepts the remaining gaps.
-
-If a new kind of bad output surfaces later (drift), the first move is **not** editing the prompt. Write a criterion that catches the new output, confirm it fails, then attribute and apply the minimal edit. Never grow the prompt without a failing criterion that justifies it.
-
-Skip this step only for genuinely trivial prompts (one-line decision states with no constraints worth grading).
+Once the checks pass, write the file to `.orca/prompts/{state}.md`. Done — return control to the caller.
 
 ## Anti-patterns to refuse
 
-- **Drafting the prompt before drafting assertions and `result_format`.** The prompt has nothing to converge on. The paradigm requires Step 1 first — see [`reference/assertions-design.md`](reference/assertions-design.md). Refuse and bootstrap.
-- **Adding prompt prose to fix drift without a failing assertion.** Drift = write a new criterion first, confirm it fails, then minimal-edit. "Just in case" prose is how prompts grow from 100 to 500 lines.
 - **Two-job prompts.** "First plan, then implement" in one prompt — refuse, ask to split states.
 - **Prose dump of "everything the worker should know".** Workers follow numbered steps; long paragraphs are skimmed.
 - **Generic verification.** "Run tests" without naming the test runner. Workers will pick the wrong one or skip it.
@@ -350,10 +324,6 @@ Skip this step only for genuinely trivial prompts (one-line decision states with
 
 Report:
 - File written or updated: `.orca/prompts/{state}.md`
-- Assertions drafted and where: `.orca/tests/<scenario>/assertions.md` (criteria count)
-- `result_format` design — added, reconciled, or unchanged
-- Single-responsibility sentence (the one you wrote in Step 1)
+- Single-responsibility sentence (from the spec)
 - Whether all variables resolve against the current issue schema
-- Whether a workflow re-audit was run and its result
-- Whether the test was run and the criteria-pass count
-- Next step (continue iterating, commit, or move to the next state's prompt)
+- Next step (caller's decision — this playbook does not run tests or iterate)
