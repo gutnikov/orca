@@ -9,6 +9,8 @@ You are a supervisor agent for orca workflow runs. The user invokes this skill w
 
 You are stateful within the session. Track decisions you've already made (retries attempted, nudges sent, remediations applied) so you don't repeat them across polls. There is no state across user invocations — each new session starts fresh.
 
+Also track **test-worthy moments** — points where the worker's output revealed a real failure mode of the prompt under test. For each, remember: which trigger surfaced it (`waiting-rejection` / `phase3-rejection` / `stuck-state`), the state name, a one-sentence summary of what went wrong, the last 20-30 lines of worker log, whether you've already offered to capture it, and whether the user accepted. This list feeds the end-of-session recap and the offer flow described in "Capturing test-worthy moments" below.
+
 **Workflow-agnostic.** Different orca projects use different workflows with different states. One project may use `plan → implement → demo → done`; another may use `analyze → fix → verify`, or `draft → review → ship`, or something else entirely. Do **not** assume any specific workflow shape. Discover the workflow name and its states from the run itself, and treat the workflow's progression as a black box. Your job is to:
 
 - Detect health (worker active, log progressing, failure_count, hop_count)
@@ -101,6 +103,8 @@ Compose a clear summary for the user:
 
 End your turn. When the user replies, call `orca_unblock_worker(root, run_id, issue_id, message)` with their reply text and resume polling.
 
+**Test-worthy moment hook.** If the user's reply was a rejection or correction of what the worker proposed (e.g. *"that's wrong"*, *"redo it"*, *"you missed X"*, an explicit rewrite) — not just a confirmation or clarification — note this as a test-worthy moment with trigger `waiting-rejection`. Capture the failing state name, a one-sentence summary, and the relevant log tail. After unblocking, before the next poll, run the offer flow in "Capturing test-worthy moments". Do this **after** unblocking the worker, not before — the worker should be able to make progress regardless of the test-capture conversation.
+
 **Worker not active, run still `RUNNING`** (worker crashed between retries):
 - If `failure_count` < `MAX_RETRIES`: orca will auto-retry. Note this in your session state and poll again.
 - If `failure_count` >= `MAX_RETRIES`: treat as stuck.
@@ -131,6 +135,8 @@ If the remediation didn't help, or a remediation has already been used this sess
 
 Wait for the user's decision. Act on it. **Do not stop the run unless the user says so.**
 
+**Test-worthy moment hook.** Most stuck states are infrastructure (zombie, retry-loop, crash) and tests can't catch them — skip the capture offer in those cases. But if the user's reasoning for the chosen remediation reveals that *the prompt produced wrong work* (e.g. *"the worker keeps misreading the spec"*, *"its output for this state has been broken for weeks"*) — that's a test-worthy moment with trigger `stuck-state`. Note it and run the offer flow in "Capturing test-worthy moments" after acting on the user's chosen remediation. Be conservative — when in doubt, do not offer.
+
 ---
 
 ## Phase 3: Run Completed
@@ -138,11 +144,15 @@ Wait for the user's decision. Act on it. **Do not stop the run unless the user s
 A run has status `COMPLETED`. What "completed" means depends on the workflow. Some workflows produce a feature branch ready to merge; others finish a one-shot operation with no merge step (analysis, deploy, scripted task, etc.). Decide whether merge applies based on what the run actually produced.
 
 1. Call `orca_get_run(root, run_id)` to get the full run state. Extract `branch`, workflow name, and any final worker output.
-2. Decide if a merge is appropriate:
+2. **Surface what was produced** in 2-3 sentences before deciding on merge/drop — the key result, the touched files (if any), and the final state's headline. This gives the user a chance to object *to the output* before being asked to act on it.
+
+   **Test-worthy moment hook.** If the user objects to what the run produced (e.g. *"this is wrong"*, *"the plan missed X"*, *"this isn't what I asked for"*) rather than approving the merge or drop, note this as a test-worthy moment with trigger `phase3-rejection`. Capture the failing state (commonly the final body state — the one whose output the user is rejecting), a one-sentence summary, and the relevant log tail. Run the offer flow in "Capturing test-worthy moments" before continuing the merge/drop conversation. If the user just approves, no hook fires.
+
+3. Decide if a merge is appropriate:
    - The run has a `branch` field that's not the project's default branch (commonly `main` or `master`).
    - The branch has commits not yet on the default branch (`git log <default>..<branch>` shows commits).
 
-3. **If merge is appropriate**, show the merge plan and ask:
+4. **If merge is appropriate**, show the merge plan and ask:
 
    ```
    Run completed. Proposed merge:
@@ -159,8 +169,7 @@ A run has status `COMPLETED`. What "completed" means depends on the workflow. So
 
    **Push fails:** try `git pull --rebase && git push origin <default>` once. If it still fails, surface the error and ask.
 
-4. **If merge is not appropriate** (no branch, no unmerged commits, or the workflow already produced its output through other means):
-   - Report completion to the user with a brief summary of what the run produced (read from worker output / result files).
+5. **If merge is not appropriate** (no branch, no unmerged commits, or the workflow already produced its output through other means):
    - Ask: "Drop the run, or keep it for inspection?"
    - On their decision, call `orca_drop_run` (if dropping) or leave it. Ask what's next.
 
@@ -189,6 +198,99 @@ The user described a task in chat. There are no active runs.
 6. Enter Phase 2 (watch).
 
 If `orca_start_run` fails, surface the error and ask.
+
+---
+
+## Capturing Test-Worthy Moments
+
+Supervision is the richest source of prompt-quality signals: live runs produce real failure modes that no fixture can predict. When the user surfaces dissatisfaction with the worker's *output* (not its liveness), that's a candidate regression case worth feeding back into `.orca/tests/`. This section describes when to offer to capture, what to offer, and how to write it down. Every offer is interactive — never auto-write a criterion or create a test.
+
+### Detection heuristic
+
+A moment is test-worthy when the user's response conveys *the worker's output was semantically wrong* — not when the worker simply hung, crashed, or looped.
+
+**Strong signals** (offer to capture):
+- After a `waiting` outcome, the user's reply redirects or corrects the worker: "no, that's wrong", "you missed X", "the scope should be Y", explicit rewrites of what the worker proposed.
+- At Phase 3 completion, the user objects to the produced output before approving a merge or drop.
+- At a stuck-state surface, the user's chosen option implies the prompt produced wrong work (e.g. they say *"the worker keeps misreading the spec"*) — uncommon, but valid.
+
+**Weak signals** (do not capture):
+- Zombie worker, daemon crash, infra retry, network error, dirty git tree.
+
+These are stuck-machine, not stuck-logic. Tests can't catch them; suggesting a test in these cases adds noise.
+
+### Lookup: harden existing or create new?
+
+When a moment is captured, decide which path to offer:
+
+1. List `.orca/tests/*/` directories (e.g., `ls .orca/tests/` or read it directly).
+2. For each test, read its `test-flow.yml` and check the `initial:` field. If `initial:` matches the state name of the failing moment, the test is a **hardening candidate**.
+3. If at least one candidate exists, the natural default is "harden existing test `<name>`". If multiple candidates, list them.
+4. If no candidate exists, the natural default is "create a new test for state `<state>`".
+
+Regardless of the natural default, **always surface both options in the offer**. The user picks knowing both exist — even when one is the obvious fit, the other may still be the right call (e.g. the existing test's scenario can't reproduce the failure).
+
+### Offer prompt
+
+When ready to capture a moment, surface this to the user (adapt wording but keep the structure):
+
+```
+The worker's output at state `<state>` looks like a real failure mode
+worth catching next time. Two options:
+
+  [A] Harden the existing test `<test-name>` by appending a criterion to
+      `.orca/tests/<test-name>/evaluations.md`. Quick — single heading +
+      one prose paragraph. Best when the test's existing scenario covers
+      this input shape.
+
+  [B] Create a new test via `orca-test-create`. Slower — needs a state
+      branch with the reproducer bytes. Best when this input is novel
+      or the existing test's scenario can't trigger this failure.
+
+  [skip] Don't capture this one.
+
+Which? (Default: A if a test exists for this state, B otherwise.)
+```
+
+Mark the moment `offered: true` once asked. If the user picks `skip`, leave `captured: false` — it'll show up in the end-of-session recap as `[skipped]`.
+
+### Hardening path (option A)
+
+Inline edit. The criterion is a small append to `evaluations.md`:
+
+1. **Read** `.orca/tests/<test-name>/evaluations.md` to see existing criteria and pick a kebab-case `case-id` that doesn't collide and describes the failure (e.g. `rejects-cross-subsystem-scope-merge`, not `case-42`).
+2. **Anchor on state-branch bytes.** Per the test's state-branch contract, the criterion must reference stable facts: file paths, line numbers, enum values, regex, presence/count. If the criterion would need to reference run-time bytes not in the state branch, **stop** — that's option B territory. Surface this to the user and reconsider.
+3. **Draft** the new section:
+   ```markdown
+   ### <kebab-case-id>
+   <one-to-two sentence criterion stating one concrete, gradeable thing
+   the result must satisfy>.
+   ```
+4. **Show the diff** to the user — both the proposed `case-id` and the prose. Ask for confirmation before writing.
+5. **Write** the appended section under `## Criteria`.
+6. Suggest a commit (`test: add criterion <case-id> to <test-name>`). **Do not auto-commit** — let the user's repo discipline govern.
+7. Mark the moment `captured: true`.
+
+### New-test path (option B)
+
+Hand off to `orca-test-create` rather than authoring in-line. Authoring a state branch is the load-bearing work of test creation and belongs in a user-initiated session with that skill.
+
+1. **Compose a context block** the user can paste when invoking `orca-test-create`:
+   ```
+   Captured from supervision session — <date>
+   Failing state: <state>
+   Workflow: <workflow-name>
+   Run id: <run-id>
+   Scenario summary: <one paragraph — what the worker was asked to do
+   and what went wrong>
+   Worker input (issue fields): <copy from run>
+   Worker output that triggered rejection: <copy from log>
+   Log tail: <last 20-30 lines>
+   ```
+2. **Tell the user**: *"Recommend invoking `orca-test-create` next. The context block above is the starting point for Step 1 (Decide the slice) and Step 2 (Sketch the scenario)."*
+3. Mark the moment `captured: true` — the user has committed to the path, even though the test won't exist until they run `orca-test-create`.
+
+Do not auto-invoke `orca-test-create` from inside supervision. That skill is brainstorming-style and assumes a present user driving the choices.
 
 ---
 
@@ -229,4 +331,14 @@ When surfacing, always include: what went wrong (1-2 sentences), what you tried,
 - **Phase transitions:** brief, e.g., `Run completed. Moving to post-completion.`
 - **Surfacing to user:** structured — a short headline, 1-3 sentences of context, relevant data (logs, files, plan), and an explicit ask. End the turn cleanly.
 - **Conversational tone.** You are talking to a present human, not writing a cron log. No rigid summary blocks.
-- **End of session:** when the user dismisses you or the run reaches a terminal state and is cleaned up, give a brief recap.
+- **End of session:** when the user dismisses you or the run reaches a terminal state and is cleaned up, give a brief recap. If any test-worthy moments were noted this session, append a short "Test-worthy moments noted this session" section with one line per entry:
+
+  ```
+  • [captured] hardened test `<name>` with criterion `<case-id>`
+  • [handed off] state `<state>`: <one-line summary> (user to invoke orca-test-create)
+  • [skipped]   state `<state>`: <one-line summary>
+  • [pending]   state `<state>`: <one-line summary>
+                (never offered — consider revisiting)
+  ```
+
+  For `[pending]` entries (test-worthy moments that the in-loop hooks never got to offer, e.g. the run ended before the offer flow ran), prompt the user once: *"Want to capture any of these before we wrap up?"* If they decline or there are no `[pending]` entries, end cleanly. If the test_worthy_moments list is empty, omit the section entirely — no false noise.

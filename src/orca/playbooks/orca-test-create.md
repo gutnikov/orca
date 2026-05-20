@@ -29,6 +29,8 @@ Before asking the user anything:
 - At least one production workflow YAML exists under `.orca/` to test against — without one, there's no slice to copy.
 - You can name the test in kebab-case. The directory name *is* the test name.
 
+> Note: `orca-workflow-run` can hand off here when supervision surfaces a real-world failure mode worth capturing. If you arrived from a supervision session with a captured context block (failing state, scenario summary, worker input/output, log tail), use it as the starting point for Step 1 (Decide the slice) and Step 2 (Sketch the scenario) rather than starting from scratch.
+
 ## Cost note — surface this before the first run
 
 Every test run costs **N + 1 LLM invocations** (N body states + 1 evaluate). A 5-state slice = 6 worker sessions per run. The worktree is set up by `git checkout` rather than an LLM, so there is no per-run setup cost. Prefer **single-state slices** for first tests — they're the cheapest way to start and the easiest to debug.
