@@ -133,25 +133,48 @@ Once the workflow validates:
 
 If yes, follow [orca-workflow-run.md](orca-workflow-run.md) with a tiny test task scoped to surface workflow bugs (not production work). If the test surfaces issues, loop back to step 4 or 5 — fix the config/prompts and rerun.
 
-### Step 8 — Create per-state tests (required ask)
+### Step 8 — Auto-scaffold per-state smoke tests
 
-Before declaring the workflow done, you **must** ask the user about creating tests for each active state. This ask is non-skippable — even if the user later declines, the question must be put in front of them. Ask verbatim:
+For every active state, scaffold a structural smoke test under `.orca/tests/<state>-smoke/`. **No user interaction** — this is automatic, mechanical, and bounded. It does not exercise semantic correctness; that comes later as a separate phase via [`orca-test-create.md`](orca-test-create.md).
 
-> "I'll create one orca test per active state, following the assertions-first paradigm in [`reference/assertions-design.md`](reference/assertions-design.md). Each test is a single-state slice that grades the prompt against 3–5 objective criteria, so future prompt edits have something to validate against. Should I create them now?"
+For each active state:
 
-If the user says **yes**:
+1. **Invoke `orca test add <state>-smoke`.** This creates `.orca/tests/<state>-smoke/`, the `orca-test-state/<state>-smoke` branch, the persistent author worktree under `.orca-state/test-states/<state>-smoke/`, and stamps placeholder `test-flow.yml`, `input.md`, and `assertions.md`.
 
-1. **Pick the scope.** Ask which states to cover. Default: every active state. For large workflows (5+ states), suggest starting with the highest-risk 1–2 (typically planning and implementing equivalents); the user can add more later.
-2. **Per state, follow [`orca-test-create.md`](orca-test-create.md) end-to-end.** Each test is a `setup -> {state} -> assert` single-state slice. The state's `result_format` is already in the YAML from Step 4; the assertion-creator drafts `assertions.md` against it (the prompt-creator never sees assertions — see the Three-Agent Principle in [`reference/assertions-design.md`](reference/assertions-design.md) §1.5).
-3. **Run each test once after scaffolding.** Read the report. Iterate per [`reference/assertions-design.md`](reference/assertions-design.md) §5 — walk the failure-attribution taxonomy and apply the minimal edit. Continue until criteria pass, or the user accepts the remaining gaps.
-4. **Commit each test directory** under `.orca/tests/<scenario>/` only after the first run completes (passing or with user-accepted failures).
+2. **Edit `test-flow.yml`** to copy the production state verbatim — per the rewrite rules in [`orca-test-create.md`](orca-test-create.md) Step 5. `result_format` is reused as-is from the YAML; outgoing transitions from the body state route to `assert`.
 
-If the user says **no**:
+3. **Write a minimal `assertions.md`** mechanically derived from the state's `result_format`. No semantic judgment. The shape:
 
-- Note the decision in the final report. The workflow ships without a regression-catching surface; surface this risk plainly. Quote the user's reason if they gave one, so the next agent (or future-you) knows whether to re-ask later.
-- Optionally, offer the lighter alternative: a single end-to-end smoke test (`setup -> [every state] -> assert`) instead of per-state tests. Re-ask once.
+   ```markdown
+   # Assertions: <state>-smoke
 
-A workflow without tests rots silently — the first prompt edit may break things invisibly, and there's no signal to catch it. This is why the *ask* is non-skippable, even though the *answer* can be "skip".
+   Structural smoke test for the `<state>` state. Verifies the worker produces a result that
+   conforms to the schema in `.orca/{flow}.yml`. Semantic correctness criteria are added later
+   via `orca-test-create`.
+
+   ## Criteria
+
+   ### outcome-in-allowed-values
+   The result `outcome` is one of `<enum values from result_format.outcome.values>`.
+
+   ### <field>-present-when-outcome-is-<value>
+   When `outcome == <value>`, the `<field>` field is present and non-empty. (One criterion per
+   `required_when` constraint in `result_format`.)
+   ```
+
+   Rules:
+   - One criterion per enum field with a `values:` list — checks the value is in the allowed set.
+   - One criterion per `required_when:` constraint — checks the field is present when the gating outcome fires.
+   - Stop there. Do not add criteria that require domain reasoning ("the finding points at the right file", "the plan is comprehensive"). Those belong in the semantic phase.
+   - Two to four criteria per state is the expected output. If `result_format` has no enums and no `required_when` constraints, write a single criterion: "the result file exists and parses as JSON matching the schema."
+
+4. **Leave `input.md` as the scaffold stub.** The smoke test is *scaffolded but not yet runnable end-to-end* — a real scenario (with seeded `issue.fields.*` and state-branch bytes) is the user's later job. Do not invent placeholder field values; they would mislead a future reader into thinking the test exercises a real case.
+
+After scaffolding every state, report the paths and explain the next step:
+
+> "Smoke test scaffolds created under `.orca/tests/`. Each one structurally verifies its state's output schema. To make them runnable, add a scenario to `input.md` and arrange the state branch (per `orca-test-create.md` Step 6). To add semantic correctness criteria, run `orca-test-create` for each test."
+
+Do **not** run the tests during this step. Do **not** iterate on results. Do **not** ask the user to opt out, choose scope, or pick an alternative shape — the scaffolds are unconditional. A workflow ships with at least its structural surface in place; users decide later how much semantic depth to add.
 
 ### Step 9 — Offer a convenience wrapper skill (optional)
 

@@ -102,6 +102,12 @@ While drafting each criterion, ask: *what field does this read?* If the answer i
 
 Cross-reference: [`orca-test-create.md`](../orca-test-create.md) is the playbook for drafting `assertions.md` and the matching `result_format`. The handoff to the prompt-creator happens once `result_format` is committed to the YAML.
 
+### Structural vs semantic assertions — two phases
+
+Workflow creation produces a *structural* `assertions.md` per active state automatically — derived mechanically from `result_format` (enum coverage, `required_when` presence). These exist as smoke-test scaffolds the moment a workflow is born; see [`orca-workflow-create.md`](../orca-workflow-create.md) Step 8.
+
+The *semantic* assertions — the ones that grade whether the worker actually solved the task, not just whether it returned a valid shape — are appended later via [`orca-test-create.md`](../orca-test-create.md). They are the work this whole document describes. The two phases are deliberately separated: structural assertions need no domain reasoning and ship with the workflow; semantic assertions need a real scenario and are written when the user is ready to invest in regression coverage.
+
 ## 4. Lifting constraints into assertions
 
 A constraint stated only in the prompt is hope; a constraint reflected in the `result_format` (or in a worktree-readable side-effect) is verifiable. The prompt should still state the constraint in prose — but it must also be checked.

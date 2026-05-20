@@ -31,6 +31,8 @@ Before asking the user anything:
 
 > Note: `orca-workflow-run` can hand off here when supervision surfaces a real-world failure mode worth capturing. If you arrived from a supervision session with a captured context block (failing state, scenario summary, worker input/output, log tail), use it as the starting point for Step 1 (Decide the slice) and Step 2 (Sketch the scenario) rather than starting from scratch.
 
+> Note: `orca-workflow-create` Step 8 auto-scaffolds a `<state>-smoke` test per active state with mechanical structural assertions (enum coverage, `required_when` presence). When you arrive here to add semantic correctness criteria to one of those scaffolds, you are in **Update mode**: the directory, `test-flow.yml`, `result_format`, and structural `assertions.md` already exist. Skip Step 3 (Scaffold) and most of Step 5 (Copy body states); jump to Step 4 (`input.md` — design a real scenario) and Step 8 (`assertions.md` — append semantic criteria to the existing file). Do not rewrite the structural criteria — they're still load-bearing.
+
 ## Cost note — surface this before the first run
 
 Every test run costs **N + 1 LLM invocations** (N body states + 1 assert). A 5-state slice = 6 worker sessions per run. The worktree is set up by `git checkout` rather than an LLM, so there is no per-run setup cost. Prefer **single-state slices** for first tests — they're the cheapest way to start and the easiest to debug.
