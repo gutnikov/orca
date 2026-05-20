@@ -9,7 +9,6 @@ Write or update a single `.orca/prompts/{state}.md` template — the instruction
 ## Required reading (you, the agent — not the user)
 
 - [`reference/assertions-design.md`](reference/assertions-design.md) — the assertions-first paradigm and the methodology that anchors every prompt this playbook produces. Read this *first*; prompts are downstream of user-curated assertions.
-- [`reference/prompt-design.md`](reference/prompt-design.md) — the prompt-side conventions (structured fields, explicit constraints, minimal-edit discipline) used in this playbook.
 
 ## When to use this
 

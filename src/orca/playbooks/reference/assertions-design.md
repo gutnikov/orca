@@ -2,7 +2,7 @@
 
 The methodology Orca uses to anchor prompts to a durable, user-curated specification: **assertions come first, prompts are downstream.**
 
-This is a reference, not a procedural playbook. It explains *why* the codebase has [`orca-test-create.md`](../orca-test-create.md) and [`orca-prompt-create.md`](../orca-prompt-create.md), and how to use them under one consistent discipline. Read it before either playbook. The playbooks are the *how*; this doc is the *what for*. For the prompt-side conventions and pitfalls, see the companion [`prompt-design.md`](prompt-design.md).
+This is a reference, not a procedural playbook. It explains *why* the codebase has [`orca-test-create.md`](../orca-test-create.md) and [`orca-prompt-create.md`](../orca-prompt-create.md), and how to use them under one consistent discipline. Read it before either playbook. The playbooks are the *how*; this doc is the *what for*.
 
 > Audience: you, the agent. Not the user.
 
@@ -72,7 +72,7 @@ The link between assertions and prompts is `result_format`. Every criterion need
 
 1. **Draft `assertions.md`** (with the user's help, per Section 5 bootstrap).
 2. **Sketch `result_format` *from the assertions*** — every field a criterion references must be emitted.
-3. **Then draft the prompt** — its job is to make the worker emit the `result_format` correctly. See [`prompt-design.md`](prompt-design.md) for the prompt-side conventions.
+3. **Then draft the prompt** — its job is to make the worker emit the `result_format` correctly. See [`orca-prompt-create.md`](../orca-prompt-create.md) for the authoring procedure.
 
 This inverts what feels natural ("write the prompt, then add a result schema"). The inversion is what prevents rot.
 
@@ -84,7 +84,7 @@ Cross-reference: [`orca-prompt-create.md`](../orca-prompt-create.md) Step 1 ("Pi
 
 ## 4. Lifting constraints into assertions
 
-A constraint stated only in the prompt is hope; a constraint reflected in the `result_format` (or in a worktree-readable side-effect) is verifiable. The prompt should still state the constraint in prose (see [`prompt-design.md`](prompt-design.md)) — but it must also be checked.
+A constraint stated only in the prompt is hope; a constraint reflected in the `result_format` (or in a worktree-readable side-effect) is verifiable. The prompt should still state the constraint in prose — but it must also be checked.
 
 Example: "ONLY modify files under `issue.fields.scope_boundary`". The prompt should still say this. But you also want an assertion:
 
@@ -130,7 +130,7 @@ When the report shows a failed criterion, walk this taxonomy **before** editing 
 
 | Failure mode | Symptom | Fix |
 |---|---|---|
-| **Prompt** | Worker had access to a clear instruction in the prompt and didn't follow it. | Sharpen or add the relevant instruction. Minimal edit. See [`prompt-design.md`](prompt-design.md). |
+| **Prompt** | Worker had access to a clear instruction in the prompt and didn't follow it. | Sharpen or add the relevant instruction. Minimal edit. See [`orca-prompt-create.md`](../orca-prompt-create.md). |
 | **Assertion** | Criterion is ambiguous, judgment-heavy, or references a key not in `result_format`. | Rewrite the criterion. |
 | **Scenario** | Test input (`input.md`, fixtures) doesn't actually exercise the path the criterion grades. | Edit `input.md` / fixtures. |
 | **`result_format`** | The field the criterion needs isn't emitted. | Add the field to `result_format` AND update the prompt to emit it. |
@@ -231,7 +231,6 @@ The whole story: assertions first, attribution second, minimal edit third. Drift
 
 ## Cross-references
 
-- [`prompt-design.md`](prompt-design.md) — prompt-side conventions: structured fields, explicit constraints, minimal-edit discipline, prompt anti-patterns. Read this for the *how* of writing a prompt that satisfies a set of assertions.
 - [`orca-prompt-create.md`](../orca-prompt-create.md) — mechanics of writing a single state prompt (template variables, structure, pitfalls). The bootstrap step in Section 5 above maps to that playbook's Step 1.
 - [`orca-test-create.md`](../orca-test-create.md) — interactive procedure for authoring a test. The bootstrap step in Section 5 above maps to that playbook's Steps 1–8.
 - [`orca-test-review.md`](../orca-test-review.md) — audit checklist for an existing test. Use it to verify your assertions are well-formed.

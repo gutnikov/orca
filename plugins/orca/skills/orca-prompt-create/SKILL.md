@@ -22,7 +22,6 @@ Infer the mode from context:
 Fetch these via the `orca_get_playbook` MCP tool before doing anything. Pass the name without `.md`. Markdown links inside any returned playbook (e.g. `[orca-glossary](reference/orca-glossary.md)`) are also playbook names — follow them by calling the tool again with the link target.
 
 - `reference/assertions-design` — the assertions-first paradigm; **foundational, read first**
-- `reference/prompt-design` — prompt-side conventions (structured fields, explicit constraints, minimal-edit discipline)
 - `orca-prompt-create` — end-to-end procedure (Steps 1–8)
 - `reference/orca-config-reference` — template variables, `result_format` schema
 - `orca-test-create` — for writing the `assertions.md` and the test that grades the prompt
