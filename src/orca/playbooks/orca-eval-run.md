@@ -62,6 +62,11 @@ Identify the body state(s), the `assert` state, and the `state_ref:` value in
 `input.md` frontmatter. If `state_ref:` is missing or still `TODO_STATE_REF`,
 stop: `orca eval <eval>` will refuse to start.
 
+Treat the parsed `state_ref` as the source of truth for fixture bytes. The
+default is `orca-eval-state/<eval>` with author worktree
+`.orca-state/eval-states/<eval>/`, but evals may share or retarget state refs.
+Do not assume the eval name and fixture branch name match.
+
 ### Step 1.3 - Optional explanation page
 
 If the user wants a visual/plain-language explanation, invoke
@@ -75,7 +80,7 @@ Conversationally:
 
 > "Do you want to modify the input before we run? You can tweak the scenario
 > in `.orca/evals/<eval>/input.md` or the fixture bytes on the state branch
-> via `.orca-state/eval-states/<eval>/`."
+> declared by `state_ref`."
 
 If **no**, skip to Phase 2.
 
@@ -88,8 +93,12 @@ file-editing tools to:
   changes (`state_ref:` etc.).
 - Modify `.orca/evals/<eval>/assertions.md` if the expected behavior changed.
 - For state-branch bytes, walk the user through committing into the persistent
-  author worktree at `.orca-state/eval-states/<eval>/` per
-  [`orca-eval-create.md`](orca-eval-create.md) Step 6.
+  author worktree for the parsed `state_ref` per
+  [`orca-eval-create.md`](orca-eval-create.md) Step 6. If `state_ref` is
+  `orca-eval-state/<eval>`, that is normally `.orca-state/eval-states/<eval>/`.
+  If `state_ref` points elsewhere, locate or create the matching author
+  worktree first; do not edit `.orca-state/eval-states/<eval>/` just because
+  it exists.
 
 Track every file you touched and whether the state branch gained commits.
 When the user signals "done modifying", continue to Phase 2.
@@ -218,8 +227,9 @@ Apply only the chosen edits:
   [`orca-prompt-create.md`](orca-prompt-create.md) Update mode. Track paths.
 - **Update assertions:** edit `.orca/evals/<eval>/assertions.md`. Track path.
 - **Update input:** edit `.orca/evals/<eval>/input.md`. Track path.
-- **Update state branch:** edit and commit inside
-  `.orca-state/eval-states/<eval>/`; track the branch commit separately.
+- **Update state branch:** edit and commit inside the author worktree for the
+  parsed `state_ref`; track the branch commit separately. For shared refs, run
+  all evals that point at that branch after the edit.
 - **Update workflow/result_format:** route through
   [`orca-workflow-review.md`](orca-workflow-review.md) or
   [`orca-workflow-create.md`](orca-workflow-create.md), because schema and
@@ -246,9 +256,9 @@ The commit step is explicit and defensive.
 6. On yes: `git add <listed-paths>` with specific paths only, then
    `git commit -m "<message>"`.
 
-If the state branch changed, it already has its own commit in
-`orca-eval-state/<eval>`; mention that it must be pushed alongside the main
-repo commit when sharing the eval.
+If the state branch changed, it already has its own commit on the parsed
+`state_ref`; mention that it must be pushed alongside the main repo commit
+when sharing the eval.
 
 ### Step 3.6 - Restart?
 

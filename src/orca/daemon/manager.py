@@ -5,6 +5,7 @@ import contextlib
 import enum
 import json as _json
 import logging
+import shutil
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -83,6 +84,17 @@ async def _reset_eval_worktree(repo_root: Path, branch: str, worktree_path: Path
         ["git", "-C", str(repo_root), "branch", "-D", branch],
         capture_output=True,
     )
+
+
+def _reset_eval_run_dir(run_dir: Path) -> None:
+    """Clear persisted eval run state so `orca eval <name>` starts fresh."""
+    if not run_dir.exists():
+        return
+    for child in run_dir.iterdir():
+        if child.is_dir() and not child.is_symlink():
+            shutil.rmtree(child)
+        else:
+            child.unlink(missing_ok=True)
 
 
 class RunStatus(enum.Enum):
@@ -212,8 +224,11 @@ class RunManager:
             msg = f"Run '{run_id}' is already running"
             raise ValueError(msg)
 
-        # Set up run directory and persistence
+        # Set up run directory and persistence. Eval invocations are fresh test
+        # attempts; resuming an interrupted eval is handled through resume_run().
         run_dir = self.repo_root / ".orca-state" / "runs" / branch / effective_workflow
+        if state_ref is not None:
+            _reset_eval_run_dir(run_dir)
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "config_source.json").write_text(_json.dumps({"config_path": str(config_path.resolve())}))
         persistence = Persistence(self.repo_root, branch, effective_workflow)

@@ -444,6 +444,143 @@ class TestStartRunStateRef:
         )
 
     @pytest.mark.asyncio()
+    async def test_eval_start_after_completed_run_is_fresh(self, repo_root: Path) -> None:
+        """A second eval invocation should read updated input.md and state_ref tip."""
+        import subprocess as _subp
+
+        _subp.run(["git", "init", "-b", "main", str(repo_root)], check=True, capture_output=True)
+        _subp.run(["git", "-C", str(repo_root), "config", "user.email", "t@t"], check=True, capture_output=True)
+        _subp.run(["git", "-C", str(repo_root), "config", "user.name", "t"], check=True, capture_output=True)
+        _subp.run(["git", "-C", str(repo_root), "add", "."], check=True, capture_output=True)
+        _subp.run(["git", "-C", str(repo_root), "commit", "-m", "init"], check=True, capture_output=True)
+
+        author_worktree = repo_root / ".orca-state" / "eval-states" / "foo"
+        _subp.run(
+            ["git", "-C", str(repo_root), "worktree", "add", "--detach", str(author_worktree), "HEAD"],
+            check=True,
+            capture_output=True,
+        )
+        _subp.run(
+            ["git", "-C", str(author_worktree), "checkout", "--orphan", "orca-eval-state/foo"],
+            check=True,
+            capture_output=True,
+        )
+        _subp.run(
+            ["git", "-C", str(author_worktree), "rm", "-rf", "--quiet", "."],
+            check=True,
+            capture_output=True,
+        )
+        (author_worktree / "fixture.txt").write_text("seed one\n")
+        _subp.run(["git", "-C", str(author_worktree), "add", "."], check=True, capture_output=True)
+        _subp.run(
+            ["git", "-C", str(author_worktree), "commit", "-m", "seed one"],
+            check=True,
+            capture_output=True,
+        )
+
+        eval_dir = repo_root / ".orca" / "evals" / "foo"
+        eval_dir.mkdir(parents=True)
+        (eval_dir / "eval-flow.yml").write_text(SIMPLE_CONFIG_YAML)
+        input_file = eval_dir / "input.md"
+        input_file.write_text("title: First\ndescription: D\nstate_ref: orca-eval-state/foo\n")
+
+        class RecordingWorker(MockWorker):
+            def __init__(self) -> None:
+                super().__init__(
+                    outcomes={
+                        "todo": WorkerSuccess(result={"outcome": "start"}),
+                        "implementing": WorkerSuccess(result={"outcome": "complete"}),
+                    }
+                )
+                self.seen: list[tuple[str, str, str]] = []
+
+            async def execute(
+                self,
+                effect: DispatchWorkerEffect,
+                workdir: Path,
+                result_path: Path,
+                prompt_path: Path | None = None,
+                inactivity_timeout: int | None = None,
+                pty_session: Any = None,
+                env: dict[str, str] | None = None,
+                model: str | None = None,
+                extra_args: list[str] | None = None,
+                session_manifest: Any = None,
+                session_id: str | None = None,
+                run_context: Any = None,
+                unblock_event: Any = None,
+                unblock_message: Any = None,
+                on_blocked: Any = None,
+                on_unblocked: Any = None,
+                prompt_text: str | None = None,
+            ) -> WorkerOutcome:
+                self.seen.append(
+                    (
+                        effect.state,
+                        str(effect.issue["fields"]["title"]),
+                        (workdir / "fixture.txt").read_text(),
+                    )
+                )
+                return await super().execute(
+                    effect,
+                    workdir,
+                    result_path,
+                    prompt_path,
+                    inactivity_timeout,
+                    pty_session,
+                    env,
+                    model,
+                    extra_args,
+                    session_manifest,
+                    session_id,
+                    run_context,
+                    unblock_event,
+                    unblock_message,
+                    on_blocked,
+                    on_unblocked,
+                    prompt_text,
+                )
+
+        mgr = RunManager(repo_root)
+        worker = RecordingWorker()
+
+        with patch("orca.daemon.manager.CliAgentWorker", return_value=worker):
+            run_id = await mgr.start_run(
+                task_file=input_file,
+                workflow=str(eval_dir / "eval-flow.yml"),
+                state_ref="orca-eval-state/foo",
+            )
+            first_info = mgr.get_run(run_id)
+            assert first_info is not None and first_info.task is not None
+            await first_info.task
+
+            (author_worktree / "fixture.txt").write_text("seed two\n")
+            _subp.run(["git", "-C", str(author_worktree), "add", "fixture.txt"], check=True, capture_output=True)
+            _subp.run(
+                ["git", "-C", str(author_worktree), "commit", "-m", "seed two"],
+                check=True,
+                capture_output=True,
+            )
+            input_file.write_text("title: Second\ndescription: D\nstate_ref: orca-eval-state/foo\n")
+
+            run_id_2 = await mgr.start_run(
+                task_file=input_file,
+                workflow=str(eval_dir / "eval-flow.yml"),
+                state_ref="orca-eval-state/foo",
+            )
+            second_info = mgr.get_run(run_id_2)
+            assert second_info is not None and second_info.task is not None
+            await second_info.task
+
+        assert run_id_2 == run_id == "orca-eval-run-foo:eval-flow"
+        assert worker.seen == [
+            ("todo", "First", "seed one\n"),
+            ("implementing", "First", "seed one\n"),
+            ("todo", "Second", "seed two\n"),
+            ("implementing", "Second", "seed two\n"),
+        ]
+
+    @pytest.mark.asyncio()
     async def test_rejects_unresolved_state_ref(self, repo_root: Path) -> None:
         """If state_ref is set but the ref does not exist, start_run errors."""
         import subprocess as _subp
