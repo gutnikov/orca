@@ -33,7 +33,7 @@ Before running checks, build an in-memory map:
    - `result_format` per state.
    - `on:` rules per state.
    - All `worker.prompt` paths (file or inline).
-3. Identify the production workflow each body state was copied from. Search `.orca/*.yml` for matching state names. If a body state name appears in multiple workflows, ask the user.
+3. Identify the production workflow and issue type each body state was copied from. Search `.orca/*.yml` for matching type/state pairs. If a body state name appears in multiple workflows or under multiple issue types in one workflow, use prompt path and `result_format` as hints, but ask the user when the source is still ambiguous.
 4. Parse `assertions.md` and enumerate every `### <id>` heading.
 
 Most checks below cross-reference these tables. Build them once, then run the checklist.
@@ -55,13 +55,13 @@ These catch shape violations that would fail at runtime or produce uninterpretab
 
 These catch drift between the eval and its production counterpart — the most insidious failure mode.
 
-- [ ] **Every body state matches a state in some production workflow under `.orca/` by name.** If a body state name doesn't appear in any production YAML, the eval is evaluating something that doesn't exist — flag.
+- [ ] **Every body state matches a state in some production workflow under `.orca/`.** Prefer an exact type/state match when the production workflow is typed; if the eval is legacy single-type, record the selected production type in the audit notes. If a body state name doesn't appear in any production YAML, the eval is evaluating something that doesn't exist — flag.
 - [ ] **`worker.prompt` paths resolve.** For file-based prompts (`prompt: ../../prompts/foo.md`), the file must exist relative to the eval workflow's directory. Verify on disk.
-- [ ] **`result_format` is verbatim against production.** For each body state, diff `result_format` against the matched production state. Any difference is reported as drift — the eval no longer exercises the production contract.
+- [ ] **`result_format` is verbatim against production.** For each body state, diff `result_format` against the matched production type/state. Any difference is reported as drift — the eval no longer exercises the production contract.
 - [ ] **`worker.prompt` path points at the production prompt.** An eval that ships its own prompt copy is evaluating a copy, not the production prompt. The path should be relative (`../../prompts/...`) and resolve to a file under `.orca/prompts/`.
 - [ ] **Outgoing routes from body states land in `assert` or another body state in this file.** Routes to states that exist in production but not in the eval file are dangling references and must be rewritten to `assert`.
 
-**Severity:** drift in `result_format` is **Important** (the eval is silently evaluating a stale contract). Dangling routes are **Critical** (config fails to load).
+**Severity:** drift in `result_format` is **Critical** because the eval is silently evaluating a stale production contract. Dangling routes are **Critical** because config fails to load.
 
 ## Phase 4 — Reference integrity
 
@@ -97,18 +97,23 @@ All commands in this subsection assume the current directory is the repo root.
 
 - [ ] **`state_ref` is present in `input.md` frontmatter.** Grep: `grep -n '^state_ref:' .orca/evals/<name>/input.md` — should return exactly one line.
 - [ ] **`state_ref` is not the placeholder.** `TODO_STATE_REF` means the eval predates the current scaffold or was hand-written incompletely. Flag as Critical — the eval cannot run.
-- [ ] **`state_ref` resolves to a real branch.** Run: `git rev-parse --verify $(yq '.state_ref' .orca/evals/<name>/input.md)`. Exit code 0 = ref exists. If not, the eval cannot run.
+- [ ] **`state_ref` resolves to a real branch.** Extract it from the YAML frontmatter, then verify it:
+  ```bash
+  state_ref=$(awk 'NR==1 && $0=="---"{fm=1; next} fm && $0=="---"{exit} fm && /^state_ref:/{sub(/^state_ref:[[:space:]]*/, ""); print; exit}' .orca/evals/<name>/input.md)
+  git rev-parse --verify "$state_ref"
+  ```
+  Exit code 0 = ref exists. If not, the eval cannot run.
 - [ ] **`state_ref` lives in the `orca-eval-state/` namespace.** Branches outside the namespace (e.g. `main`, feature branches) tie the eval to history that changes under your feet. Sharing within the namespace is fine; pointing at `main` is Important.
 
 ### Branch contents
 
-- [ ] **State branch contains only scenario-relevant bytes.** Run: `git ls-tree --name-only orca-eval-state/<name>` — confirm no `.orca/` and no top-level files unrelated to the scenario. `pyproject.toml` or similar config is acceptable only when the state under eval reads it or needs it for verification.
-- [ ] **Assertion criteria anchor on bytes in the state branch.** For every criterion that references a literal file path, line number, function name, or fixed string, run `git show orca-eval-state/<name>:<path>` (or similar) and verify the bytes match. Mismatches mean the state was edited but the criterion wasn't updated.
+- [ ] **State branch contains only scenario-relevant bytes.** Run `git ls-tree --name-only "$state_ref"` using the actual ref from `input.md` — confirm no `.orca/` and no top-level files unrelated to the scenario. `pyproject.toml` or similar config is acceptable only when the state under eval reads it or needs it for verification.
+- [ ] **Assertion criteria anchor on bytes in the state branch.** For every criterion that references a literal file path, line number, function name, or fixed string, run `git show "$state_ref":<path>` (or similar) and verify the bytes match. Mismatches mean the state was edited but the criterion wasn't updated.
 - [ ] **No body state has its own `setup` re-implementation.** If a body state's prompt instructs the worker to copy files, run git commands, or seed scenario content, it's recreating the deleted setup step — fold those bytes into the state branch instead.
 
 ### Issue fields
 
-- [ ] **`input.md` frontmatter covers every `issue.fields.*` the slice's entry state reads.** Cross-reference frontmatter keys with the `issue.fields.*` references in the entry state's prompt. Missing fields → the slice will fail at first run.
+- [ ] **`input.md` frontmatter covers every `issue.fields.*` the slice's entry state reads.** Cross-reference frontmatter keys with the `issue.fields.*` references in the entry state's prompt and the selected production type's `fields:` block. Missing fields → the slice will fail at first run.
 
 **Severity:** unresolved `state_ref` → **Critical**. Project chrome in state branch → **Important**. Assertion/fixture anchor mismatch → **Critical** (criteria pass or fail for wrong reasons). Missing issue.fields → **Critical**.
 
@@ -117,7 +122,7 @@ All commands in this subsection assume the current directory is the repo root.
 For each body state, produce a comparison table:
 
 ```
-| State | Prod result_format | Eval result_format | Status |
+| State | Prod type/state result_format | Eval result_format | Status |
 |---|---|---|---|
 | review | <hash or summary> | <hash or summary> | match |
 | implementing | outcome.values=[done, blocked] | outcome.values=[done, blocked, waiting] | drift: waiting outcome added in eval |
@@ -137,9 +142,9 @@ Use the same format as [`orca-workflow-review.md`](orca-workflow-review.md) so o
 ### Critical
 - [state-branch] input.md:L8 — `state_ref` is `TODO_STATE_REF`; create or retarget the state branch and update the marker.
 - [assertions] assertions.md:L24 — duplicate id `outcome-is-request-changes`.
+- [drift] review — result_format diverges from .orca/review.yml#review: eval adds `waiting` to outcome.values. Re-copy from prod.
 
 ### Important
-- [drift] review — result_format diverges from .orca/review.yml#review: eval adds `waiting` to outcome.values. Re-copy from prod.
 - [assertions] assertions.md:L34 — criterion "messages-are-actionable" asks a judgment question. Rewrite as a regex check (e.g., message starts with a verb from a fixed list).
 
 ### Minor

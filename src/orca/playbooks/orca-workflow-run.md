@@ -27,10 +27,10 @@ Run these checks in order:
    ```bash
    orca runs
    ```
-   - If a `RUNNING` run exists → ask whether to supervise that run or start a separate one with a distinct branch/run id. Default to supervising the existing run unless the user explicitly wants parallel work.
-   - If a `FAILED` / `INTERRUPTED` run exists → ask the user: resume it (`orca resume <run_id>`) or drop it (`orca drop <run_id>`)?
-   - If a `STOPPED` run exists (user previously ran `orca stop`) → ask: resume (`orca resume`) or drop (`orca drop`)? Don't auto-resume — they stopped it for a reason.
-   - If a `COMPLETED` run is sitting around → ask the user whether to drop it before starting new work.
+   - If a `running` run exists → ask whether to supervise that run or start a separate one with a distinct branch/run id. Default to supervising the existing run unless the user explicitly wants parallel work.
+   - If a `failed` / `interrupted` run exists → ask the user: resume it (`orca resume <run_id>`) or drop it (`orca drop <run_id>`)?
+   - If a `stopped` run exists (user previously ran `orca stop`) → ask: resume (`orca resume`) or drop (`orca drop`)? Don't auto-resume — they stopped it for a reason.
+   - If a `completed` run is sitting around → ask the user whether to drop it before starting new work.
 
 3. **Pick the workflow.** Read `.orca/`:
    ```bash
@@ -74,12 +74,12 @@ Available flags (defaults shown):
 | Flag | Default | What it does |
 |---|---|---|
 | `-w, --workflow <name>` | `default` | Pick a non-default workflow under `.orca/`. Pass the filename without `.yml` (e.g. `-w develop` loads `.orca/develop.yml`). |
-| `-b, --branch <name>` | auto-derived | Override the run branch. Auto-derivation pulls from issue fields and the current git state; pass this only when you need a specific branch name. |
-| `--base <ref>` | from config `base_branch`, else `origin/main` | What the new run branch is cut from. |
+| `-b, --branch <name>` | current git branch | Override the run branch/run label used in `run_id`, `.orca-state/runs/<branch>/...`, `{{ run.branch }}`, and child branch naming. If omitted, the daemon detects the current git branch. It does not derive the branch from issue fields. For workflows that create child worktrees, use an existing branch/ref here or omit it. |
+| `--base <ref>` | accepted but not applied by the daemon-backed run path | Compatibility flag. The current `orca run` submission path passes it to the daemon, but the daemon does not create a root run branch from this ref. Do not rely on `--base` for branch setup unless you have verified the active runner path. |
 | `--run-id <id>` | `<branch>:<workflow>` | Override the run identifier. Rarely needed. |
 | `--max-hops <N>` | 10 | Cap total state transitions per issue. Overrides the CLI default; workflow YAML does not currently set this. |
 | `--max-retries <N>` | 3 | Cap worker failures per issue per state. Overrides the CLI default; workflow YAML does not currently set this. |
-| `--headless` | off | Suppress TUI output; useful for scripted invocations. |
+| `--headless` | off | Accepted for compatibility/scripted invocations. Daemon-backed `orca run` already submits the run and returns rather than launching a TUI. |
 | `--insights` | off | Generate an insights log alongside the run (readable via `orca_get_insights`). |
 
 Or via MCP (if invoked through Claude Code / Cursor / etc.):
@@ -87,7 +87,7 @@ Or via MCP (if invoked through Claude Code / Cursor / etc.):
 orca_start_run(root="<absolute path>", task_file="<task-file>", workflow="<flow-name>", branch=None, run_id=None)
 ```
 
-The MCP form exposes only the four common arguments (`root`, `task_file`, `workflow`, `branch`, `run_id`). For `--base`, `--max-hops`, `--max-retries`, `--headless`, `--insights` you need the CLI form.
+The MCP form exposes only the four common arguments (`root`, `task_file`, `workflow`, `branch`, `run_id`). For `--max-hops`, `--max-retries`, and `--insights` you need the CLI form. `--base` is also CLI-only, but the daemon-backed run path currently does not apply it.
 
 `workflow` is optional — omit it to load `.orca/default.yml`. Pass it only when the project has multiple workflows under `.orca/` and you need a specific one.
 
@@ -109,14 +109,14 @@ Discover the workflow's effective `max_worker_retries` and `max_hops`. CLI `orca
    | Signal | Action |
    |---|---|
    | `worker_active: true`, log progressing, `failure_count < MAX_RETRIES`, `hop_count < MAX_HOPS` | Healthy — continue. |
-   | Run status becomes `COMPLETED` | Exit loop → Phase D. |
+   | Run status becomes `completed` | Exit loop → Phase D. |
    | Worker outcome is `waiting` | Not stuck — surface to user. See below. |
-   | `worker_active: false`, run still `RUNNING`, `failure_count < MAX_RETRIES` | Orca will auto-retry. Note in session, continue. |
-   | `worker_active: false`, run still `RUNNING`, `failure_count >= MAX_RETRIES` | Treat as stuck. |
+   | `worker_active: false`, run still `running`, `failure_count < MAX_RETRIES` | Orca will auto-retry. Note in session, continue. |
+   | `worker_active: false`, run still `running`, `failure_count >= MAX_RETRIES` | Treat as stuck. |
    | `hop_count >= MAX_HOPS - 2` and the same cycle is repeating | Treat as stuck (loop). |
    | Same error across consecutive retries | Treat as stuck. |
    | `worker_active: true`, no new log lines across two consecutive polls, log ends with idle prompt | Zombie worker — treat as stuck. |
-   | Run status `FAILED` or `INTERRUPTED` | One `orca_resume_run(root, run_id)`, then continue. If status flips back to `FAILED`, surface. |
+   | Run status `failed` or `interrupted` | One `orca_resume_run(root, run_id)`, then continue. If status flips back to `failed`, surface. |
 
 ### `waiting` outcome — surface, don't fix
 
@@ -137,7 +137,7 @@ At most **one** auto-remediation per issue per session. If it doesn't fix it, su
 |---|---|---|
 | Zombie worker / idle prompt | `orca_unblock_worker` with a generic nudge (e.g. *"Continue with the next step. If you've finished the current state's work, write your result and conclude."*) | Surface to user |
 | Repeated identical errors | `orca_retry_issue(root, run_id, issue_id)` once | Surface to user |
-| `FAILED` / `INTERRUPTED` | `orca_resume_run(root, run_id)` once | Surface to user |
+| `failed` / `interrupted` | `orca_resume_run(root, run_id)` once | Surface to user |
 | Crashed beyond `MAX_RETRIES` | `orca_resume_run(root, run_id)` once | Surface to user |
 | State cycle / hop limit nearing | None — surface immediately (judgment call) | n/a |
 | Dirty tree, no active worker | None — surface immediately | n/a |
@@ -153,27 +153,29 @@ When surfacing to the user, always include: what you observed (1-2 sentences), w
 
 ## Phase D — Run completed
 
-When the run reaches `COMPLETED`, decide if a merge applies.
+When the run reaches `completed`, decide if a merge applies.
 
-1. Pull the full run state:
+1. Pull the run summary and full run state:
    ```
+   orca_list_runs(root)
    orca_get_run(root, run_id)
    ```
-   Look at `branch` and the workflow's final output.
+   `orca_list_runs` includes the run's `branch`; `orca_get_run` gives the issue state, sessions, and final output. If you only have the full run state, derive the branch from the `run_id` prefix before the final `:<workflow>` segment.
 
 2. **Merge applies** when:
-   - The run has a `branch` field that isn't the project's default (`main` / `master`).
+   - The run summary has a `branch` value that isn't the project's default (`main` / `master`).
    - `git log <default>..<branch>` shows commits.
 
 3. **If merge applies**, show the user the plan and ask for approval:
    ```
-   git checkout <default> && git pull origin <default>
+   git checkout <default>
+   git pull origin <default>
    git merge <branch> --no-ff -m "merge: <branch> — <title>"
    git push origin <default>
    git branch -d <branch>
    ```
 
-   On approval, execute in order. **Push fails because remote moved:** try `git pull --rebase origin <default> && git push origin <default>` once; if it still fails, surface. **Merge conflict:** show conflicting files and ask the user how to handle. Never force-push, never silently resolve conflicts, never `git stash` to "clean up" a dirty tree.
+   On approval, execute in order. **Push fails because remote moved:** run `git pull --rebase origin <default>` and then `git push origin <default>` once; if it still fails, surface. **Merge conflict:** show conflicting files and ask the user how to handle. Never force-push, never silently resolve conflicts, never `git stash` to "clean up" a dirty tree.
 
    Once merged: `orca_drop_run(root, run_id)` to clean up orca state.
 
@@ -192,7 +194,7 @@ Tell the user:
 
 ## Anti-patterns to refuse
 
-- **Auto-stopping a `FAILED` run.** Surface the failure and let the user decide. Stopping is destructive in the sense that resume options narrow afterwards.
+- **Auto-stopping a `failed` run.** Surface the failure and let the user decide. Stopping is destructive in the sense that resume options narrow afterwards.
 - **`git stash` / `git checkout .` to "clean up" a dirty tree.** A running worker may be mid-write. Ask the user before touching the worktree.
 - **Force-pushing to recover a merge.** Never. Surface and ask.
 - **Looping on remediations.** One auto-remediation per issue per session — then surface.

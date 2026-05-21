@@ -26,7 +26,7 @@ The methodology is split across three agents that **must not share procedures or
 
 | Agent | Reads | Writes | Cannot read |
 |---|---|---|---|
-| **Prompt-creator** | State spec (job, `result_format`, inputs, constraints, verification) from `.orca/{flow}.yml` | `.orca/prompts/{state}.md` | `assertions.md`, eval reports, evaluator's prompt |
+| **Prompt-creator** | State spec (job, `result_format`, inputs, constraints, verification) from `.orca/{flow}.yml` | The prompt source referenced by `worker.prompt` | `assertions.md`, eval reports, evaluator's prompt |
 | **Worker** (prompt executor) | The rendered prompt at runtime | `result.json` per the schema | `assertions.md`, the evaluator's prompt, how it's graded |
 | **Evaluator** (assertion grader) | `assertions.md`, worker's `result.json`, worktree side-effects | `report.md`, structured outcome | The prompt-creator's playbook, the worker's prompt |
 
@@ -55,9 +55,9 @@ Each eval directory has `assertions.md` — the user-curated checklist. Its shap
 A criterion is gradable only if the evaluator has access to evidence that answers it. The evaluator can read:
 
 - Worktree files after the slice runs
-- Per-state results in `{{ run.run_dir }}/state-results/`
-- Run summary (`{{ run.summary }}`) — outcomes, transitions, retries
-- Session history (`{{ run.sessions }}`)
+- Run state in `{{ run.run_dir }}/state.json` — issue fields, event logs, outcomes, transitions, retries
+- Session history in `{{ run.run_dir }}/sessions.json` and the worker logs referenced by `{{ run.sessions }}`
+- Run summary (`{{ run.summary }}`)
 
 If answering the criterion requires reading the worker's mind, the user's intent, or a future state that didn't run, rewrite or drop the criterion.
 

@@ -1,6 +1,6 @@
 # Playbook: Create a State Prompt
 
-Write or update a single `.orca/prompts/{state}.md` template — the instructions a worker reads when running a specific state of the workflow. Each **active** state in `.orca/{flow}.yml` has exactly one prompt file. This playbook is a pure procedure: given a state specification, produce a prompt that conforms to orca conventions and won't surprise the worker at runtime. It enforces structural correctness (variables resolve, sections in the right place, no obvious pitfalls) but does not iterate, does not run tests, and does not judge whether the prompt is *good* — that lives in [`reference/assertions-design.md`](reference/assertions-design.md) under a Chinese-wall isolation. If a quality concern surfaces while you're here, finish writing the structurally-correct file and hand the concern back to the caller.
+Write or update one worker prompt template — usually `.orca/prompts/{state}.md`, but always whatever path the state's `worker.prompt` references. Each **active** state in `.orca/{flow}.yml` has exactly one prompt source: a file path or a small inline `prompt: { text: ... }`. This playbook is a pure procedure: given a state specification, produce a prompt that conforms to orca conventions and won't surprise the worker at runtime. It enforces structural correctness (variables resolve, sections in the right place, no obvious pitfalls) but does not iterate, does not run tests, and does not judge whether the prompt is *good* — that lives in [`reference/assertions-design.md`](reference/assertions-design.md) under a Chinese-wall isolation. If a quality concern surfaces while you're here, finish writing the structurally-correct file and hand the concern back to the caller.
 
 > **Why this playbook is deliberately walled off from assertions.** By design, the prompt-creator does not see `assertions.md`, test reports, or grading rubrics — see the Three-Agent Principle in [`reference/assertions-design.md`](reference/assertions-design.md). If you find yourself wishing for that information, you're being asked to do the assertion-creator's job; push back and ask for a sharper spec instead.
 
@@ -24,7 +24,7 @@ This playbook runs in one of two modes. The caller indicates which.
 
 ### Create mode (default)
 
-The state has no prompt file yet — `.orca/prompts/{state}.md` does not exist (or exists but is the skeleton). The caller hands over a fresh state spec. Run Steps 1–5 end to end and write the file.
+The state has no prompt source yet — the file referenced by `worker.prompt` does not exist (or exists but is the skeleton). The caller hands over a fresh state spec. Run Steps 1–5 end to end and write the file. If the state uses inline `prompt: { text: ... }`, return the inline prompt body to the caller so they can place it in YAML; do not invent a separate file.
 
 ### Update mode
 
@@ -34,9 +34,9 @@ A correct Update-mode invocation looks like: "in `.orca/prompts/implementing.md`
 
 ## Prerequisites
 
-- `.orca/{flow}.yml` exists and the target state is defined in it, **with `result_format` already specified**.
+- `.orca/{flow}.yml` exists and the target issue type/state is defined in it, **with `result_format` already specified**.
 - You have a state specification:
-  - **State name** (e.g., `implementing`, `reviewing`, `scoping`)
+  - **Issue type and state name** (e.g., `task/implementing`, `feature/reviewing`, `default/scoping`)
   - **One-sentence job** describing what the state does
   - **`result_format`** — already in the workflow YAML
   - **Inputs** — which `issue.fields.*` the worker reads
@@ -49,13 +49,13 @@ If any of these are missing from the spec, stop and request them. Do not invent.
 
 Restate the spec in plain language as a sanity check that nothing is missing:
 
-- State name and one-sentence job
-- Required `issue.fields.*` (cross-checked against the workflow's `issue.fields` block)
+- Issue type, state name, and one-sentence job
+- Required `issue.fields.*` (cross-checked against that issue type's `fields:` block)
 - `result_format` shape (read from the YAML)
 - Constraints (scope, branch behaviour, off-limits actions)
 - Verification commands
 
-If a field referenced by the spec isn't declared in `.orca/{flow}.yml`'s `issue.fields` block — and isn't emitted by an upstream state's `result_format` — stop. The spec is inconsistent with the workflow.
+If a field referenced by the spec isn't declared in that issue type's `fields:` block, stop. An upstream state emitting the same key in `result_format` is not enough by itself: the reducer only copies result keys into `issue.fields` when the key is declared in the current issue type's field schema.
 
 ## Step 2 — Pick the right template variables
 
@@ -64,7 +64,7 @@ The full set of variables exposed to a prompt template:
 | Variable | Type | Description | When you need it |
 |---|---|---|---|
 | `{{ issue.fields.* }}` | varies | User-declared issue fields (title, description, scope_boundary, etc.) plus auto-populated `failure_context` if declared in the schema. | Whenever the state needs issue input. Many workflows use `title`/`description`, but only reference fields declared in the schema. |
-| `{{ issue.base_branch }}` | string | Auto-populated at dispatch with the issue's live base branch: root issues see the run branch; child issues see their parent issue's branch. **Top-level on `issue`, not under `fields`.** | If the worker needs to know where its branch should merge/apply |
+| `{{ issue.base_branch }}` | string | Auto-populated at dispatch with the issue's live base branch: root issues see the run branch/run label; child issues see their parent issue's branch. **Top-level on `issue`, not under `fields`.** | If the worker needs to know where its branch should merge/apply |
 | `{{ issue.depends_on }}` | list of issue ids | IDs of sibling issues this child waits on. Empty list for root issues. | If this state can only run after a predecessor |
 | `{{ issue.decomposed_from }}` | string \| null | Parent issue id if this is a decomposed child; null otherwise. | When a child task needs parent context |
 | `{{ issue.children }}` | list of dicts | Decomposed child issues. Each entry has keys `issue_id` (str), `fields` (dict), `state` (str), `event_log` (list). **No `id`, `title`, or `depends_on` at the child level** — access title via `child.fields.title`. | If this state operates over sub-issues |
@@ -81,7 +81,7 @@ The full set of variables exposed to a prompt template:
 
 > Two auto-populated values have *different access paths* — the table above gets this right; it's worth restating because the schema doc treats them as siblings:
 > - `{{ issue.base_branch }}` — top-level on the issue dict. This is the live parent/root branch, not necessarily the workflow YAML's `base_branch` value.
-> - `{{ issue.fields.failure_context }}` — **inside `fields`** (only present if the workflow declared `failure_context` in its issue schema, per the *Failure-Context Propagation* pattern).
+> - `{{ issue.fields.failure_context }}` — **inside `fields`** (only present if the issue type declares `failure_context`, per the *Failure-Context Propagation* pattern).
 
 Anything optional (`depends_on`, `children`, `event_log`) must be wrapped in `{% if %}` — otherwise the rendered prompt has empty headers that confuse the worker.
 
@@ -320,21 +320,21 @@ A self-looping `blocked` outcome is bounded by `max_hops` (each loop = one trans
 
 Before writing:
 
-1. **File path matches the YAML.** Confirm `.orca/prompts/{state}.md` matches the `worker.prompt` path in `.orca/{flow}.yml`. The filename and the YAML reference must agree exactly.
-2. **All field references exist.** Every `{{ issue.fields.X }}` in the prompt must be declared in the workflow's `issue.fields` block (or set by an upstream state's `result_format`). Grep the prompt for `issue.fields.` and cross-check.
+1. **File path matches the YAML.** Confirm the file you are writing matches the `worker.prompt` path in `.orca/{flow}.yml`. The filename and the YAML reference must agree exactly. If the prompt is inline, confirm the YAML uses `prompt: { text: ... }` and skip the file-path check.
+2. **All field references exist.** Every `{{ issue.fields.X }}` in the prompt must be declared in this state's issue type `fields:` block. If an upstream state is supposed to populate `X`, that upstream `result_format` must emit `X` and the field still must be declared here. Grep the prompt for `issue.fields.` and cross-check.
 3. **`{% if %}` guards on optional sections.** Anything that depends on optional data (`depends_on`, `children`, etc.) must be guarded — otherwise the rendered prompt has dangling empty headers.
 4. **JSON template renders cleanly.** Mentally render the bottom block with the actual `result_format` and check that the JSON is what you want the worker to produce.
 5. **`{{ result_path }}` appears inside the `## Result` section** — not only at the top of the prompt. Pull the section body and check for the variable:
 
    ```bash
-   awk '/^## Result/{flag=1; next} /^## /{flag=0} flag' .orca/prompts/{state}.md | grep -q '{{ result_path }}'
+   awk '/^## Result/{flag=1; next} /^## /{flag=0} flag' <prompt-path> | grep -q '{{ result_path }}'
    ```
 
    `awk` keeps reading until the next `##` heading, so this matches the path anywhere in the Result section regardless of whitespace, prose preamble, or how many lines the schema block takes. The framework also interpolates the path into the auto-appended end-of-prompt warning, so a forgotten `{{ result_path }}` is no longer fatal — but the Result section is the logical home for it. Treat this as defense-in-depth, not a single point of failure.
 
 If your editor supports it, render the Jinja template with a sample issue and read the output — many bugs only show up post-render (orphan headers, missing fields, wrong indentation in the JSON block).
 
-Once the checks pass, write the file to `.orca/prompts/{state}.md`. Done — return control to the caller.
+Once the checks pass, write the prompt to the path referenced by `worker.prompt`, or return the inline prompt body to the caller for placement in YAML. Done — return control to the caller.
 
 ## Anti-patterns to refuse
 
@@ -348,7 +348,7 @@ Once the checks pass, write the file to `.orca/prompts/{state}.md`. Done — ret
 ## Done
 
 Report:
-- File written or updated: `.orca/prompts/{state}.md`
+- File written/updated, or inline prompt returned: `<prompt-path>` / inline
 - Single-responsibility sentence (from the spec)
-- Whether all variables resolve against the current issue schema
+- Whether all variables resolve against the current issue type schema
 - Next step (caller's decision — this playbook does not run tests or iterate)

@@ -39,7 +39,7 @@ states:
 
 **Notes:**
 - Each state has one clear job
-- `blocked` loops back for human intervention or retry
+- `blocked` loops back for another worker attempt or a remediation state. Use the built-in `waiting` outcome when the worker needs live human input before continuing the same session.
 - Add more states in the middle as needed (testing, review, applying)
 
 ## Decompose + Parallel Execution

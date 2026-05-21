@@ -74,11 +74,12 @@ Run the steps in order. After each, show what you produced and ask the user to c
 Ask the user, in plain language:
 
 1. **Which workflow?** `ls .orca/*.yml` and list candidates. If there's only one, name it; otherwise ask.
-2. **Which states?** One of:
+2. **Which issue type?** For typed workflows, list the `types:` keys and pick the production type whose state machine you are slicing. For legacy workflows, use the implicit `default` type.
+3. **Which states?** One of:
    - **Single state** (unit eval of one prompt — e.g. just `review`). Default suggestion.
    - **Subgraph** (integration eval of a slice — e.g. `planning -> implementing`).
    - **Full workflow** (end-to-end — every active state).
-3. **What does success look like?** One sentence: "the slice should …". This becomes the seed for `assertions.md`.
+4. **What does success look like?** One sentence: "the slice should …". This becomes the seed for `assertions.md`.
 
 Echo back what you understood:
 
@@ -94,7 +95,7 @@ One paragraph. Write the situation the slice will face and what it should do.
 
 This paragraph drives three downstream artefacts:
 
-- `input.md` body (the prose context — for a human reader)
+- `input.md` frontmatter and body (frontmatter seeds fields for the selected type; prose is for a human reader)
 - the state branch commits (what the worktree should contain before the slice runs)
 - `assertions.md` (the criteria — derived from "should do" wording above)
 
@@ -120,7 +121,11 @@ This creates `.orca/evals/review-catches-sql-injection/` with skeleton `eval-flo
 
 #### If `orca eval add` errors
 
-- **`eval directory already exists`** — the `.orca/evals/<name>/` directory already exists. Either pick a different name or, if you're recovering from an aborted attempt, remove the persistent worktree and then the orphan branch (`git worktree remove .orca-state/eval-states/<name> && git branch -D orca-eval-state/<name>`) before retrying.
+- **`eval directory already exists`** — the `.orca/evals/<name>/` directory already exists. Either pick a different name or, if you're recovering from an aborted attempt, remove the persistent worktree and then the orphan branch before retrying:
+  ```bash
+  git worktree remove .orca-state/eval-states/<name>
+  git branch -D orca-eval-state/<name>
+  ```
 - **`state branch already exists: orca-eval-state/<name>`** — the orphan branch is present but the eval directory isn't. Either you're reusing a branch from a deleted eval (sharing — see below) and you should hand-create the `.orca/evals/<name>/` skeleton instead of using `orca eval add`, or there's leftover state to clean up first.
 
 #### Sharing a state branch across multiple evals
@@ -180,23 +185,24 @@ diff, identify the unsafe f-string into a SQL query, and emit
 
 Rules:
 
-- Frontmatter keys are issue field names. **Only declare fields the slice's entry state actually reads.** Cross-check against `issue.fields` in the production workflow.
+- Frontmatter keys are issue field names. **Only declare fields the slice's entry state actually reads.** Cross-check against the selected production type's `fields:` block and the prompt's `{{ issue.fields.X }}` references.
 - `state_ref` is required. Without it `orca eval <name>` refuses to start the run.
 - Prose body is for the reader's eyes — it does not seed `issue.fields`.
 - If the eval should share state with another eval, point `state_ref` at that eval's branch instead of the scaffolded default.
 
 ### Step 5 — Copy slice states into `eval-flow.yml`
 
-The skeleton has placeholders. Replace them with body states copied from production, applying only the eval-harness rewrites below.
+The skeleton has placeholders. Replace them with body states copied from production, applying only the eval-harness rewrites below. For most typed production workflows, keep the eval harness in the scaffold's legacy single-type shape and copy the selected production type's needed fields into `issue.fields`. Preserve a full typed `types:` wrapper only when the eval intentionally exercises internal decomposition across child types; otherwise the extra type graph makes the eval harder to audit without changing what the prompt sees.
 
 **Rewrite rules.** For each body state copied from production:
 
-1. **`result_format` is copied verbatim.** Drift here is the whole point of having evals — keep them in sync.
-2. **Internal transitions stay verbatim.** If `planning` in prod routes `done -> implementing` and both states are in the slice, copy the rule unchanged.
-3. **Outgoing-to-outside-slice transitions are rewritten to `assert`.** If `implementing` in prod routes `done -> reviewing` but `reviewing` is *not* in the slice, rewrite to `done -> assert`. The same applies to any rule that targets the built-in `done` — rewrite to `assert` so the grader sees the final result.
-4. **`initial:` names the slice's entry state.** Replace the placeholder `initial: TODO_BODY_STATE` with the real entry state name (e.g. `initial: review`).
+1. **`issue.fields` covers the selected type.** Copy only the fields that the slice's entry state and copied prompts read. If an upstream state in the slice emits a carried field that a later prompt reads via `issue.fields.X`, declare `X` here too.
+2. **`result_format` is copied verbatim.** Drift here is the whole point of having evals — keep them in sync.
+3. **Internal transitions stay verbatim.** If `planning` in prod routes `done -> implementing` and both states are in the slice, copy the rule unchanged.
+4. **Outgoing-to-outside-slice transitions are rewritten to `assert`.** If `implementing` in prod routes `done -> reviewing` but `reviewing` is *not* in the slice, rewrite to `done -> assert`. The same applies to any rule that targets the built-in `done` — rewrite to `assert` so the grader sees the final result.
+5. **`initial:` names the slice's entry state.** Replace the placeholder `initial: TODO_BODY_STATE` with the real entry state name (e.g. `initial: review`).
 
-Concrete example — copying a single `review` state from `.orca/review.yml`. Both YAML blocks below are shown under their own file's `states:` parent (the parent is included for context — do not double-nest when you copy).
+Concrete example — copying a single `review` state from `.orca/review.yml` (or from one selected type inside a typed workflow). Both YAML blocks below are shown under their own file's `states:` parent (the parent is included for context — do not double-nest when you copy).
 
 Before (in `.orca/review.yml`):
 
@@ -269,7 +275,8 @@ cd .orca-state/eval-states/<name>/
 # write the files the slice will read
 vim src/api.py
 # commit when the state is ready
-git add . && git commit -m "seed: <describe the scenario>"
+git add <scenario-files>
+git commit -m "seed: <describe the scenario>"
 ```
 
 #### Rules
@@ -286,7 +293,7 @@ If a criterion anchors on `src/api.py:42`, count the lines in the file the state
 
 ### Step 7 — Leave the assert prompt alone (usually)
 
-The assert state is an agent worker that reads `{{ run.repo_root }}/.orca/evals/{{ run.eval_name }}/assertions.md`, inspects the worktree and per-state results, grades each criterion, writes `{{ run.run_dir }}/report.md`, and emits a structured result at `{{ result_path }}`.
+The assert state is an agent worker that reads `{{ run.repo_root }}/.orca/evals/{{ run.eval_name }}/assertions.md`, inspects the worktree plus run state/log evidence, grades each criterion, writes `{{ run.run_dir }}/report.md`, and emits a structured result at `{{ result_path }}`.
 
 `orca eval add` ships a minimal inline prompt that does exactly this. It's deliberately terse:
 
@@ -320,7 +327,7 @@ The assert state is an agent worker that reads `{{ run.repo_root }}/.orca/evals/
 
 Extend the prompt only when the scaffold demonstrably falls short — e.g. the evaluator is consistently failing to gather evidence from the right place, or you need a specific report layout for a downstream consumer. Reasonable extensions, in increasing order of intrusiveness:
 
-- Add a *gather evidence* line listing the dirs to inspect (worktree, `{{ run.run_dir }}/state-results/`, `{{ run.summary }}`, `{{ run.sessions }}`).
+- Add a *gather evidence* line listing the evidence to inspect: the run worktree, `{{ run.run_dir }}/state.json`, `{{ run.run_dir }}/sessions.json`, worker session logs from `{{ run.sessions }}`, `{{ run.summary }}`, and any result file paths recorded in the run.
 - Add a *grading rubric* line defining `pass` / `fail` / `not_applicable`.
 - Add a *report shape* template if the report needs a fixed columnar layout.
 - Add explicit *outcome rules* (`passed = all pass-or-na`; `failed = any fail`; `inconclusive = ungradeable`).
@@ -400,17 +407,23 @@ After the run completes, read the report:
 cat .orca-state/runs/<branch>/<workflow>/report.md
 ```
 
-The layout is `.orca-state/runs/<branch>/<workflow>/` — for `orca eval <name>`, the `<branch>` segment defaults to `orca-eval-run-<name>` and the `<workflow>` segment is the eval name. The path printed by the assert state at end-of-run is the canonical one — copy from there if you're unsure.
+The layout is `.orca-state/runs/<branch>/<workflow>/` — for `orca eval <name>`, the `<branch>` segment defaults to `orca-eval-run-<name>` and the `<workflow>` segment is currently `eval-flow` because the submitted config file is `.orca/evals/<name>/eval-flow.yml`. So the default report path is:
+
+```bash
+cat .orca-state/runs/orca-eval-run-<name>/eval-flow/report.md
+```
+
+If a lower-level caller supplied a custom branch/run id, derive the path from the daemon's run summary or inspect `.orca-state/runs/`.
 
 **Iterate.** First runs usually surface one of three problems:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | Daemon error: `state ref '<...>' not found` | The state branch was deleted or renamed, or `state_ref` in `input.md` is wrong. | `git branch --list 'orca-eval-state/*'` to confirm; recreate via `orca eval add` or fix the marker. |
-| Worktree contents look wrong | State branch tip changed since the author last edited; or someone committed `.orca/` or other chrome to the state branch. | `cd .orca-state/eval-states/<name>/ && git log --oneline` to inspect; amend or reset as needed. |
+| Worktree contents look wrong | State branch tip changed since the author last edited; or someone committed `.orca/` or other chrome to the state branch. | `git -C .orca-state/eval-states/<name>/ log --oneline` to inspect; amend or reset as needed. |
 | Slice fails with worker error | `result_format` drift between eval and prod, or the production prompt has a bug. | Re-copy `result_format` verbatim from prod; if still failing, the prompt itself is buggy — fix in prod. |
 | Criteria flip-flop run-to-run | Judgment-heavy criteria. | Rewrite to be objective (counts, presence, regexes). |
-| Every criterion `fail` | Assert prompt isn't reading evidence from the right place. | Double-check `{{ run.run_dir }}/state-results/` references; confirm the slice actually emitted a result. |
+| Every criterion `fail` | Assert prompt isn't reading evidence from the right place, or the slice did not emit the expected result. | Check `{{ run.run_dir }}/state.json`, `{{ run.run_dir }}/sessions.json`, worker logs, and the run worktree; confirm the slice actually emitted a result before changing assertions. |
 
 ## Anti-patterns to refuse
 
@@ -429,7 +442,7 @@ Report:
 - Directory created: `.orca/evals/<name>/`
 - Files: `eval-flow.yml`, `input.md` (with `state_ref` marker), `assertions.md`
 - State branch: `orca-eval-state/<name>` (commits arranging the worktree)
-- Slice shape: single-state / subgraph / e2e — and which states
+- Slice shape: single-state / subgraph / e2e — and which production type/states
 - Criteria count
 - Whether a first run was performed and its outcome
 - Path to `report.md` (if a run completed)

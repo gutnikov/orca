@@ -65,9 +65,9 @@ description: <authored per "Description authoring" above>
 
 When this skill triggers:
 
-1. Capture the user's natural-language ask in 1–2 sentences. If anything required by the workflow's issue schema is missing or ambiguous, ask one clarifying question — then stop asking.
-2. Compose a `task.md` filling the workflow's required fields:
-   - `<field-1>`: <one-line guidance, taken from the workflow's issue.fields block>
+1. Capture the user's natural-language ask in 1–2 sentences. If anything required by the workflow's root issue type fields is missing or ambiguous, ask one clarifying question — then stop asking.
+2. Compose a `task.md` filling the workflow's root issue type required fields:
+   - `<field-1>`: <one-line guidance, taken from the root issue type's `fields:` block>
    - `<field-2>`: <one-line guidance>
    - <... one bullet per issue field>
 3. Check the daemon. Call `orca_daemon_status`; if it reports the daemon is not running, tell the user to start it themselves with `orca daemon start` in a shell at the project root. Do not call `orca_start_run` until the daemon is up — it will return a clear error.

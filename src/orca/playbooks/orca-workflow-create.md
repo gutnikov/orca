@@ -55,7 +55,7 @@ For each proposed state, name:
 - **What the worker does** (one sentence)
 - **What it outputs** (the `result_format` outcomes, in plain language)
 - **Where each outcome routes**
-- **Failure-safe outcomes** (`blocked` / `waiting` — every active state needs at least one escape hatch beyond success)
+- **Failure-safe outcomes** (a routable non-success outcome such as `blocked`, `conflict`, or `needs_rework`; `waiting` is only for live human input)
 
 Decision points to make explicit with the user:
 
@@ -65,16 +65,16 @@ Decision points to make explicit with the user:
 | Where to decompose | Early decomposition = more parallelism but less control. Late = vice versa. |
 | `max_workers` per state | Merge/apply/deploy states should be `1`. Independent work states can omit it (unbounded). |
 | `max_hops`, `max_worker_retries` | These are launch-time limits, not workflow YAML fields in the current engine. `orca run` defaults to 10 / 3; use `--max-hops` / `--max-retries` only if the user has a reason. |
-| Branch strategy | The run branch is chosen at `orca run` time (auto-derived from the issue, or set via `-b/--branch`). The `base_branch` config controls what new run branches are cut from. Child issue branches are cut from their parent issue's branch. There is no per-state "branch prefix" knob; check with the user whether each issue should land on its own branch (typical) or on a shared one. |
+| Branch strategy | The run branch/run label is chosen at `orca run` time (current git branch by default, or set via `-b/--branch`). In the current daemon-backed run path, `base_branch` / `--base` should not be relied on to create a new root branch. Child issue worktrees are based on their parent/root branch, so a custom `-b` should name an existing branch/ref when the workflow decomposes into children. There is no per-state "branch prefix" knob; check with the user whether child issues should land on separate branches (typical) or the root issue should do all work in the current checkout. |
 | Human-in-the-loop | Will any state need the `waiting` outcome (i.e., pause for human input)? Where? |
 
 Get the user to sign off on the diagram. **Do not write a single line of YAML until they do.**
 
-### Step 3 — Define the issue schema
+### Step 3 — Define the issue schema(s)
 
 Ask: what fields does an issue carry through the workflow?
 
-For each field:
+For typed configs, define fields separately for each issue type. A field emitted by a `task` state does not automatically exist on `epic`, and vice versa. For each field:
 - Name (snake_case)
 - Type — only `string` and `enum` are supported for issue fields (see [`orca-config-reference.md`](reference/orca-config-reference.md)). For collections of child issues, use `sub_issues` with `items: "$issue"` — that's part of `result_format`, not the issue schema.
 - Required at start, or filled in by an earlier state?
@@ -82,7 +82,7 @@ For each field:
 
 Common fields when relevant: `title`, `description`, `acceptance_criteria`, `scope_boundary`, `summary`. Don't add `branch` — orca tracks git branches at the run level (`run.branch`) and auto-injects `issue.base_branch` for workers; user-defined fields shouldn't duplicate that. Don't invent fields the workflow doesn't actually use.
 
-Show the user the field list and confirm.
+Show the user the field list grouped by type and confirm.
 
 ### Step 4 — Draft `.orca/{flow}.yml`
 
@@ -92,7 +92,7 @@ Write the YAML. Use the snippets in [`orca-workflow-patterns.md`](reference/orca
 - Every `on:` target is either a real state in `states:` or a built-in target (`done`, `failed`). Note: `waiting` is a built-in *outcome*, not a transition target — it has no `on:` rule.
 - Every key in an `on:` map is present in that state's `result_format.outcome.values`, and every non-`waiting` outcome the worker may emit has an `on:` route. `on:` keys are outcome values; the `decompose` action is what runs for that outcome — not a separate routing concept.
 - Every active state has `worker.prompt` pointing at a file under `prompts/`, or a deliberately tiny inline prompt.
-- Field references in prompts (`{{ issue.fields.X }}`) match the issue schema
+- Field references in prompts (`{{ issue.fields.X }}`) match the field schema for that state's issue type. If an upstream state emits `X` and a later prompt reads `{{ issue.fields.X }}`, `X` must also be declared in that later issue type's `fields:` block; the reducer only carries result keys that are declared fields.
 
 Filename: `.orca/{flow}.yml` (snake_case or hyphen-case; commonly `develop.yml`, `review.yml`, `triage.yml`).
 
@@ -100,11 +100,11 @@ Show the file to the user and ask: *"Does this match what you described?"* Don't
 
 ### Step 5 — Write prompt templates
 
-For each active state, create `.orca/prompts/{state}.md` via [`orca-prompt-create.md`](orca-prompt-create.md). That playbook is a **pure procedure** — it consumes a state specification and emits a prompt. It does not interact with the user; the user-interaction layer is here in workflow-create.
+For each active state, create the prompt file referenced by that state's `worker.prompt` via [`orca-prompt-create.md`](orca-prompt-create.md). The common path is `.orca/prompts/{state}.md`, but typed workflows may need distinct filenames such as `.orca/prompts/task_implementing.md` when different types reuse the same state name. That playbook is a **pure procedure** — it consumes a state specification and emits a prompt. It does not interact with the user; the user-interaction layer is here in workflow-create.
 
 For each active state, assemble a spec from what you already have:
 
-- **State name** (already in the YAML from Step 4)
+- **Issue type and state name** (already in the YAML from Step 4)
 - **One-sentence job** (derive from the state's purpose in Step 2)
 - **`result_format`** (already in the YAML from Step 4 — the prompt-creator reads it directly)
 - **Inputs** — which `issue.fields.*` and which upstream-state result fields the worker reads
@@ -113,7 +113,7 @@ For each active state, assemble a spec from what you already have:
 
 Pass that spec to `orca-prompt-create`. After it returns, show the prompt to the user and ask: *"Does this capture what `<state>` should do?"* If the user wants changes, re-invoke `orca-prompt-create` in Update mode with the specific instruction — do **not** edit the prompt directly here.
 
-For multi-state workflows, each prompt's spec should reference what the previous state produced (e.g., a `plan` field set by a planning state).
+For multi-state workflows, each prompt's spec should reference what the previous state produced (e.g., a `plan` field set by a planning state). If the later prompt reads that value via `issue.fields.plan`, declare `plan` in the relevant type's `fields:` block as a carried field.
 
 ### Step 6 — Validate
 
@@ -137,20 +137,20 @@ Distinct from Step 8 below, which scaffolds *static* per-state structural evals 
 
 ### Step 8 — Auto-scaffold per-state structural evals
 
-For every active state, scaffold a per-state structural eval under `.orca/evals/<state>-smoke/`. Announce that you're about to create the scaffolds and list the state names, then perform this step mechanically. Unlike Steps 1–7, you do not ask the user to design the evals, choose criteria, or opt out; the scaffolds are unconditional because they're cheap, schema-derived, and add value at zero cost. They do not exercise semantic correctness; that comes later as a separate phase via [`orca-eval-create.md`](orca-eval-create.md).
+For every active state, scaffold a per-state structural eval under `.orca/evals/<eval-name>/`. Use `<type>-<state>-smoke` for typed workflows, or `<state>-smoke` only when the state name is unique. Announce that you're about to create the scaffolds and list the type/state pairs, then perform this step mechanically. Unlike Steps 1–7, you do not ask the user to design the evals, choose criteria, or opt out; the scaffolds are unconditional because they're schema-derived and create useful review anchors. They are not free: they create files, an orphan state branch, and a persistent author worktree per eval. They do not exercise semantic correctness; that comes later as a separate phase via [`orca-eval-create.md`](orca-eval-create.md).
 
 For each active state:
 
-1. **Invoke `orca eval add <state>-smoke`.** This creates `.orca/evals/<state>-smoke/`, the `orca-eval-state/<state>-smoke` branch, the persistent author worktree under `.orca-state/eval-states/<state>-smoke/`, and stamps placeholder `eval-flow.yml`, `input.md`, and `assertions.md`.
+1. **Invoke `orca eval add <eval-name>`.** This creates `.orca/evals/<eval-name>/`, the `orca-eval-state/<eval-name>` branch, the persistent author worktree under `.orca-state/eval-states/<eval-name>/`, and stamps placeholder `eval-flow.yml`, `input.md`, and `assertions.md`.
 
 2. **Edit `eval-flow.yml`** to copy the production state verbatim — per the rewrite rules in [`orca-eval-create.md`](orca-eval-create.md) Step 5. `result_format` is reused as-is from the YAML; outgoing transitions from the body state route to `assert`.
 
 3. **Write a minimal `assertions.md`** mechanically derived from the state's `result_format`. No semantic judgment. The shape:
 
    ```markdown
-   # Assertions: <state>-smoke
+   # Assertions: <eval-name>
 
-   Structural smoke eval for the `<state>` state. Verifies the worker produces a result that
+   Structural smoke eval for the `<type>/<state>` state. Verifies the worker produces a result that
    conforms to the schema in `.orca/{flow}.yml`. Semantic correctness criteria are added later
    via `orca-eval-create`.
 
@@ -174,7 +174,7 @@ For each active state:
 
 After scaffolding every state, report the paths and explain the next step:
 
-> "Per-state structural eval scaffolds created under `.orca/evals/`. Each one structurally verifies its state's output schema. To make them runnable, add a scenario to `input.md` and arrange the state branch (per `orca-eval-create.md` Step 6). To add semantic correctness criteria, run `orca-eval-create` for each eval."
+> "Per-state structural eval scaffolds created under `.orca/evals/`. Each one contains structural criteria for its state's output schema. They are not runnable until `input.md` has a real scenario and the state branch contains the required worktree bytes (per `orca-eval-create.md` Step 6). To add semantic correctness criteria, run `orca-eval-create` for each eval."
 
 Don't run the evals during this step. Don't iterate on results. Don't ask the user to opt out, choose scope, or pick an alternative shape. Do tell the user what files/branches were created. A workflow ships with at least its structural surface in place; users decide later how much semantic depth to add.
 
@@ -206,10 +206,10 @@ If the user says **no**, note it in the final report and move on.
 ## Anti-patterns to refuse (or push back on)
 
 - **Closing out the workflow without acting on Steps 7 and 8.** Step 8's per-state structural scaffolds are unconditional — they must exist before "done". Step 7's end-to-end smoke run is an *ask*: the user may decline, but they must be asked, and their answer recorded.
-- **No escape hatch.** Every active state needs `blocked` or `waiting` in addition to success outcomes. Refuse to write a state that can only succeed.
+- **No escape hatch.** Every active state needs a routable non-success outcome such as `blocked`, `conflict`, or `needs_rework` in addition to success outcomes. `waiting` is available for live human input, but it has no `on:` route and should not be the only way a state reports failure or defers work.
 - **Result format / prompt drift.** If you change `result_format`, update the prompt's output contract in the same edit. Never commit one without the other.
 - **Hidden fan-out on a merge state.** A merge/apply state must have `max_workers: 1`. Surface this explicitly to the user.
-- **Mystery field references.** If a prompt references `{{ issue.fields.X }}`, `X` must be in the issue schema (either declared at start or set by an upstream state's `result_format`).
+- **Mystery field references.** If a prompt references `{{ issue.fields.X }}`, `X` must be declared in that issue type's `fields:` block. If an upstream state's `result_format` emits `X`, declare `X` as a carried field too; otherwise the reducer drops it instead of making it available to later prompts.
 - **Free-form outcomes.** Every value in `result_format.outcome.values` must appear in `on:` (or it's an unhandled terminal — confirm with the user).
 - **Generating a wrapper skill with a generic description.** Skill routing is description-driven; the offer in Step 9 is wasted if the trigger phrases don't match how the team actually speaks. Walk the description-authoring step from [`reference/wrapper-skill-template.md`](reference/wrapper-skill-template.md) — don't shortcut it.
 

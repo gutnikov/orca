@@ -24,7 +24,7 @@ Run these checks. If any fail, stop and tell the user what's missing — do **no
 | At least one agent CLI present | `which claude \|\| which codex \|\| which opencode` | prints a path |
 | SSH access to GitHub works | `ssh -T git@github.com` | output proves auth (GitHub's successful-auth/no-shell banner is OK even if the command exits 1); `Permission denied` fails |
 
-If `pipx` is missing, suggest `brew install pipx && pipx ensurepath` (macOS) or the platform-appropriate equivalent. Do not run it without confirmation.
+If `pipx` is missing, suggest `brew install pipx` and then `pipx ensurepath` (macOS), or the platform-appropriate equivalent. Do not run installation commands without confirmation.
 
 If `pipx` is installed but its bin dir isn't on `PATH`, suggest `pipx ensurepath` and a shell restart **before** installing — otherwise `pipx install` succeeds silently but `command -v orca` won't find anything afterwards (the classic "I installed it, why doesn't it run" trap).
 
@@ -106,13 +106,13 @@ Upgrade the `orca` CLI to the latest commit on `main` of the upstream repo.
    orca -v
    ```
 
-3. Check for active runs in known Orca project roots the user cares about — there is no global "all projects" registry. Updating restarts each daemon on next invocation. Ask the user before proceeding if any checked project has a `RUNNING` run:
+3. Check for active runs in known Orca project roots the user cares about — there is no global "all projects" registry. Updating restarts each daemon on next invocation. Ask the user before proceeding if any checked project has a `running` run:
    ```bash
    # in each orca project:
    orca runs
    ```
 
-   Restarting the daemon mid-run is recoverable (orca will mark the run `INTERRUPTED` and `orca resume` can pick it back up), but the user should know.
+   Restarting the daemon mid-run is recoverable (orca will mark the run `interrupted` and `orca resume` can pick it back up), but the user should know.
 
 ### Stop any running daemons
 
@@ -152,7 +152,7 @@ orca daemon start
 orca runs
 ```
 
-For any run shown as `INTERRUPTED`, ask the user before resuming:
+For any run shown as `interrupted`, ask the user before resuming:
 
 ```bash
 orca resume <run_id>

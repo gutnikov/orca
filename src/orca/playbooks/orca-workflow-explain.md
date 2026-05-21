@@ -1,11 +1,13 @@
 # Playbook: Explain a Workflow
 
 Generate a plain-language, language-localized explanation of an orca workflow
-and open it in the web UI. The output is a single JSON file under
+for the web UI. The target may be a production workflow
+(`.orca/{flow}.yml`) or an eval workflow
+(`.orca/evals/{flow}/eval-flow.yml`). The output is a single JSON file under
 `.orca-state/explanations/{flow}.{lang}.json` that the daemon serves at
 `GET /api/explanations/{flow}` and the web app renders at
 `http://localhost:7891/explain/{flow}?lang={lang}` (Mermaid state diagram +
-per-state cards + optional eval walkthrough).
+per-state cards + optional scenario walkthrough).
 
 Audience for the rendered page: a smart non-engineer. Avoid jargon. Translate
 the *intent* of each prompt — do not paste prompt text verbatim.
@@ -21,32 +23,37 @@ the *intent* of each prompt — do not paste prompt text verbatim.
 
 ## Inputs
 
-- **`flow`** (required) — the YAML stem under `.orca/`, e.g. `run-evals`.
+- **`flow`** (required) — either the YAML stem under `.orca/`, e.g. `develop`,
+  or an eval directory name under `.orca/evals/`, e.g. `review-catches-sql-injection`.
 - **`lang`** (optional, default `en`) — ISO 639-1 code, e.g. `en`, `ru`, `es`, `de`, `fr`.
-- **`eval`** (optional) — subdirectory name under `.orca/evals/`. When provided, a "walkthrough" section is added that anchors the explanation in this concrete scenario.
+- **`eval`** (optional) — subdirectory name under `.orca/evals/`. When provided while explaining a production workflow, a "walkthrough" section is added that anchors the explanation in this concrete scenario. When `flow` itself resolves to an eval workflow, use that eval's own `input.md`/`assertions.md` as walkthrough context.
 
 If `flow` is missing, stop and ask. Don't guess from `.orca/` directory listing.
 
 ## Output
 
-A single JSON file at `.orca-state/explanations/{flow}.{lang}.json` matching the schema in [Step 7](#step-7--write-the-json). Then open the URL in the user's browser.
+A single JSON file at `.orca-state/explanations/{flow}.{lang}.json` matching the schema in [Step 7](#step-7--write-the-json). Then print the URL for the user; open it in the browser only when the current host/tooling allows that.
 
 ---
 
 ## Step 1 — Confirm inputs and prerequisites
 
-- `.orca/{flow}.yml` exists. If not, stop with a clear message ("no workflow named X found under .orca/").
-- If `eval` provided, `.orca/evals/{eval}/` exists. If not, stop similarly.
-- The orca daemon is running. Check via the `orca_daemon_status` MCP tool when available; otherwise do `curl -s http://localhost:7891/api/health` and confirm 200. If down, tell the user to start it (`orca daemon start`) and stop.
+- Resolve the workflow config:
+  - If `.orca/{flow}.yml` exists, explain that production workflow.
+  - Else if `.orca/evals/{flow}/eval-flow.yml` exists, explain that eval workflow.
+  - Else stop with a clear message ("no workflow or eval named X found under .orca/").
+- If `eval` is provided separately, `.orca/evals/{eval}/` must exist. If not, stop similarly.
+- The orca daemon is running. Check via the `orca_daemon_status` MCP tool when available; otherwise run `orca daemon status`. If down, tell the user to start it (`orca daemon start`) and stop.
 
 ## Step 2 — Read the artefacts
 
 Read these files (use the file-reading tools available to you, not `cat`):
 
-- `.orca/{flow}.yml` — the workflow definition.
-- For every `state.worker.prompt: path/to.md` entry, read that prompt file (path is relative to `.orca/`).
+- The resolved workflow config (`.orca/{flow}.yml` or `.orca/evals/{flow}/eval-flow.yml`).
+- For every `state.worker.prompt: path/to.md` entry, read that prompt file. The path is relative to the directory containing the resolved config (`.orca/` for production flows, `.orca/evals/{flow}/` for eval flows).
 - For states with inline `prompt: { text: "..." }`, capture the inline string.
-- If `eval` provided: `.orca/evals/{eval}/README.md` and any other files in that directory.
+- If explaining an eval workflow, read `.orca/evals/{flow}/input.md` and `.orca/evals/{flow}/assertions.md`.
+- If `eval` provided separately: read `.orca/evals/{eval}/input.md`, `.orca/evals/{eval}/assertions.md`, and any other small files needed for context.
 
 If a referenced prompt file is missing, flag it but continue — emit a state with `what_the_prompt_asks` set to "(prompt file missing — could not summarise)" in the target language.
 
@@ -59,7 +66,7 @@ From the YAML, derive for each state:
 - `is_passive: true` when there is no `worker` block.
 - `inputs` — best-effort scan of the prompt template for `{{ issue.fields.X }}` references plus any inputs explicitly described in the prompt's prose. List the field names as `["title", "description", ...]`. **This is best-effort by string scan — note this fact internally; do not promise exhaustiveness.**
 - `outputs` — keys from `state.worker.result_format` (if present). For each, the key name only (e.g. `["outcome", "selected"]`).
-- `transitions` — from `state.on.{event}: {target_state}` pairs. Each transition is `{on: event, to: target_state, explain: <see Step 4>}`.
+- `transitions` — from each `state.on` rule. For simple transitions, `to` is the target string. For decompose rules, `to` is `then` when present, otherwise `"[children]"` because the parent waits for children before continuing. Each transition is `{on: event, to: target_state, explain: <see Step 4>}`.
 
 ## Step 4 — Write the plain-language fields, in the target language
 
@@ -99,9 +106,14 @@ Rules:
 - Use the value of `initial:` in the YAML as the entry. If absent, use the
   first state defined.
 - For each `state.on.{event}: {target}`, emit one line.
-- Terminal states are: states listed in the workflow's `terminal:` block
-  (if present), OR states with no `on:` block, OR states that transition
-  to `done`. Add `state --> [*]` lines for each.
+- There is no `terminal:` block in the current schema. The built-in terminal
+  sink is `done`. For each transition that targets `done`, emit
+  `{state} --> [*] : {on_value}`. Passive states with no `worker` and no
+  `on:` are manual wait states, not terminal states; render them with no
+  outgoing edge unless a manual transition is described elsewhere.
+- The built-in `failed` target is a control directive, not a resting state.
+  Render it as `{state} --> failed : {on_value}` only if doing so helps explain
+  retry/failure handling; do not add `failed --> [*]`.
 - Mermaid identifiers don't allow hyphens — replace `-` with `_` in state
   names *for the diagram only*. Keep the original names in `states[].name`.
 
@@ -115,9 +127,9 @@ For each state in the flow, write one entry:
 - `expected_outcome` — short prediction of the outcome enum value or the
   shape of the result, in `{lang}`.
 
-Use the eval's `README.md` and fixtures as context. If you cannot reasonably
-predict (e.g. the eval is about prompt quality, not flow behaviour), say so
-in `what_happens` — don't fabricate.
+Use the eval's `input.md`, `assertions.md`, and state-branch notes as context.
+If you cannot reasonably predict (e.g. the eval is about prompt quality, not
+flow behaviour), say so in `what_happens` — don't fabricate.
 
 ## Step 7 — Write the JSON
 
@@ -157,16 +169,17 @@ shape:
 Omit `walkthrough` entirely if no `eval` was provided. Omit `worker_kind`
 and `is_passive` per-state when they don't apply.
 
-## Step 8 — Open the URL
+## Step 8 — Print the URL
 
-Print the URL clearly to the user, then open it in their browser:
+Print the URL clearly to the user:
+
+    http://localhost:7891/explain/{flow}?lang={lang}
+
+If the host environment allows browser-opening commands and the user has not restricted tool use, you may also open it:
 
 - macOS: `open http://localhost:7891/explain/{flow}?lang={lang}`
 - Linux: `xdg-open http://localhost:7891/explain/{flow}?lang={lang}`
 - Windows: `start http://localhost:7891/explain/{flow}?lang={lang}`
-
-Use the available shell tool. If you cannot open the browser, still print
-the URL.
 
 ## Pitfall checks
 
@@ -182,4 +195,5 @@ the URL.
 - **No `walkthrough` without `eval`**: if no eval was provided, the
   `walkthrough` key must be absent from the output, not present-but-empty.
 - **Daemon must be up before opening the URL** — if it isn't, the user gets a
-  connection-refused error in the browser. Catch it earlier in Step 1.
+  connection-refused error in the browser. Check with `orca_daemon_status` or
+  `orca daemon status` in Step 1.

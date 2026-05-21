@@ -15,7 +15,6 @@ Two formats supported:
 **Typed (recommended):**
 ```yaml
 root_type: feature
-base_branch: origin/main
 types:
   feature:
     fields: { ... }
@@ -40,7 +39,7 @@ states: { ... }
 | Field | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `root_type` | string | yes (typed) | — | Must match a key in `types:` |
-| `base_branch` | string | no | `origin/main` | Default git branch new run branches are cut from. Prompt templates receive a live `{{ issue.base_branch }}` value, but that value is resolved from the run/parent branch rather than copied directly from this setting. |
+| `base_branch` | string | no | legacy runner: `origin/main`; daemon path: ignored | Compatibility/config intent for branch setup. In the current daemon-backed `orca run` path, root run branches are not created from this value; do not rely on it for checkout/branch creation. Prompt templates receive a live `{{ issue.base_branch }}` value resolved from the run/parent branch rather than copied directly from this setting. |
 
 ### Runtime Bounds
 
@@ -94,7 +93,7 @@ These are set by the orchestrator at runtime, not by the user.
 | Name | Set When | Access path in prompts | Schema requirement |
 |---|---|---|---|
 | `failure_context` | Worker fails or transitions to the built-in `failed` target | `{{ issue.fields.failure_context }}` — **inside `fields`** | Must be declared in the type's `fields:` block (as `type: string`) for the orchestrator to set it. If not declared, the failure context is silently dropped. |
-| `base_branch` | Worker dispatched | `{{ issue.base_branch }}` — **top-level on `issue`, not under `fields`** | No declaration needed. For a root issue this is the run branch; for a child issue it is the parent issue's branch. The top-level config `base_branch` is used when creating a new run branch, not as the value injected into every prompt. |
+| `base_branch` | Worker dispatched | `{{ issue.base_branch }}` — **top-level on `issue`, not under `fields`** | No declaration needed. For a root issue this is the run branch/run label; for a child issue it is the parent issue's branch. The top-level config `base_branch` is not injected into prompts and is not currently applied by the daemon-backed run path to create the root branch. |
 
 The two access paths differ because `failure_context` is layered into the user-defined field schema (you opt in by declaring it), while `base_branch` is a runtime-only injection that doesn't live in the schema. The prompt-create playbook restates this where it bites — see [`../orca-prompt-create.md`](../orca-prompt-create.md) Step 2.
 
@@ -258,6 +257,7 @@ See [`../orca-eval-create.md`](../orca-eval-create.md) for the authoring procedu
 - `outcome` is required and must be one of `result_format.outcome.values`.
 - Fields with `required_when` must be present and non-empty when the outcome matches.
 - Nested `items` shapes, scalar subtypes such as `integer`, and object field details are not deeply validated by the engine. Use assertions/evals to grade those details.
+- After a non-`waiting` worker result, result keys other than `outcome` are copied into `issue.fields` only if the key is declared in the current issue type's `fields:` block. Declare carried fields (for example `plan`, `review_notes`, or `failure_context`) when later prompts read them via `{{ issue.fields.X }}`.
 
 ## Validation Rules
 
