@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils"
 import { rowStyles, wordDiff } from "./diff-viewer-styles"
 import type { HunkRow } from "./types"
 import { diffWordsWithSpace, type Change } from "diff"
+import { useIsDark } from "./useIsDark"
 
 type Props = {
   row: HunkRow
@@ -49,10 +50,11 @@ function renderWordDiffParts(parts: Change[], side: "left" | "right") {
   })
 }
 
-function renderHighlighted(text: string, language?: string) {
+function renderHighlighted(text: string, language: string | undefined, dark: boolean) {
   const lang = (language ?? "tsx") as Language
+  const theme = dark ? themes.vsDark : themes.github
   return (
-    <Highlight code={text} language={lang} theme={themes.github}>
+    <Highlight code={text} language={lang} theme={theme}>
       {({ tokens, getTokenProps }) => (
         <>
           {tokens[0]?.map((token, i) => <span key={i} {...getTokenProps({ token })} />)}
@@ -69,6 +71,7 @@ export function DiffRowView({
   onAddComment,
   showGutterButton = true,
 }: Props) {
+  const dark = useIsDark()
   const styleBucket =
     row.type === "added" ? rowStyles.added : row.type === "removed" ? rowStyles.removed : rowStyles.context
   const sign = row.type === "added" ? "+" : row.type === "removed" ? "−" : ""
@@ -81,7 +84,7 @@ export function DiffRowView({
     const { left } = inlineDiff(row.text, pairedWith.text)
     content = renderWordDiffParts(left, "left")
   } else {
-    content = renderHighlighted(row.text, language)
+    content = renderHighlighted(row.text, language, dark)
   }
 
   return (
@@ -103,7 +106,7 @@ export function DiffRowView({
             <MessageSquarePlus size={12} />
           </button>
         ) : null}
-        <span className="opacity-100 group-hover/row:opacity-0 transition-opacity">{sign}</span>
+        <span className="opacity-100 group-hover/row:opacity-0 transition-opacity pointer-events-none">{sign}</span>
       </span>
       <span className={rowStyles.content}>{content}</span>
     </div>

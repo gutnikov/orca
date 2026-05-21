@@ -7,6 +7,7 @@ import { parseUnifiedDiff } from "./diff-parser"
 import { CommentThread } from "./CommentThread"
 import { rowStyles } from "./diff-viewer-styles"
 import type { DiffViewOverlay } from "./DiffView"
+import { useIsDark } from "./useIsDark"
 
 export function FullFileView({
   file,
@@ -15,6 +16,7 @@ export function FullFileView({
   file: ChangesetFile
   overlay: DiffViewOverlay
 }) {
+  const dark = useIsDark()
   const newContent = file.new_content ?? ""
   const lines = useMemo(() => newContent.split("\n"), [newContent])
   const addedLineSet = useMemo(() => {
@@ -30,7 +32,7 @@ export function FullFileView({
 
   return (
     <div className="overflow-x-auto">
-      <Highlight code={newContent} language={(file.language ?? "tsx") as Language} theme={themes.github}>
+      <Highlight code={newContent} language={(file.language ?? "tsx") as Language} theme={dark ? themes.vsDark : themes.github}>
         {({ tokens, getTokenProps }) => (
           <>
             {tokens.map((tokenLine, i) => {
@@ -59,7 +61,7 @@ export function FullFileView({
                       >
                         <MessageSquarePlus size={12} />
                       </button>
-                      <span className="opacity-100 group-hover/row:opacity-0 transition-opacity">
+                      <span className="opacity-100 group-hover/row:opacity-0 transition-opacity pointer-events-none">
                         {isAdded ? "+" : ""}
                       </span>
                     </span>

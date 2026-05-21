@@ -83,8 +83,13 @@ export function FormPage({ data }: { data: FormResponse }) {
     }
   })
 
+  const hasChangeset = data.schema.steps.some((s) =>
+    s.blocks.some((b) => b.kind === "changeset"),
+  )
+  const widthClass = hasChangeset ? "max-w-6xl" : "max-w-2xl"
+
   return (
-    <main className="max-w-2xl mx-auto p-6">
+    <main className={`${widthClass} mx-auto p-6`}>
       <FormHeader data={data} />
       <Card>
         <CardContent className="pt-6">

@@ -9,7 +9,7 @@ export const rowStyles = {
     "px-4 py-1 text-[11px] font-mono text-muted-foreground bg-muted/40 border-y",
   gutterNumber: "text-right pr-2 text-muted-foreground/70 select-none",
   gutterSign: "text-center select-none",
-  content: "pl-2 pr-4 whitespace-pre overflow-x-hidden",
+  content: "pl-2 pr-4 whitespace-pre",
 } as const
 
 export const wordDiff = {
