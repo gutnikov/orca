@@ -9,10 +9,16 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as ReviewDemoRouteImport } from './routes/review-demo'
 import { Route as InboxRouteImport } from './routes/inbox'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as FormsRunIdIssueIdRouteImport } from './routes/forms.$runId.$issueId'
 
+const ReviewDemoRoute = ReviewDemoRouteImport.update({
+  id: '/review-demo',
+  path: '/review-demo',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const InboxRoute = InboxRouteImport.update({
   id: '/inbox',
   path: '/inbox',
@@ -32,35 +38,46 @@ const FormsRunIdIssueIdRoute = FormsRunIdIssueIdRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/inbox': typeof InboxRoute
+  '/review-demo': typeof ReviewDemoRoute
   '/forms/$runId/$issueId': typeof FormsRunIdIssueIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/inbox': typeof InboxRoute
+  '/review-demo': typeof ReviewDemoRoute
   '/forms/$runId/$issueId': typeof FormsRunIdIssueIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/inbox': typeof InboxRoute
+  '/review-demo': typeof ReviewDemoRoute
   '/forms/$runId/$issueId': typeof FormsRunIdIssueIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/inbox' | '/forms/$runId/$issueId'
+  fullPaths: '/' | '/inbox' | '/review-demo' | '/forms/$runId/$issueId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/inbox' | '/forms/$runId/$issueId'
-  id: '__root__' | '/' | '/inbox' | '/forms/$runId/$issueId'
+  to: '/' | '/inbox' | '/review-demo' | '/forms/$runId/$issueId'
+  id: '__root__' | '/' | '/inbox' | '/review-demo' | '/forms/$runId/$issueId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   InboxRoute: typeof InboxRoute
+  ReviewDemoRoute: typeof ReviewDemoRoute
   FormsRunIdIssueIdRoute: typeof FormsRunIdIssueIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/review-demo': {
+      id: '/review-demo'
+      path: '/review-demo'
+      fullPath: '/review-demo'
+      preLoaderRoute: typeof ReviewDemoRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/inbox': {
       id: '/inbox'
       path: '/inbox'
@@ -88,6 +105,7 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   InboxRoute: InboxRoute,
+  ReviewDemoRoute: ReviewDemoRoute,
   FormsRunIdIssueIdRoute: FormsRunIdIssueIdRoute,
 }
 export const routeTree = rootRouteImport
