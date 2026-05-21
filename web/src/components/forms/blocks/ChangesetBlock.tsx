@@ -72,6 +72,11 @@ export default function ChangesetBlock({
           onSelectFile={jumpToFile}
         />
         <div ref={containerRef} className="flex-1 min-w-0">
+          {block.require_comment && state.comments.length === 0 ? (
+            <div className="text-[11px] text-muted-foreground italic">
+              At least one comment is required.
+            </div>
+          ) : null}
           <ReviewToolbar
             fileCount={block.files.length}
             comments={state.comments}

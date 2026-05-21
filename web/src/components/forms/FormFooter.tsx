@@ -10,6 +10,8 @@ type Props = {
   onSubmit: () => void
   onCancel: () => void
   submitting: boolean
+  submitDisabled?: boolean
+  submitDisabledReason?: string
 }
 
 export function FormFooter({
@@ -22,6 +24,8 @@ export function FormFooter({
   onSubmit,
   onCancel,
   submitting,
+  submitDisabled,
+  submitDisabledReason,
 }: Props) {
   const lastStep = stepIdx === totalSteps - 1
   return (
@@ -40,7 +44,12 @@ export function FormFooter({
           </Button>
         ) : null}
         {lastStep ? (
-          <Button type="button" onClick={onSubmit} disabled={submitting}>
+          <Button
+            type="button"
+            onClick={onSubmit}
+            disabled={submitting || submitDisabled}
+            title={submitDisabled && !submitting ? submitDisabledReason : undefined}
+          >
             {submitting ? "Submitting…" : submitLabel ?? "Submit"}
           </Button>
         ) : (
