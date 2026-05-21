@@ -2,6 +2,7 @@ import { useController, type Control } from "react-hook-form"
 import type { FormBlock, ReviewComment, ChangesetFile } from "@/lib/schema"
 import { useChangesetState } from "./changeset/useChangesetState"
 import { FileCard } from "./changeset/FileCard"
+import { DiffView } from "./changeset/DiffView"
 
 type Block = Extract<FormBlock, { kind: "changeset" }>
 
@@ -44,9 +45,15 @@ export default function ChangesetBlock({
             onSetMode={(m) => state.setFileMode(file.path, m)}
             commentCount={state.commentCountForFile(file.path)}
           >
-            <pre className="p-4 text-xs font-mono whitespace-pre overflow-x-auto bg-muted/30">
-              {file.diff}
-            </pre>
+            {(state.viewMode.get(file.path) ?? "changes") !== "full" ? (
+              <DiffView
+                file={file}
+                mode={(state.viewMode.get(file.path) ?? "changes") as "changes" | "split"}
+                onAddComment={(side, line) => state.openDraft(file.path, side, line)}
+              />
+            ) : (
+              <div className="p-6 text-center text-sm text-muted-foreground">Full view (Task 7)</div>
+            )}
           </FileCard>
         ))}
       </div>
