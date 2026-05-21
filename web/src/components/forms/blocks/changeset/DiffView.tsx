@@ -1,24 +1,55 @@
 import { useMemo } from "react"
-import type { ChangesetFile } from "@/lib/schema"
+import type { ChangesetFile, ReviewComment } from "@/lib/schema"
 import { parseUnifiedDiff, hunksToUnifiedRows, hunksToSplitRows } from "./diff-parser"
 import type { ViewMode } from "./types"
 import { DiffRowView } from "./DiffRowView"
 import { rowStyles } from "./diff-viewer-styles"
+import { CommentThread } from "./CommentThread"
+
+type CommentSide = "old" | "new"
+
+export type DiffViewOverlay = {
+  commentsForLine: (file: string, side: CommentSide, line: number) => ReviewComment[]
+  draftForLine: (file: string, side: CommentSide, line: number) => string | undefined
+  globalIndexOf: (c: ReviewComment) => number
+  onOpenDraft: (side: CommentSide, line: number) => void
+  onUpdateDraft: (side: CommentSide, line: number, body: string) => void
+  onSaveDraft: (side: CommentSide, line: number) => void
+  onCloseDraft: (side: CommentSide, line: number) => void
+  onEditComment: (index: number, body: string) => void
+  onDeleteComment: (index: number) => void
+}
 
 export function DiffView({
   file,
   mode,
-  onAddComment,
+  overlay,
 }: {
   file: ChangesetFile
   mode: Exclude<ViewMode, "full">
-  onAddComment: (side: "old" | "new", line: number) => void
+  overlay: DiffViewOverlay
 }) {
   const hunks = useMemo(() => parseUnifiedDiff(file.diff), [file.diff])
 
   if (hunks.length === 0) {
+    return <div className="p-6 text-center text-sm text-muted-foreground">diff not available</div>
+  }
+
+  const renderOverlay = (side: CommentSide, line: number) => {
+    const comments = overlay.commentsForLine(file.path, side, line)
+    const draft = overlay.draftForLine(file.path, side, line)
+    if (comments.length === 0 && draft === undefined) return null
     return (
-      <div className="p-6 text-center text-sm text-muted-foreground">diff not available</div>
+      <CommentThread
+        comments={comments}
+        globalIndexOf={overlay.globalIndexOf}
+        onEdit={overlay.onEditComment}
+        onDelete={overlay.onDeleteComment}
+        draft={draft}
+        onDraftChange={(v) => overlay.onUpdateDraft(side, line, v)}
+        onDraftSave={() => overlay.onSaveDraft(side, line)}
+        onDraftCancel={() => overlay.onCloseDraft(side, line)}
+      />
     )
   }
 
@@ -28,28 +59,25 @@ export function DiffView({
       <div className="overflow-x-auto">
         {rows.map((r) => {
           if (r.kind === "hunk-header") {
-            return (
-              <div key={r.rowKey} className={rowStyles.hunkHeader}>
-                {r.header}
-              </div>
-            )
+            return <div key={r.rowKey} className={rowStyles.hunkHeader}>{r.header}</div>
           }
-          const side: "old" | "new" = r.row.type === "removed" ? "old" : "new"
+          const side: CommentSide = r.row.type === "removed" ? "old" : "new"
           const line = (r.row.type === "removed" ? r.row.oldLine : r.row.newLine) ?? 0
           return (
-            <DiffRowView
-              key={r.rowKey}
-              row={r.row}
-              language={file.language}
-              onAddComment={() => onAddComment(side, line)}
-            />
+            <div key={r.rowKey}>
+              <DiffRowView
+                row={r.row}
+                language={file.language}
+                onAddComment={() => overlay.onOpenDraft(side, line)}
+              />
+              {renderOverlay(side, line)}
+            </div>
           )
         })}
       </div>
     )
   }
 
-  // Split mode
   const rows = hunksToSplitRows(hunks)
   return (
     <div className="grid grid-cols-2 divide-x">
@@ -57,18 +85,18 @@ export function DiffView({
         {rows.map((r) => {
           if (r.kind === "hunk-header") return <div key={`L-${r.rowKey}`} className={rowStyles.hunkHeader}>{r.header}</div>
           const left = r.pair.left
-          if (!left) {
-            return <div key={`L-${r.pair.rowKey}`} className={`${rowStyles.base} ${rowStyles.context}`}><span /><span /><span /><span /></div>
-          }
+          if (!left) return <div key={`L-${r.pair.rowKey}`} className={`${rowStyles.base} ${rowStyles.context}`}><span /><span /><span /><span /></div>
           const line = left.oldLine ?? 0
           return (
-            <DiffRowView
-              key={`L-${r.pair.rowKey}`}
-              row={left}
-              language={file.language}
-              pairedWith={r.pair.right ?? undefined}
-              onAddComment={() => onAddComment("old", line)}
-            />
+            <div key={`L-${r.pair.rowKey}`}>
+              <DiffRowView
+                row={left}
+                language={file.language}
+                pairedWith={r.pair.right ?? undefined}
+                onAddComment={() => overlay.onOpenDraft("old", line)}
+              />
+              {renderOverlay("old", line)}
+            </div>
           )
         })}
       </div>
@@ -76,18 +104,18 @@ export function DiffView({
         {rows.map((r) => {
           if (r.kind === "hunk-header") return <div key={`R-${r.rowKey}`} className={rowStyles.hunkHeader}>{r.header}</div>
           const right = r.pair.right
-          if (!right) {
-            return <div key={`R-${r.pair.rowKey}`} className={`${rowStyles.base} ${rowStyles.context}`}><span /><span /><span /><span /></div>
-          }
+          if (!right) return <div key={`R-${r.pair.rowKey}`} className={`${rowStyles.base} ${rowStyles.context}`}><span /><span /><span /><span /></div>
           const line = right.newLine ?? 0
           return (
-            <DiffRowView
-              key={`R-${r.pair.rowKey}`}
-              row={right}
-              language={file.language}
-              pairedWith={r.pair.left ?? undefined}
-              onAddComment={() => onAddComment("new", line)}
-            />
+            <div key={`R-${r.pair.rowKey}`}>
+              <DiffRowView
+                row={right}
+                language={file.language}
+                pairedWith={r.pair.left ?? undefined}
+                onAddComment={() => overlay.onOpenDraft("new", line)}
+              />
+              {renderOverlay("new", line)}
+            </div>
           )
         })}
       </div>

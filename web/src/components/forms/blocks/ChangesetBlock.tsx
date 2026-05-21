@@ -1,3 +1,4 @@
+import { useMemo } from "react"
 import { useController, type Control } from "react-hook-form"
 import type { FormBlock, ReviewComment, ChangesetFile } from "@/lib/schema"
 import { useChangesetState } from "./changeset/useChangesetState"
@@ -28,6 +29,12 @@ export default function ChangesetBlock({
     filePaths: block.files.map((f: ChangesetFile) => f.path),
   })
 
+  const globalIndexOf = useMemo(() => {
+    const refMap = new Map<ReviewComment, number>()
+    state.comments.forEach((c, i) => refMap.set(c, i))
+    return (c: ReviewComment) => refMap.get(c) ?? -1
+  }, [state.comments])
+
   return (
     <div className="space-y-4">
       <div className="text-xs text-muted-foreground font-mono">
@@ -49,7 +56,17 @@ export default function ChangesetBlock({
               <DiffView
                 file={file}
                 mode={(state.viewMode.get(file.path) ?? "changes") as "changes" | "split"}
-                onAddComment={(side, line) => state.openDraft(file.path, side, line)}
+                overlay={{
+                  commentsForLine: state.commentsForLine,
+                  draftForLine: state.draftForLine,
+                  globalIndexOf,
+                  onOpenDraft: (side, line) => state.openDraft(file.path, side, line),
+                  onUpdateDraft: (side, line, body) => state.updateDraft(file.path, side, line, body),
+                  onSaveDraft: (side, line) => state.saveDraft(file.path, side, line),
+                  onCloseDraft: (side, line) => state.closeDraft(file.path, side, line),
+                  onEditComment: state.editComment,
+                  onDeleteComment: state.deleteComment,
+                }}
               />
             ) : (
               <div className="p-6 text-center text-sm text-muted-foreground">Full view (Task 7)</div>
