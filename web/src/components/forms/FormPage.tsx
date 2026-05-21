@@ -22,7 +22,7 @@ export function FormPage({ data }: { data: FormResponse }) {
 
   const form = useForm<Record<string, unknown>>({
     defaultValues: schemaToDefaults(data.schema),
-    mode: "onBlur",
+    mode: "onChange",
   })
 
   if (done) return <TerminalState variant={done} />
@@ -45,6 +45,11 @@ export function FormPage({ data }: { data: FormResponse }) {
       toast.error("Something went wrong")
     }
   }
+
+  const submitDisabled = !form.formState.isValid
+  const submitDisabledReason = submitDisabled
+    ? "At least one comment is required to submit."
+    : undefined
 
   const onNext = async () => {
     const ok = await form.trigger(stepFieldNames(step))
@@ -78,8 +83,13 @@ export function FormPage({ data }: { data: FormResponse }) {
     }
   })
 
+  const hasChangeset = data.schema.steps.some((s) =>
+    s.blocks.some((b) => b.kind === "changeset"),
+  )
+  const widthClass = hasChangeset ? "max-w-6xl" : "max-w-2xl"
+
   return (
-    <main className="max-w-2xl mx-auto p-6">
+    <main className={`${widthClass} mx-auto p-6`}>
       <FormHeader data={data} />
       <Card>
         <CardContent className="pt-6">
@@ -101,6 +111,8 @@ export function FormPage({ data }: { data: FormResponse }) {
             onSubmit={onSubmit}
             onCancel={onCancel}
             submitting={submitting}
+            submitDisabled={submitDisabled}
+            submitDisabledReason={submitDisabledReason}
           />
         </CardContent>
       </Card>

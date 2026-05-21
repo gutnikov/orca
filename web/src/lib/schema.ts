@@ -25,10 +25,32 @@ export type FieldBlock = {
   options?: { value: string; label: string }[]
 }
 
+export type FileStatus = "added" | "modified" | "deleted" | "renamed"
+
+export type ChangesetFile = {
+  path: string
+  status: FileStatus
+  old_path?: string
+  language?: string
+  additions: number
+  deletions: number
+  diff: string
+  old_content?: string
+  new_content?: string
+}
+
+export type ReviewComment = {
+  file: string
+  line: number
+  side: "old" | "new"
+  body: string
+}
+
 export type FormBlock =
   | { kind: "markdown"; content: string }
   | { kind: "code"; language?: string; content: string }
   | { kind: "diff"; filename?: string; content: string }
+  | { kind: "changeset"; name: string; files: ChangesetFile[]; require_comment?: boolean }
   | FieldBlock
 
 export type FormStep = {
@@ -72,6 +94,10 @@ export function schemaToDefaults(schema: FormSchema): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const step of schema.steps) {
     for (const block of step.blocks) {
+      if (block.kind === "changeset") {
+        out[block.name] = [] as ReviewComment[]
+        continue
+      }
       if (block.kind !== "field") continue
       if (block.default !== undefined) {
         out[block.name] = block.default

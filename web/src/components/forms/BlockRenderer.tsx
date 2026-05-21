@@ -6,6 +6,7 @@ import { FieldBlock } from "./blocks/FieldBlock"
 const MarkdownBlock = lazy(() => import("./blocks/MarkdownBlock"))
 const CodeBlock = lazy(() => import("./blocks/CodeBlock"))
 const DiffBlock = lazy(() => import("./blocks/DiffBlock"))
+const ChangesetBlock = lazy(() => import("./blocks/ChangesetBlock"))
 
 const BlockSkeleton = () => <div className="h-12 animate-pulse rounded bg-muted" />
 
@@ -35,6 +36,12 @@ export function BlockRenderer({
       return (
         <Suspense fallback={<BlockSkeleton />}>
           <DiffBlock content={block.content} filename={block.filename} />
+        </Suspense>
+      )
+    case "changeset":
+      return (
+        <Suspense fallback={<BlockSkeleton />}>
+          <ChangesetBlock block={block} control={control} />
         </Suspense>
       )
   }
