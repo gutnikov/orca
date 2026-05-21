@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 import type { ReviewComment } from "@/lib/schema"
 import type { ViewMode } from "./types"
 import { draftKey } from "./types"
@@ -28,6 +28,9 @@ export type UseChangesetStateApi = {
 
   editComment: (index: number, body: string) => void
   deleteComment: (index: number) => void
+
+  highlightedCommentIndex: number | null
+  flashComment: (index: number) => void
 
   toggleCollapse: (file: string) => void
   collapseAll: () => void
@@ -164,6 +167,15 @@ export function useChangesetState({
     setCollapsed(new Set())
   }, [])
 
+  const [highlightedCommentIndex, setHighlightedCommentIndex] = useState<number | null>(null)
+  const flashTimerRef = useRef<number | null>(null)
+
+  const flashComment = useCallback((index: number) => {
+    if (flashTimerRef.current !== null) window.clearTimeout(flashTimerRef.current)
+    setHighlightedCommentIndex(index)
+    flashTimerRef.current = window.setTimeout(() => setHighlightedCommentIndex(null), 1400)
+  }, [])
+
   const setFileMode = useCallback((file: string, mode: ViewMode) => {
     setViewMode((prev) => {
       const next = new Map(prev)
@@ -190,5 +202,7 @@ export function useChangesetState({
     collapseAll,
     expandAll,
     setFileMode,
+    highlightedCommentIndex,
+    flashComment,
   }
 }

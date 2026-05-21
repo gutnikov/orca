@@ -3,6 +3,7 @@ import ReactMarkdown from "react-markdown"
 import remarkGfm from "remark-gfm"
 import { Pencil, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 import { CommentComposer } from "./CommentComposer"
 import type { ReviewComment } from "@/lib/schema"
 
@@ -15,6 +16,7 @@ export function CommentThread({
   onDraftChange,
   onDraftSave,
   onDraftCancel,
+  highlightedIndex,
 }: {
   comments: ReviewComment[]
   globalIndexOf: (c: ReviewComment) => number
@@ -24,6 +26,7 @@ export function CommentThread({
   onDraftChange: (v: string) => void
   onDraftSave: () => void
   onDraftCancel: () => void
+  highlightedIndex?: number | null
 }) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [editBody, setEditBody] = useState("")
@@ -33,10 +36,15 @@ export function CommentThread({
       {comments.map((c) => {
         const idx = globalIndexOf(c)
         const isEditing = editingIndex === idx
+        const isHighlighted = highlightedIndex === idx
         return (
           <div
             key={idx}
-            className="border-l-2 border-primary/50 bg-card mx-3 my-2 rounded-md p-3 group/comment"
+            data-highlight={isHighlighted ? "on" : undefined}
+            className={cn(
+              "border-l-2 border-primary/50 bg-card mx-3 my-2 rounded-md p-3 group/comment transition-all",
+              isHighlighted && "ring-2 ring-primary/40 shadow-md",
+            )}
           >
             {isEditing ? (
               <CommentComposer

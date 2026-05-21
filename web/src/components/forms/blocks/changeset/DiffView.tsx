@@ -18,6 +18,7 @@ export type DiffViewOverlay = {
   onCloseDraft: (side: CommentSide, line: number) => void
   onEditComment: (index: number, body: string) => void
   onDeleteComment: (index: number) => void
+  highlightedCommentIndex: number | null
 }
 
 export function DiffView({
@@ -49,6 +50,7 @@ export function DiffView({
         onDraftChange={(v) => overlay.onUpdateDraft(side, line, v)}
         onDraftSave={() => overlay.onSaveDraft(side, line)}
         onDraftCancel={() => overlay.onCloseDraft(side, line)}
+        highlightedIndex={overlay.highlightedCommentIndex}
       />
     )
   }

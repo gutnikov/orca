@@ -81,6 +81,7 @@ export function FullFileView({
                       onDraftChange={(v) => overlay.onUpdateDraft("new", lineNumber, v)}
                       onDraftSave={() => overlay.onSaveDraft("new", lineNumber)}
                       onDraftCancel={() => overlay.onCloseDraft("new", lineNumber)}
+                      highlightedIndex={overlay.highlightedCommentIndex}
                     />
                   ) : null}
                 </div>

@@ -6,6 +6,7 @@ import { FileCard } from "./changeset/FileCard"
 import { DiffView } from "./changeset/DiffView"
 import { FullFileView } from "./changeset/FullFileView"
 import { FileTreeSidebar } from "./changeset/FileTreeSidebar"
+import { ReviewToolbar } from "./changeset/ReviewToolbar"
 
 type Block = Extract<FormBlock, { kind: "changeset" }>
 
@@ -49,6 +50,19 @@ export default function ChangesetBlock({
     })
   }
 
+  const jumpToComment = (index: number) => {
+    const c = state.comments[index]
+    if (!c) return
+    if (state.collapsed.has(c.file)) state.toggleCollapse(c.file)
+    requestAnimationFrame(() => {
+      const el = containerRef.current?.querySelector(`[data-path="${CSS.escape(c.file)}"]`)
+      if (el instanceof HTMLElement) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" })
+        setTimeout(() => state.flashComment(index), 250)
+      }
+    })
+  }
+
   return (
     <div className="-mx-6 sm:-mx-12 px-6 sm:px-12">
       <div className="flex gap-6 items-start">
@@ -57,11 +71,14 @@ export default function ChangesetBlock({
           commentCountFor={state.commentCountForFile}
           onSelectFile={jumpToFile}
         />
-        <div ref={containerRef} className="flex-1 min-w-0 space-y-4">
-          <div className="text-xs text-muted-foreground font-mono">
-            {block.files.length} file{block.files.length === 1 ? "" : "s"} changed · {state.comments.length}{" "}
-            comment{state.comments.length === 1 ? "" : "s"}
-          </div>
+        <div ref={containerRef} className="flex-1 min-w-0">
+          <ReviewToolbar
+            fileCount={block.files.length}
+            comments={state.comments}
+            onExpandAll={state.expandAll}
+            onCollapseAll={state.collapseAll}
+            onJumpToComment={jumpToComment}
+          />
           <div className="space-y-3">
             {block.files.map((file: ChangesetFile) => (
               <FileCard
@@ -85,6 +102,7 @@ export default function ChangesetBlock({
                     onCloseDraft: (side: "old" | "new", line: number) => state.closeDraft(file.path, side, line),
                     onEditComment: state.editComment,
                     onDeleteComment: state.deleteComment,
+                    highlightedCommentIndex: state.highlightedCommentIndex,
                   }
                   return fileMode === "full" ? (
                     <FullFileView file={file} overlay={overlay} />
