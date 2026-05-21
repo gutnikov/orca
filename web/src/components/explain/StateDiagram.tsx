@@ -2,25 +2,38 @@ import { useEffect, useRef, useState } from "react"
 import { useIsDark } from "./useIsDark"
 import { Card } from "@/components/ui/card"
 
-function readToken(name: string): string {
-  if (typeof document === "undefined") return ""
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
-}
+// Mermaid's color parser doesn't understand oklch() — the project's design
+// tokens are oklch-based. Rather than runtime-converting tokens (which is
+// fragile across browsers), we keep two hand-tuned palettes that mirror the
+// `light` and `dark` token values closely enough.
+const LIGHT_PALETTE = {
+  fontFamily: "Open Sans, sans-serif",
+  primaryColor: "#f7f7f7",       // ~ --card light
+  primaryTextColor: "#1a1a2e",    // ~ --foreground light
+  primaryBorderColor: "#d4d4d8",  // ~ --border light
+  lineColor: "#1a1a2e",
+  secondaryColor: "#f0f0f0",      // ~ --muted light
+  tertiaryColor: "#ffffff",
+  background: "#fafafa",          // ~ --background light
+  mainBkg: "#ffffff",
+  nodeTextColor: "#1a1a2e",
+} as const
 
-function themeVariables() {
-  const fontSans = readToken("--font-sans") || "Open Sans, sans-serif"
-  return {
-    fontFamily: fontSans,
-    primaryColor: readToken("--card") || "#fff",
-    primaryTextColor: readToken("--foreground") || "#000",
-    primaryBorderColor: readToken("--border") || "#999",
-    lineColor: readToken("--foreground") || "#666",
-    secondaryColor: readToken("--muted") || "#eee",
-    tertiaryColor: readToken("--card") || "#fff",
-    background: readToken("--background") || "#fff",
-    mainBkg: readToken("--card") || "#fff",
-    nodeTextColor: readToken("--foreground") || "#000",
-  }
+const DARK_PALETTE = {
+  fontFamily: "Open Sans, sans-serif",
+  primaryColor: "#262626",        // ~ --card dark
+  primaryTextColor: "#e5e5e5",    // ~ --foreground dark
+  primaryBorderColor: "#404460",  // ~ --border dark
+  lineColor: "#e5e5e5",
+  secondaryColor: "#2a2a2a",      // ~ --muted dark
+  tertiaryColor: "#262626",
+  background: "#000000",          // ~ --background dark
+  mainBkg: "#1f1f1f",
+  nodeTextColor: "#e5e5e5",
+} as const
+
+function themeVariables(dark: boolean) {
+  return dark ? DARK_PALETTE : LIGHT_PALETTE
 }
 
 function replaceChildren(target: HTMLElement, svgMarkup: string) {
@@ -48,8 +61,8 @@ export function StateDiagram({ source }: { source: string }) {
         mermaid.initialize({
           startOnLoad: false,
           securityLevel: "strict",
-          theme: dark ? "dark" : "base",
-          themeVariables: themeVariables(),
+          theme: "base",
+          themeVariables: themeVariables(dark),
         })
         const { svg } = await mermaid.render(renderId, source)
         if (cancelled) return
