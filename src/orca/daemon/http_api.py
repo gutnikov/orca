@@ -416,22 +416,46 @@ class _SPAStaticFiles(StaticFiles):  # type: ignore[misc]
 
 
 def _web_dist_dir() -> Path:
-    """Return web/dist/ relative to the orca source tree, falling back to a
-    sibling 'web/_dist_stub' directory so test/dev startup doesn't blow up
-    when the production bundle hasn't been built."""
-    src_root = Path(__file__).resolve().parents[2]  # .../src/orca/daemon -> .../src
-    candidate = src_root.parent / "web" / "dist"
-    if candidate.exists():
-        return candidate
-    stub = src_root.parent / "web" / "_dist_stub"
+    """Locate the built web bundle.
+
+    Lookup order:
+
+    1. **Wheel-bundled location** (`<site-packages>/orca/web_dist/`) — what
+       pipx-installed users get. The wheel ships a prebuilt bundle via
+       `force-include` in `pyproject.toml`.
+    2. **Repo source location** (`<repo>/web/dist/`) — what orca devs get
+       when running from a source checkout after `pnpm build`.
+    3. **Dev-only stub** — only reached when running from a source checkout
+       *and* the dev hasn't built the bundle. Tells them to run
+       `pnpm build` or `pnpm dev`. End users should never see this because
+       the wheel includes `web_dist/` unconditionally.
+    """
+    pkg_root = Path(__file__).resolve().parents[1]  # .../orca/daemon -> .../orca
+    bundled = pkg_root / "web_dist"
+    if bundled.exists():
+        return bundled
+    repo_root = pkg_root.parent.parent  # .../src/orca -> .../src -> repo root
+    dev_dist = repo_root / "web" / "dist"
+    if dev_dist.exists():
+        return dev_dist
+    stub = repo_root / "web" / "_dist_stub"
     stub.mkdir(parents=True, exist_ok=True)
     index = stub / "index.html"
     if not index.exists():
         index.write_text(
-            "<!doctype html><html><body><h1>Orca web</h1>"
-            "<p>The web bundle has not been built yet. "
-            "Run <code>cd web &amp;&amp; pnpm build</code>, or "
-            "use the Vite dev server at <code>http://localhost:5174</code>.</p>"
+            '<!doctype html><html><body style="font-family:system-ui;padding:2rem;max-width:40rem">'
+            "<h1>Orca web bundle missing</h1>"
+            "<p>You are running orca from a source checkout and the web "
+            "bundle hasn't been built yet.</p>"
+            "<p>For development, run <code>cd web &amp;&amp; pnpm dev</code> "
+            'and open <a href="http://localhost:5174">http://localhost:5174</a> '
+            "(the Vite dev server proxies <code>/api</code> back to this "
+            "daemon).</p>"
+            "<p>For a one-shot build, run <code>cd web &amp;&amp; pnpm build</code> "
+            "and reload this page.</p>"
+            "<p><em>If you installed orca via pipx and you're seeing this, "
+            "the wheel was built without the web bundle — please "
+            "re-install or report the bug.</em></p>"
             "</body></html>"
         )
     return stub

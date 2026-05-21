@@ -1,5 +1,4 @@
 node_modules
-dist
 dist-ssr
 _dist_stub
 *.local

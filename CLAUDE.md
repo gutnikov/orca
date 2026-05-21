@@ -32,9 +32,15 @@ Orca's version lives in **four** files. They must all be bumped together — bum
 Procedure:
 
 1. Bump all four files to the new version in one commit (typical message: `chore: bump version to X.Y.Z`).
-2. Run `uv lock` to regenerate `uv.lock` — it picks up the new package version automatically. Stage and commit the lock-file change alongside (single commit is fine).
-3. Verify: `grep -rn '"version"\|^version' --include="*.json" --include="*.toml" plugin/ plugins/ pyproject.toml .claude-plugin/marketplace.json` — all four lines should show the new version.
-4. Push to `origin/main`. Installed plugins pick up the new version via `claude plugin update orca@orca` (and the Codex equivalent).
+2. Run `uv lock` to regenerate `uv.lock` — it picks up the new package version automatically.
+3. **Rebuild the web bundle:** `cd web && pnpm install && pnpm build`. The output `web/dist/` is committed to git and force-included into the wheel via `pyproject.toml`'s `[tool.hatch.build.targets.wheel.force-include]`. Skipping this step means `pipx install` users get an outdated bundle that still claims to be the new version. **Always commit `web/dist/` in the same commit as the version bump** — they ship together.
+4. Verify: `grep -rn '"version"\|^version' --include="*.json" --include="*.toml" plugin/ plugins/ pyproject.toml .claude-plugin/marketplace.json` — all four lines should show the new version.
+5. Push to `origin/main`. Installed plugins pick up the new version via `claude plugin update orca@orca` (and the Codex equivalent); `pipx install --force` re-pulls the orca CLI itself with the freshly-built web bundle inside.
+
+Why `web/dist/` is committed:
+
+- pipx installs orca via `pipx install "git+ssh://git@github.com/gutnikov/orca.git"` — that's a fresh clone, no Node/pnpm available on the install machine. If `web/dist/` weren't in git, hatchling would silently skip the `force-include` and users would land on the dev-only "web bundle missing" stub page when opening the daemon's browser UI.
+- Treating `web/dist/` like generated source (commit it, rebuild on every version bump) is the same pattern as the four-files version bump: explicit, manual, but failure-mode-visible.
 
 Notes:
 
