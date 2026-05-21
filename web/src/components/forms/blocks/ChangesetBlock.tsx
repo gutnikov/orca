@@ -4,6 +4,7 @@ import type { FormBlock, ReviewComment, ChangesetFile } from "@/lib/schema"
 import { useChangesetState } from "./changeset/useChangesetState"
 import { FileCard } from "./changeset/FileCard"
 import { DiffView } from "./changeset/DiffView"
+import { FullFileView } from "./changeset/FullFileView"
 
 type Block = Extract<FormBlock, { kind: "changeset" }>
 
@@ -52,25 +53,29 @@ export default function ChangesetBlock({
             onSetMode={(m) => state.setFileMode(file.path, m)}
             commentCount={state.commentCountForFile(file.path)}
           >
-            {(state.viewMode.get(file.path) ?? "changes") !== "full" ? (
-              <DiffView
-                file={file}
-                mode={(state.viewMode.get(file.path) ?? "changes") as "changes" | "split"}
-                overlay={{
-                  commentsForLine: state.commentsForLine,
-                  draftForLine: state.draftForLine,
-                  globalIndexOf,
-                  onOpenDraft: (side, line) => state.openDraft(file.path, side, line),
-                  onUpdateDraft: (side, line, body) => state.updateDraft(file.path, side, line, body),
-                  onSaveDraft: (side, line) => state.saveDraft(file.path, side, line),
-                  onCloseDraft: (side, line) => state.closeDraft(file.path, side, line),
-                  onEditComment: state.editComment,
-                  onDeleteComment: state.deleteComment,
-                }}
-              />
-            ) : (
-              <div className="p-6 text-center text-sm text-muted-foreground">Full view (Task 7)</div>
-            )}
+            {(() => {
+              const fileMode = state.viewMode.get(file.path) ?? "changes"
+              const overlay = {
+                commentsForLine: state.commentsForLine,
+                draftForLine: state.draftForLine,
+                globalIndexOf,
+                onOpenDraft: (side: "old" | "new", line: number) => state.openDraft(file.path, side, line),
+                onUpdateDraft: (side: "old" | "new", line: number, body: string) => state.updateDraft(file.path, side, line, body),
+                onSaveDraft: (side: "old" | "new", line: number) => state.saveDraft(file.path, side, line),
+                onCloseDraft: (side: "old" | "new", line: number) => state.closeDraft(file.path, side, line),
+                onEditComment: state.editComment,
+                onDeleteComment: state.deleteComment,
+              }
+              return fileMode === "full" ? (
+                <FullFileView file={file} overlay={overlay} />
+              ) : (
+                <DiffView
+                  file={file}
+                  mode={fileMode as "changes" | "split"}
+                  overlay={overlay}
+                />
+              )
+            })()}
           </FileCard>
         ))}
       </div>
