@@ -8,15 +8,20 @@ import pytest
 
 from orca.daemon.lifecycle import (
     DaemonAlreadyRunningError,
+    browser_port_path,
     check_daemon_running,
     cleanup_stale_socket,
     daemon_dir,
+    find_daemon_using_port,
     pidfile_path,
+    read_browser_port,
     read_pidfile,
     read_root_marker,
+    remove_browser_port,
     remove_pidfile,
     send_stop_signal,
     socket_path,
+    write_browser_port,
     write_pidfile,
     write_root_marker,
 )
@@ -184,3 +189,89 @@ class TestDaemonAlreadyRunningError:
         err = DaemonAlreadyRunningError(42)
         assert err.pid == 42
         assert "42" in str(err)
+
+
+class TestBrowserPort:
+    def test_path_lives_under_daemon_dir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = Path("/some/repo")
+        assert browser_port_path(repo) == daemon_dir(repo) / "browser_port"
+
+    def test_write_and_read(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = tmp_path / "repo"
+        write_browser_port(repo, 7892)
+        assert read_browser_port(repo) == 7892
+
+    def test_read_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        assert read_browser_port(tmp_path / "noexist") is None
+
+    def test_read_invalid(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = tmp_path / "repo"
+        bp = browser_port_path(repo)
+        bp.parent.mkdir(parents=True, exist_ok=True)
+        bp.write_text("not-a-port\n")
+        assert read_browser_port(repo) is None
+
+    def test_remove(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = tmp_path / "repo"
+        write_browser_port(repo, 9999)
+        remove_browser_port(repo)
+        assert read_browser_port(repo) is None
+
+    def test_remove_missing(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        remove_browser_port(tmp_path / "noexist")  # should not raise
+
+
+class TestFindDaemonUsingPort:
+    def test_no_base_dir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        assert find_daemon_using_port(7891) is None
+
+    def test_finds_live_daemon(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = tmp_path / "repoA"
+        write_root_marker(repo)
+        write_browser_port(repo, 7891)
+        write_pidfile(pidfile_path(repo), os.getpid())  # self is alive
+        assert find_daemon_using_port(7891) == repo
+
+    def test_ignores_stale_pid(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = tmp_path / "repoA"
+        write_root_marker(repo)
+        write_browser_port(repo, 7891)
+        write_pidfile(pidfile_path(repo), 99999999)  # unlikely to be alive
+        assert find_daemon_using_port(7891) is None
+
+    def test_ignores_other_ports(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setenv("HOME", str(fake_home))
+        repo = tmp_path / "repoA"
+        write_root_marker(repo)
+        write_browser_port(repo, 8000)
+        write_pidfile(pidfile_path(repo), os.getpid())
+        assert find_daemon_using_port(7891) is None

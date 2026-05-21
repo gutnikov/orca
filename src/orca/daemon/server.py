@@ -6,6 +6,7 @@ import asyncio
 import logging
 import os
 import signal
+import socket as _socket
 from pathlib import Path
 
 import uvicorn
@@ -15,15 +16,67 @@ from orca.daemon.lifecycle import (
     DaemonAlreadyRunningError,
     check_daemon_running,
     cleanup_stale_socket,
+    find_daemon_using_port,
     pidfile_path,
+    remove_browser_port,
     remove_pidfile,
     socket_path,
+    write_browser_port,
     write_pidfile,
     write_root_marker,
 )
 from orca.daemon.manager import RunManager
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_BROWSER_PORT = 7891
+
+
+def _port_is_free(port: int) -> bool:
+    """Return True if 127.0.0.1:port can be bound right now."""
+    try:
+        with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", port))
+    except OSError:
+        return False
+    return True
+
+
+def _pick_free_port() -> int:
+    """Ask the kernel for a free TCP port on 127.0.0.1."""
+    with _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        port: int = probe.getsockname()[1]
+        return port
+
+
+def _resolve_browser_port(requested: int | None) -> tuple[int | None, str | None]:
+    """Resolve the browser-facing TCP port.
+
+    Returns ``(port, conflict_message)``. ``port`` is ``None`` only if
+    the listener should stay disabled. ``conflict_message`` is non-None
+    only when the requested port was busy and a fallback was selected —
+    callers should surface it via ``logger.warning``.
+    """
+    if requested is None:
+        return None, None
+    if _port_is_free(requested):
+        return requested, None
+    holder = find_daemon_using_port(requested)
+    fallback = _pick_free_port()
+    if holder is not None:
+        msg = (
+            f"Browser port {requested} is already held by the orca daemon for {holder}. "
+            f"Binding to free port {fallback} instead. "
+            f"Set ORCA_DAEMON_TCP_PORT=<port> to override or 'off' to disable."
+        )
+    else:
+        msg = (
+            f"Browser port {requested} is in use by another process. "
+            f"Binding to free port {fallback} instead. "
+            f"Set ORCA_DAEMON_TCP_PORT=<port> to override or 'off' to disable."
+        )
+    return fallback, msg
 
 
 async def serve(repo_root: Path) -> None:
@@ -59,17 +112,21 @@ async def serve(repo_root: Path) -> None:
     # 5b. Optional browser-facing TCP listener (form endpoints + SPA only)
     browser_server: uvicorn.Server | None = None
     tcp_port_env = os.environ.get("ORCA_DAEMON_TCP_PORT")
-    tcp_port: int | None
+    requested_port: int | None
     if tcp_port_env is None:
-        tcp_port = 7891
+        requested_port = DEFAULT_BROWSER_PORT
     elif tcp_port_env.strip() in ("", "0", "off", "false"):
-        tcp_port = None
+        requested_port = None
     else:
         try:
-            tcp_port = int(tcp_port_env)
+            requested_port = int(tcp_port_env)
         except ValueError:
             logger.warning("ORCA_DAEMON_TCP_PORT=%r is not an integer; skipping TCP listener", tcp_port_env)
-            tcp_port = None
+            requested_port = None
+
+    tcp_port, conflict_msg = _resolve_browser_port(requested_port)
+    if conflict_msg is not None:
+        logger.warning(conflict_msg)
 
     if tcp_port is not None:
         browser_app = create_browser_app(manager)
@@ -81,6 +138,7 @@ async def serve(repo_root: Path) -> None:
             access_log=False,
         )
         browser_server = uvicorn.Server(browser_config)
+        write_browser_port(repo_root, tcp_port)
 
     # 6. Set up signal handlers with a stop event
     stop_event = asyncio.Event()
@@ -113,7 +171,8 @@ async def serve(repo_root: Path) -> None:
         browser_server.should_exit = True
         await browser_task
 
-    # Cleanup pidfile and socket
+    # Cleanup pidfile, socket, and browser-port marker
     remove_pidfile(pf)
     cleanup_stale_socket(repo_root)
+    remove_browser_port(repo_root)
     logger.info("Daemon shut down cleanly")

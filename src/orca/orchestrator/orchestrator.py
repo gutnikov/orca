@@ -32,21 +32,32 @@ from orca.orchestrator.worktree import WorktreeManager
 logger = logging.getLogger(__name__)
 
 
-def _notify_form_pending(run_id: str, issue_id: str) -> None:
+def _notify_form_pending(run_id: str, issue_id: str, repo_root: Path | None) -> None:
     """Log the form URL and try to open the user's browser.
 
     The daemon's localhost TCP listener serves the React form app; this
     helper builds a URL pointing at it and best-effort opens the user's
     default browser. Both the log line and the browser open are safe to
     fail (e.g. headless SSH session — the URL is still in the log).
+
+    The bound port lives in ``daemon_dir/browser_port`` — preferred over
+    the env var because the daemon may have fallen back to a different
+    port when the requested one was busy. The env var is only honored
+    when no on-disk record exists.
     """
-    raw = os.environ.get("ORCA_DAEMON_TCP_PORT", "7891")
-    if raw.strip().lower() in ("", "0", "off", "false"):
-        return
-    try:
-        port = int(raw)
-    except ValueError:
-        return
+    port: int | None = None
+    if repo_root is not None:
+        from orca.daemon.lifecycle import read_browser_port
+
+        port = read_browser_port(repo_root)
+    if port is None:
+        raw = os.environ.get("ORCA_DAEMON_TCP_PORT", "7891")
+        if raw.strip().lower() in ("", "0", "off", "false"):
+            return
+        try:
+            port = int(raw)
+        except ValueError:
+            return
     from urllib.parse import quote
 
     url = f"http://127.0.0.1:{port}/forms/{quote(run_id, safe='')}/{quote(issue_id, safe='')}"
@@ -514,7 +525,7 @@ class Orchestrator:
                 state_path = self.persistence.state_path
                 branch = state_path.parent.parent.name
                 workflow = state_path.parent.name
-                _notify_form_pending(f"{branch}:{workflow}", effect.issue_id)
+                _notify_form_pending(f"{branch}:{workflow}", effect.issue_id, self.repo_root)
 
         def _on_unblocked(message: str) -> None:
             from orca.engine.types import WorkerResumedEvent

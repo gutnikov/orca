@@ -96,7 +96,14 @@ def daemon_command(action: str, root: Path | None = None, *, foreground: bool = 
 
     elif action == "status":
         if check_daemon_running(repo):
+            from orca.daemon.lifecycle import read_browser_port
+
             pid = read_pidfile(pidfile_path(repo))
+            port = read_browser_port(repo)
             print(f"Daemon running (PID: {pid}).")
+            if port is not None:
+                print(f"Browser: http://127.0.0.1:{port}/")
+            else:
+                print("Browser: disabled (ORCA_DAEMON_TCP_PORT=off).")
         else:
             print("Daemon is not running.")

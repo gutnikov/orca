@@ -6,8 +6,12 @@ for the web UI. The target may be a production workflow
 (`.orca/evals/{flow}/eval-flow.yml`). The output is a single JSON file under
 `.orca-state/explanations/{flow}.{lang}.json` that the daemon serves at
 `GET /api/explanations/{flow}` and the web app renders at
-`http://localhost:7891/explain/{flow}?lang={lang}` (Mermaid state diagram +
-per-state cards + optional scenario walkthrough).
+`http://localhost:{browser_port}/explain/{flow}?lang={lang}` (Mermaid state diagram +
+per-state cards + optional scenario walkthrough). The `browser_port` is the
+TCP port the daemon bound for the browser app — usually `7891`, but the
+daemon falls back to a free port if `7891` is busy (e.g. another orca daemon
+is running for a different repo). Read it from `orca_daemon_status`
+(`browser_port` field) or `orca daemon status`.
 
 Audience for the rendered page: a smart non-engineer. Avoid jargon. Translate
 the *intent* of each prompt — do not paste prompt text verbatim.
@@ -171,15 +175,17 @@ and `is_passive` per-state when they don't apply.
 
 ## Step 8 — Print the URL
 
-Print the URL clearly to the user:
+Read the daemon's browser port (`browser_port` from `orca_daemon_status` /
+`orca daemon status`) — do **not** assume `7891`, since the daemon may have
+fallen back to a different free port. Then print the URL clearly to the user:
 
-    http://localhost:7891/explain/{flow}?lang={lang}
+    http://localhost:{browser_port}/explain/{flow}?lang={lang}
 
 If the host environment allows browser-opening commands and the user has not restricted tool use, you may also open it:
 
-- macOS: `open http://localhost:7891/explain/{flow}?lang={lang}`
-- Linux: `xdg-open http://localhost:7891/explain/{flow}?lang={lang}`
-- Windows: `start http://localhost:7891/explain/{flow}?lang={lang}`
+- macOS: `open http://localhost:{browser_port}/explain/{flow}?lang={lang}`
+- Linux: `xdg-open http://localhost:{browser_port}/explain/{flow}?lang={lang}`
+- Windows: `start http://localhost:{browser_port}/explain/{flow}?lang={lang}`
 
 ## Pitfall checks
 

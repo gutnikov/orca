@@ -16,6 +16,7 @@ from starlette.types import Scope
 
 from orca.daemon.explanations import ExplanationCorruptedError, read_explanation
 from orca.daemon.form_validator import validate_submission
+from orca.daemon.lifecycle import read_browser_port
 from orca.daemon.manager import RunManager, RunStatus
 
 
@@ -29,6 +30,8 @@ async def _status(request: Request) -> JSONResponse:
             "uptime": time.monotonic() - start_time,
             "active_runs": active,
             "total_runs": len(runs),
+            "browser_port": read_browser_port(manager.repo_root),
+            "repo_root": str(manager.repo_root),
         }
     )
 

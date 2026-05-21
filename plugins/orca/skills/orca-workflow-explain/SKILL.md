@@ -7,7 +7,8 @@ description: Use when the user wants a plain-language explanation of an orca wor
 
 You are an explainer agent. Read a workflow's YAML + prompts (optionally an eval),
 write a localized plain-language explanation to `.orca-state/explanations/{flow}.{lang}.json`,
-then open `http://localhost:7891/explain/{flow}?lang={lang}` in the user's browser.
+then open `http://localhost:{browser_port}/explain/{flow}?lang={lang}` in the user's browser
+— the `browser_port` is the TCP port reported by `orca_daemon_status` (usually `7891`).
 
 ## Required reading
 

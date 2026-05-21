@@ -99,6 +99,57 @@ def read_root_marker(dd: Path) -> Path | None:
         return None
 
 
+def browser_port_path(repo_root: Path) -> Path:
+    """Return the path of the file that records this daemon's browser TCP port."""
+    return daemon_dir(repo_root) / "browser_port"
+
+
+def write_browser_port(repo_root: Path, port: int) -> None:
+    """Persist the browser-facing TCP port for this daemon."""
+    p = browser_port_path(repo_root)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(str(port) + "\n")
+
+
+def read_browser_port(repo_root: Path) -> int | None:
+    """Return the recorded browser TCP port for this daemon, or None if absent/invalid."""
+    try:
+        return int(browser_port_path(repo_root).read_text().strip())
+    except (FileNotFoundError, ValueError):
+        return None
+
+
+def remove_browser_port(repo_root: Path) -> None:
+    """Remove the browser-port file if present."""
+    browser_port_path(repo_root).unlink(missing_ok=True)
+
+
+def find_daemon_using_port(port: int) -> Path | None:
+    """Return the repo root of any live daemon currently holding ``port``, else None.
+
+    Scans every ``~/.orca-state/daemons/*/browser_port`` file. A daemon counts
+    as "using" the port only when its pidfile points at a live process —
+    stale registrations from crashed daemons are ignored.
+    """
+    base = Path.home() / ".orca-state" / "daemons"
+    if not base.is_dir():
+        return None
+    for dd in base.iterdir():
+        if not dd.is_dir():
+            continue
+        try:
+            recorded = int((dd / "browser_port").read_text().strip())
+        except (FileNotFoundError, ValueError):
+            continue
+        if recorded != port:
+            continue
+        pid = read_pidfile(dd / "daemon.pid")
+        if pid is None or not _is_process_alive(pid):
+            continue
+        return read_root_marker(dd)
+    return None
+
+
 def send_stop_signal(repo_root: Path) -> bool:
     """Send SIGTERM to the daemon. Return True if signal was sent, False otherwise."""
     pf = pidfile_path(repo_root)
