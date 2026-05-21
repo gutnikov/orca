@@ -1,8 +1,25 @@
 import { ChevronDown, ChevronRight } from "lucide-react"
 import { useState } from "react"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 import { Card } from "@/components/ui/card"
-import { cn } from "@/lib/utils"
 import type { ExplainState } from "@/lib/explain"
+import { ExplainMarkdown } from "./ExplainMarkdown"
+
+const TERMINAL_TARGETS = new Set(["[done]", "done", "[*]", "[terminal]"])
+
+function InlineMd({ text }: { text: string }) {
+  return (
+    <span className="text-xs text-muted-foreground [&_code]:rounded [&_code]:bg-muted/60 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[11px] [&_code]:font-mono [&_p]:inline">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{ p: ({ children }) => <>{children}</> }}
+      >
+        {text}
+      </ReactMarkdown>
+    </span>
+  )
+}
 
 export function StateCard({ state }: { state: ExplainState }) {
   const [open, setOpen] = useState(true)
@@ -35,7 +52,7 @@ export function StateCard({ state }: { state: ExplainState }) {
           <p className="text-base">{state.one_line}</p>
           <div>
             <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">What the prompt asks</div>
-            <p className="text-muted-foreground leading-relaxed">{state.what_the_prompt_asks}</p>
+            <ExplainMarkdown content={state.what_the_prompt_asks} />
           </div>
           {(state.inputs.length > 0 || state.outputs.length > 0) ? (
             <div className="grid grid-cols-2 gap-4">
@@ -55,16 +72,23 @@ export function StateCard({ state }: { state: ExplainState }) {
           ) : null}
           {state.transitions.length > 0 ? (
             <div>
-              <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Transitions</div>
-              <ul className="space-y-1.5">
-                {state.transitions.map((t, i) => (
-                  <li key={i} className="flex items-baseline gap-2">
-                    <span className="font-mono text-xs rounded bg-muted/50 px-1.5 py-0.5">{t.on}</span>
-                    <span className="text-muted-foreground text-xs">→</span>
-                    <span className="font-mono text-xs font-semibold">{t.to}</span>
-                    <span className={cn("text-xs text-muted-foreground")}>· {t.explain}</span>
-                  </li>
-                ))}
+              <div className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold mb-1">Outcomes</div>
+              <ul className="space-y-2">
+                {state.transitions.map((t, i) => {
+                  const terminal = TERMINAL_TARGETS.has(t.to)
+                  return (
+                    <li key={i} className="flex items-baseline gap-2 flex-wrap">
+                      <span className="font-mono text-xs rounded bg-muted/50 px-1.5 py-0.5">{t.on}</span>
+                      {terminal ? null : (
+                        <>
+                          <span className="text-muted-foreground text-xs">→</span>
+                          <span className="font-mono text-xs font-semibold">{t.to}</span>
+                        </>
+                      )}
+                      <InlineMd text={t.explain} />
+                    </li>
+                  )
+                })}
               </ul>
             </div>
           ) : null}

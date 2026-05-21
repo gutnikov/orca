@@ -21,12 +21,20 @@ export type WalkthroughStep = {
   expected_outcome: string
 }
 
+export type ExplainInput = {
+  title?: string
+  description: string
+  fields?: Record<string, string>
+  fields_label?: string
+}
+
 export type Explanation = {
   flow: string
   language: string
   title: string
   summary: string
   diagram_mermaid: string
+  input?: ExplainInput
   states: ExplainState[]
   walkthrough?: WalkthroughStep[]
   generated_at: string
