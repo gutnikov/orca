@@ -1,5 +1,7 @@
 import { useController, type Control } from "react-hook-form"
-import type { FormBlock, ReviewComment } from "@/lib/schema"
+import type { FormBlock, ReviewComment, ChangesetFile } from "@/lib/schema"
+import { useChangesetState } from "./changeset/useChangesetState"
+import { FileCard } from "./changeset/FileCard"
 
 type Block = Extract<FormBlock, { kind: "changeset" }>
 
@@ -19,21 +21,35 @@ export default function ChangesetBlock({
       : undefined,
   })
 
+  const state = useChangesetState({
+    initialComments: (field.value as ReviewComment[]) ?? [],
+    onChange: (next) => field.onChange(next),
+    filePaths: block.files.map((f: ChangesetFile) => f.path),
+  })
+
   return (
-    <div className="space-y-3">
-      <div className="text-sm text-muted-foreground">
-        {block.files.length} file{block.files.length === 1 ? "" : "s"} changed ·{" "}
-        {(Array.isArray(field.value) ? field.value.length : 0)} comments
+    <div className="space-y-4">
+      <div className="text-xs text-muted-foreground font-mono">
+        {block.files.length} file{block.files.length === 1 ? "" : "s"} changed · {state.comments.length}{" "}
+        comment{state.comments.length === 1 ? "" : "s"}
       </div>
-      <ul className="space-y-1 font-mono text-xs">
-        {block.files.map((f) => (
-          <li key={f.path}>
-            <span className="text-muted-foreground">{f.status}</span> {f.path}{" "}
-            <span className="text-emerald-600">+{f.additions}</span>{" "}
-            <span className="text-red-600">−{f.deletions}</span>
-          </li>
+      <div className="space-y-3">
+        {block.files.map((file: ChangesetFile) => (
+          <FileCard
+            key={file.path}
+            file={file}
+            collapsed={state.collapsed.has(file.path)}
+            onToggleCollapse={() => state.toggleCollapse(file.path)}
+            viewMode={state.viewMode.get(file.path) ?? "changes"}
+            onSetMode={(m) => state.setFileMode(file.path, m)}
+            commentCount={state.commentCountForFile(file.path)}
+          >
+            <pre className="p-4 text-xs font-mono whitespace-pre overflow-x-auto bg-muted/30">
+              {file.diff}
+            </pre>
+          </FileCard>
         ))}
-      </ul>
+      </div>
     </div>
   )
 }
