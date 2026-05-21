@@ -25,7 +25,7 @@ export function CommentComposer({
   const canSave = value.trim().length > 0
 
   return (
-    <div className="border-l-2 border-primary/40 bg-card mx-3 my-2 rounded-md p-3 space-y-2">
+    <div className="bg-card border rounded-md mx-3 my-2 p-2 space-y-1.5">
       <Textarea
         ref={ref}
         value={value}
@@ -39,17 +39,17 @@ export function CommentComposer({
             onCancel()
           }
         }}
-        rows={3}
+        rows={2}
         placeholder="Leave a comment"
-        className="resize-y text-sm"
+        className="resize-y text-xs leading-snug min-h-[3rem] px-2 py-1.5 rounded-md"
       />
       <div className="flex items-center justify-between">
-        <span className="text-[11px] text-muted-foreground">⌘/Ctrl ⏎ to save · Esc to cancel</span>
-        <div className="flex gap-2">
-          <Button type="button" size="sm" variant="ghost" onClick={onCancel}>
+        <span className="text-[10px] text-muted-foreground">⌘/Ctrl ⏎ save · Esc cancel</span>
+        <div className="flex gap-1">
+          <Button type="button" size="sm" variant="ghost" onClick={onCancel} className="h-6 px-2 text-[11px] rounded-md">
             Cancel
           </Button>
-          <Button type="button" size="sm" disabled={!canSave} onClick={onSave}>
+          <Button type="button" size="sm" disabled={!canSave} onClick={onSave} className="h-6 px-2 text-[11px] rounded-md">
             {saveLabel}
           </Button>
         </div>
