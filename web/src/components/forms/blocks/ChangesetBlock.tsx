@@ -1,12 +1,7 @@
 import { useController, type Control } from "react-hook-form"
-import type { ReviewComment } from "@/lib/schema"
+import type { FormBlock, ReviewComment } from "@/lib/schema"
 
-type Block = {
-  kind: "changeset"
-  name: string
-  files: { path: string; status: string; additions: number; deletions: number; diff: string }[]
-  require_comment?: boolean
-}
+type Block = Extract<FormBlock, { kind: "changeset" }>
 
 export default function ChangesetBlock({
   block,

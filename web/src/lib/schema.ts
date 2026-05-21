@@ -94,6 +94,10 @@ export function schemaToDefaults(schema: FormSchema): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const step of schema.steps) {
     for (const block of step.blocks) {
+      if (block.kind === "changeset") {
+        out[block.name] = [] as ReviewComment[]
+        continue
+      }
       if (block.kind !== "field") continue
       if (block.default !== undefined) {
         out[block.name] = block.default
