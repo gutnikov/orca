@@ -29,9 +29,26 @@ def _iter_fields(schema: dict[str, Any]) -> Iterator[dict[str, Any]]:
                 yield block
 
 
+def _iter_value_carrying_blocks(schema: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    """Yield blocks whose `name` appears in the submitted `values` dict
+    even though they aren't `field` blocks — currently the `changeset`
+    block, whose web component writes its comments array under
+    `values[block.name]`. The validator must treat these as known keys
+    (no per-field validation, just acceptance) or every submission with
+    a changeset would return 422 `unknown_field`.
+    """
+    for step in schema.get("steps", []):
+        for block in step.get("blocks", []):
+            if block.get("kind") == "changeset" and "name" in block:
+                yield block
+
+
 def validate_submission(schema: dict[str, Any], values: dict[str, Any]) -> dict[str, str]:
     errors: dict[str, str] = {}
     known: set[str] = set()
+
+    for blk in _iter_value_carrying_blocks(schema):
+        known.add(blk["name"])
 
     for fld in _iter_fields(schema):
         name = fld["name"]

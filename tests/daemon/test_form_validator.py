@@ -142,3 +142,41 @@ def test_assertions_and_changeset_blocks_pass_through() -> None:
     assert validate_submission(schema, {"commit_after": False}) == {}
     # Unknown field still flagged
     assert validate_submission(schema, {"commit_after": True, "bogus": 1}) == {"bogus": "unknown_field"}
+
+
+def test_changeset_block_name_in_values_is_accepted() -> None:
+    """The web `ChangesetBlock` writes its comments array under
+    `values[block.name]`. The validator must treat that key as known —
+    otherwise every submitted form with a changeset block returns 422
+    `unknown_field` even though the data is well-formed (gh review-form
+    422 regression).
+    """
+    schema: dict[str, Any] = {
+        "title": "Review",
+        "steps": [
+            {
+                "blocks": [
+                    {
+                        "kind": "changeset",
+                        "name": "review",
+                        "files": [],
+                    },
+                    {"kind": "field", "name": "commit_after", "type": "checkbox", "label": "Commit"},
+                ]
+            }
+        ],
+    }
+    # The frontend submits `review` as an array of comment objects (may be empty).
+    assert validate_submission(schema, {"commit_after": False, "review": []}) == {}
+    assert (
+        validate_submission(
+            schema,
+            {
+                "commit_after": True,
+                "review": [{"file": "src/foo.ts", "line": 5, "body": "rename x"}],
+            },
+        )
+        == {}
+    )
+    # A genuinely unknown key still gets flagged.
+    assert validate_submission(schema, {"commit_after": False, "review": [], "bogus": 1}) == {"bogus": "unknown_field"}
