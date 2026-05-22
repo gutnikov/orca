@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -231,3 +232,44 @@ class TestResolveEvalPaths:
     def test_raises_for_missing_eval(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
             resolve_eval_paths(repo_root=tmp_path, name="ghost")
+
+
+class TestScaffoldHasReviewState:
+    """Scaffold must include a `review` HITL state after `assert`."""
+
+    def test_review_state_present_and_wired(self) -> None:
+        """The scaffold is intentionally incomplete (initial: TODO_BODY_STATE)
+        so orca's strict parser rejects it; we inspect the YAML directly.
+
+        YAML 1.1 parses the bare key `on` as boolean True; orca's runtime
+        config parser normalizes that (config.py:158). For test purposes we
+        do the same normalization here.
+        """
+        import yaml
+
+        from orca.cli.eval_cmd import _SKELETON_EVAL_FLOW
+
+        cfg = yaml.safe_load(_SKELETON_EVAL_FLOW)
+        states = cfg["states"]
+
+        def _on(state: dict[Any, Any]) -> dict[str, Any]:
+            return state.get(True) or state.get("on") or {}
+
+        assert "review" in states
+
+        assert_on = _on(states["assert"])
+        for outcome in ("passed", "failed", "inconclusive"):
+            assert assert_on[outcome] == "review", (
+                f"assert.{outcome} should route to review, got {assert_on[outcome]!r}"
+            )
+
+        review = states["review"]
+        assert review["worker"]["kind"] == "claude-code"
+
+        outcome_values = review["worker"]["result_format"]["outcome"]["values"]
+        assert "reviewed" in outcome_values
+        assert "skipped" in outcome_values
+
+        review_on = _on(review)
+        assert review_on["reviewed"] == "done"
+        assert review_on["skipped"] == "done"
