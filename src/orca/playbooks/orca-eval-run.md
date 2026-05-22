@@ -177,36 +177,70 @@ path from the run summary's `branch` and `workflow` fields, or inspect
 
 ## Phase 3 - Review & Act
 
-### Step 3.1 - Read the report
+The eval-flow's `review` state emits a HITL form when the eval finishes.
+Phase 3 surfaces that form to the user and acts on their submission.
 
-Read `report.md` and summarize:
+### Step 3.0 - Detect the review state (legacy fallback)
 
-- overall result (`passed`, `failed`, or `inconclusive`)
-- each failed or inconclusive criterion id
-- the evidence/detail the assert worker gave
-
-Do not edit yet. First agree on the attribution.
-
-### Step 3.2 - Inspect the eval run worktree
-
-The eval run worktree normally lives at:
+Inspect the run state JSON or `orca_get_run` output:
 
 ```
-.orca-state/worktrees/orca-eval-run-<eval-name>/
+.orca-state/runs/orca-eval-run-<eval-name>/eval-flow/state.json
 ```
 
-Inspect it only for evidence:
+- If the run paused at `state: review` with `pending_form != null`, follow
+  Steps 3.1 → 3.5 below (form-driven path).
+- If the run transitioned straight from `assert` to `done` (no `review`
+  state in the eval-flow.yml), the eval was scaffolded before this feature
+  shipped. Skip to the **Legacy fallback** section at the bottom of Phase 3
+  and walk through the conversational Q&A instead. Mention to the user
+  that adding a `review` state to their `eval-flow.yml` gives them the
+  web review UI on the next run (template lives in
+  `src/orca/cli/eval_cmd.py:_SKELETON_EVAL_FLOW`).
+
+### Step 3.1 - Surface the form URL
+
+When the run pauses with `state: review` and `outcome: waiting`, the
+form is reachable at:
 
 ```
-git -C .orca-state/worktrees/orca-eval-run-<eval-name> status --short
-git -C .orca-state/worktrees/orca-eval-run-<eval-name> log --oneline --decorate --max-count=20
+http://localhost:<port>/forms/<run_id>/<issue_id>
 ```
 
-Those files are run artifacts. Do not stage or commit `.orca-state/**` into the
-main repo.
+`<port>` defaults to 7891 (or whatever the daemon picked — check the
+daemon log). `<run_id>` and `<issue_id>` are visible in `orca_get_run`
+output; the issue id for the root issue is typically the eval's slug.
 
-### Step 3.3 - Attribute failures before editing
+Open the URL in the user's browser (`open <url>` on macOS) and tell them
+the run is paused until they submit or skip the form. Do not poll
+aggressively — the worker is suspended; nothing changes until submission.
 
+### Step 3.2 - Wait for submission
+
+Poll `orca_get_run` every ~30s. The run resumes automatically when the
+user submits. The review state's result then lives at:
+
+```
+.orca-state/runs/orca-eval-run-<eval-name>/eval-flow/state-results/review.json
+```
+
+Shape:
+
+```json
+{
+  "outcome": "reviewed",
+  "actions": "{\"update_prompts\": true, \"update_assertions\": false, \"update_input\": false, \"commit_after\": true}",
+  "comments": ["src/foo.ts:42 prefer renaming `x`"]
+}
+```
+
+`actions` is a JSON-stringified dict — parse it with `json.loads` before
+acting on the booleans. If `outcome` is `skipped`, end Phase 3 and report
+the eval result without applying any edits.
+
+### Step 3.3 - Attribute failures before applying
+
+Before applying any actions, agree with the user on the attribution.
 Use this taxonomy:
 
 | Failure mode | Symptom | Fix |
@@ -217,28 +251,31 @@ Use this taxonomy:
 | `result_format` | The criterion needs evidence the body state never emits. | Coordinate a production workflow `result_format` change plus prompt update. |
 | Flow | The eval slice entry expects fields not seeded by `input.md`. | Add the fields to `input.md` frontmatter or fix the upstream production state. |
 
-Ask the user which fixes they want to apply if the choice is not mechanical.
+The form's action checkboxes are the user's intent; the comments column
+of the changeset block is where they say WHICH prompt/assertion/file
+they want changed and how.
 
 ### Step 3.4 - Apply chosen actions
 
-Apply only the chosen edits:
+For each `true` key in the parsed `actions` dict, run the matching
+procedure:
 
-- **Update prompts:** edit `.orca/prompts/<state>.md` via
-  [`orca-prompt-create.md`](orca-prompt-create.md) Update mode. Track paths.
-- **Update assertions:** edit `.orca/evals/<eval>/assertions.md`. Track path.
-- **Update input:** edit `.orca/evals/<eval>/input.md`. Track path.
-- **Update state branch:** edit and commit inside the author worktree for the
-  parsed `state_ref`; track the branch commit separately. For shared refs, run
-  all evals that point at that branch after the edit.
-- **Update workflow/result_format:** route through
-  [`orca-workflow-review.md`](orca-workflow-review.md) or
-  [`orca-workflow-create.md`](orca-workflow-create.md), because schema and
-  prompt contract must change together.
+- `update_prompts` → use [`orca-prompt-create.md`](orca-prompt-create.md)
+  Update mode on the prompts the user flagged. The user's intent comes
+  from `comments` and the conversational follow-up; ask if comments are
+  absent.
+- `update_assertions` → edit `.orca/evals/<eval>/assertions.md` per the
+  comments.
+- `update_input` → edit `.orca/evals/<eval>/input.md` per the comments.
+- `commit_after` → run Step 3.5.
 
-Never edit the eval run worktree under `.orca-state/worktrees/...` as the fix;
-it will be discarded on the next eval run.
+Never edit the eval run worktree under `.orca-state/worktrees/...` as
+the fix; it will be discarded on the next eval run.
 
-### Step 3.5 - Commit (only if requested)
+If `comments` is non-empty but no action checkbox was ticked, ask the
+user whether the comments should drive an edit anyway.
+
+### Step 3.5 - Commit (only if `commit_after` is true)
 
 The commit step is explicit and defensive.
 
@@ -257,8 +294,8 @@ The commit step is explicit and defensive.
    `git commit -m "<message>"`.
 
 If the state branch changed, it already has its own commit on the parsed
-`state_ref`; mention that it must be pushed alongside the main repo commit
-when sharing the eval.
+`state_ref`; mention that it must be pushed alongside the main repo
+commit when sharing the eval.
 
 ### Step 3.6 - Restart?
 
@@ -266,8 +303,32 @@ Conversationally:
 
 > "Want to run another iteration?"
 
-If yes, loop back to Phase 1 with the same eval pre-filled. If no, summarize
-the run outcome, edits applied, commits made or skipped, and remaining risks.
+If yes, loop back to Phase 1 with the same eval pre-filled. If no,
+summarize the run outcome, edits applied, commits made or skipped, and
+remaining risks.
+
+### Legacy fallback (for evals without a `review` state)
+
+If Step 3.0 routed here, walk the user through the same review
+conversationally:
+
+1. Read `report.md` and summarize the outcome, the failed/inconclusive
+   criteria, and the evidence the assert worker gave.
+2. Inspect the eval worktree for evidence (read-only):
+
+   ```
+   git -C .orca-state/worktrees/orca-eval-run-<eval-name> status --short
+   git -C .orca-state/worktrees/orca-eval-run-<eval-name> log --oneline --decorate --max-count=20
+   ```
+
+3. Use the same attribution taxonomy from Step 3.3 above.
+4. Apply the chosen edits per Step 3.4.
+5. Commit per Step 3.5 if the user asks.
+6. Ask about restart per Step 3.6.
+
+This fallback exists for backward compatibility with evals scaffolded
+before the review state shipped. The form path is the default for any
+freshly-scaffolded or migrated eval.
 
 ---
 
