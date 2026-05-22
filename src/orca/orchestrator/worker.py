@@ -191,7 +191,7 @@ class CliAgentWorker:
         if extra_args:
             cmd_parts.extend(extra_args)
         if model:
-            cmd_parts.extend(["-m", model])
+            cmd_parts.extend(["--model", model])
 
         # d. Spawn in tmux session
         await pty_session.spawn(
