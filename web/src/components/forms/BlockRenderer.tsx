@@ -14,9 +14,11 @@ const BlockSkeleton = () => <div className="h-12 animate-pulse rounded bg-muted"
 export function BlockRenderer({
   block,
   control,
+  storageKeyPrefix,
 }: {
   block: FormBlock
   control: Control<Record<string, unknown>>
+  storageKeyPrefix?: string | null
 }) {
   switch (block.kind) {
     case "field":
@@ -42,7 +44,7 @@ export function BlockRenderer({
     case "changeset":
       return (
         <Suspense fallback={<BlockSkeleton />}>
-          <ChangesetBlock block={block} control={control} />
+          <ChangesetBlock block={block} control={control} storageKeyPrefix={storageKeyPrefix} />
         </Suspense>
       )
     case "assertions":

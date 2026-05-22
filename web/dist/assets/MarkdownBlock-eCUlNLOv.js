@@ -1,1 +1,0 @@
-import{s as e,M as d,u as a}from"./index-CdiqosiX.js";function m({content:r}){return e.jsx("div",{className:"text-sm leading-relaxed [&_p]:my-2 [&_ul]:my-2 [&_ol]:my-2 [&_li]:ml-4 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs [&_a]:text-primary [&_a]:underline",children:e.jsx(d,{remarkPlugins:[a],children:r})})}export{m as default};

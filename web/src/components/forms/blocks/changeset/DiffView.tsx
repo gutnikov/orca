@@ -58,7 +58,7 @@ export function DiffView({
   if (mode === "changes") {
     const rows = hunksToUnifiedRows(hunks)
     return (
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto w-full">
         {rows.map((r) => {
           if (r.kind === "hunk-header") {
             return <div key={r.rowKey} className={rowStyles.hunkHeader}>{r.header}</div>
@@ -82,8 +82,8 @@ export function DiffView({
 
   const rows = hunksToSplitRows(hunks)
   return (
-    <div className="grid grid-cols-2 divide-x">
-      <div>
+    <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] divide-x w-full">
+      <div className="overflow-x-auto">
         {rows.map((r) => {
           if (r.kind === "hunk-header") return <div key={`L-${r.rowKey}`} className={rowStyles.hunkHeader}>{r.header}</div>
           const left = r.pair.left
@@ -102,7 +102,7 @@ export function DiffView({
           )
         })}
       </div>
-      <div>
+      <div className="overflow-x-auto">
         {rows.map((r) => {
           if (r.kind === "hunk-header") return <div key={`R-${r.rowKey}`} className={rowStyles.hunkHeader}>{r.header}</div>
           const right = r.pair.right

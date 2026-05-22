@@ -13,9 +13,12 @@ type Block = Extract<FormBlock, { kind: "changeset" }>
 export default function ChangesetBlock({
   block,
   control,
+  storageKeyPrefix,
 }: {
   block: Block
   control: Control<Record<string, unknown>>
+  /** Provided by FormPage; we suffix the block's name onto it. */
+  storageKeyPrefix?: string | null
 }) {
   const { field } = useController<Record<string, unknown>, string>({
     name: block.name,
@@ -26,10 +29,13 @@ export default function ChangesetBlock({
       : undefined,
   })
 
+  const storageKey = storageKeyPrefix ? `${storageKeyPrefix}:changeset:${block.name}` : null
+
   const state = useChangesetState({
     initialComments: (field.value as ReviewComment[]) ?? [],
     onChange: (next) => field.onChange(next),
     filePaths: block.files.map((f: ChangesetFile) => f.path),
+    storageKey,
   })
 
   const globalIndexOf = useMemo(() => {

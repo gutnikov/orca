@@ -32,7 +32,7 @@ export function CommentThread({
   const [editBody, setEditBody] = useState("")
 
   return (
-    <div className="bg-muted/30 border-y">
+    <div className="bg-muted/20 border-y py-1">
       {comments.map((c) => {
         const idx = globalIndexOf(c)
         const isEditing = editingIndex === idx
@@ -42,52 +42,60 @@ export function CommentThread({
             key={idx}
             data-highlight={isHighlighted ? "on" : undefined}
             className={cn(
-              "border-l-2 border-primary/50 bg-card mx-3 my-2 rounded-md p-3 group/comment transition-all",
+              "bg-card border border-border/60 shadow-xs mx-3 my-1.5 rounded-md group/comment transition-all",
               isHighlighted && "ring-2 ring-primary/40 shadow-md",
             )}
           >
             {isEditing ? (
-              <CommentComposer
-                value={editBody}
-                onChange={setEditBody}
-                onSave={() => {
-                  onEdit(idx, editBody)
-                  setEditingIndex(null)
-                }}
-                onCancel={() => setEditingIndex(null)}
-                saveLabel="Update"
-              />
+              <div className="p-1">
+                <CommentComposer
+                  value={editBody}
+                  onChange={setEditBody}
+                  onSave={() => {
+                    onEdit(idx, editBody)
+                    setEditingIndex(null)
+                  }}
+                  onCancel={() => setEditingIndex(null)}
+                  saveLabel="Update"
+                />
+              </div>
             ) : (
-              <div className="flex items-start gap-2">
-                <div className="prose prose-sm dark:prose-invert flex-1 max-w-none text-sm">
+              <>
+                <div className="px-3 pt-1.5 pb-0 flex items-center justify-between text-[10px] text-muted-foreground font-mono">
+                  <span className="truncate">
+                    {c.file}
+                    <span className="text-muted-foreground/60">:{c.line}</span>
+                  </span>
+                  <div className="flex gap-0.5 opacity-0 group-hover/comment:opacity-100 transition-opacity shrink-0">
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-5 w-5"
+                      onClick={() => {
+                        setEditingIndex(idx)
+                        setEditBody(c.body)
+                      }}
+                      aria-label="Edit comment"
+                    >
+                      <Pencil size={11} />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="h-5 w-5 text-destructive"
+                      onClick={() => onDelete(idx)}
+                      aria-label="Delete comment"
+                    >
+                      <Trash2 size={11} />
+                    </Button>
+                  </div>
+                </div>
+                <div className="prose prose-sm dark:prose-invert max-w-none text-sm px-3 pb-2 pt-0.5 [&_p]:my-1 [&_pre]:my-1 [&_ul]:my-1">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{c.body}</ReactMarkdown>
                 </div>
-                <div className="flex gap-1 opacity-0 group-hover/comment:opacity-100 transition-opacity">
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="h-6 w-6"
-                    onClick={() => {
-                      setEditingIndex(idx)
-                      setEditBody(c.body)
-                    }}
-                    aria-label="Edit comment"
-                  >
-                    <Pencil size={12} />
-                  </Button>
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="h-6 w-6 text-destructive"
-                    onClick={() => onDelete(idx)}
-                    aria-label="Delete comment"
-                  >
-                    <Trash2 size={12} />
-                  </Button>
-                </div>
-              </div>
+              </>
             )}
           </div>
         )

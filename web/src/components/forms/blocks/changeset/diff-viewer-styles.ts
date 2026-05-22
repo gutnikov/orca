@@ -1,5 +1,10 @@
 export const rowStyles = {
-  base: "group/row grid grid-cols-[3rem_3rem_2rem_1fr] gap-0 font-mono text-[12px] leading-5 min-h-5",
+  // `minmax(0, 1fr)` for the content track is critical: a bare `1fr` does NOT
+  // include `min-width: 0`, so long unbroken lines (markdown paragraphs, JSON
+  // blobs) force the grid track to outgrow its container — the diff's
+  // overflow-x-auto wrapper then sees a row WIDER than itself but renders the
+  // content bleeding past the card's right edge instead of scrolling cleanly.
+  base: "group/row grid grid-cols-[3rem_3rem_2rem_minmax(0,1fr)] gap-0 font-mono text-[12px] leading-5 min-h-5",
   context: "bg-card",
   added:
     "bg-[oklch(0.96_0.05_150_/_0.55)] dark:bg-[oklch(0.30_0.06_150_/_0.30)]",

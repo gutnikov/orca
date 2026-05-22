@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type { ReviewComment } from "@/lib/schema"
 import type { ViewMode } from "./types"
 import { draftKey } from "./types"
@@ -9,6 +9,18 @@ export type UseChangesetStateInput = {
   initialComments: ReviewComment[]
   onChange: (next: ReviewComment[]) => void
   filePaths: string[]
+  /**
+   * When set, comments + in-flight drafts are mirrored to localStorage
+   * under this key. On mount the hook hydrates from localStorage (so an
+   * F5 reload doesn't drop the user's work). On every change the value
+   * is written back. Pass `null` to disable persistence.
+   */
+  storageKey?: string | null
+}
+
+type StoredShape = {
+  comments?: ReviewComment[]
+  drafts?: [string, string][]
 }
 
 export type UseChangesetStateApi = {
@@ -42,6 +54,7 @@ export function useChangesetState({
   initialComments,
   onChange,
   filePaths,
+  storageKey,
 }: UseChangesetStateInput): UseChangesetStateApi {
   const [comments, setComments] = useState<ReviewComment[]>(initialComments)
   const [drafts, setDrafts] = useState<Map<string, string>>(new Map())
@@ -49,6 +62,44 @@ export function useChangesetState({
   const [viewMode, setViewMode] = useState<Map<string, ViewMode>>(
     () => new Map(filePaths.map((p) => [p, "changes" as ViewMode])),
   )
+
+  // Hydrate once from localStorage if a key was provided. Server-supplied
+  // `initialComments` are still respected on first paint; LS overlays on top
+  // so user drafts survive an F5 reload.
+  const hydratedRef = useRef(false)
+  useEffect(() => {
+    if (!storageKey || hydratedRef.current) return
+    hydratedRef.current = true
+    try {
+      const raw = window.localStorage.getItem(storageKey)
+      if (!raw) return
+      const parsed = JSON.parse(raw) as StoredShape
+      if (Array.isArray(parsed.comments) && parsed.comments.length > 0) {
+        setComments(parsed.comments)
+        onChange(parsed.comments)
+      }
+      if (Array.isArray(parsed.drafts) && parsed.drafts.length > 0) {
+        setDrafts(new Map(parsed.drafts))
+      }
+    } catch {
+      // Corrupt entry or storage disabled — silently ignore.
+    }
+  }, [storageKey, onChange])
+
+  // Mirror changes to localStorage. Quota / disabled-storage errors are
+  // non-fatal; the form still works without persistence.
+  useEffect(() => {
+    if (!storageKey || !hydratedRef.current) return
+    try {
+      const payload: StoredShape = {
+        comments,
+        drafts: Array.from(drafts.entries()),
+      }
+      window.localStorage.setItem(storageKey, JSON.stringify(payload))
+    } catch {
+      // Ignore.
+    }
+  }, [storageKey, comments, drafts])
 
   const commit = useCallback(
     (next: ReviewComment[]) => {

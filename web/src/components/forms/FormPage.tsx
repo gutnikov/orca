@@ -58,11 +58,30 @@ export function FormPage({ data }: { data: FormResponse }) {
 
   const onBack = () => setStepIdx((i) => i - 1)
 
+  // Mirrors block submissions to localStorage so an F5 reload doesn't
+  // drop the user's drafts. Cleared on terminal states below.
+  const storageKeyPrefix = `orca:review:${data.run_id}:${data.issue_id}`
+
+  const clearLocalPersistence = () => {
+    try {
+      // Comments + drafts live under one entry per changeset block. The web
+      // form right now has only one (`name: "review"`) but we wildcard-match
+      // anything under our prefix so future blocks self-clean.
+      for (let i = window.localStorage.length - 1; i >= 0; i--) {
+        const key = window.localStorage.key(i)
+        if (key && key.startsWith(storageKeyPrefix)) window.localStorage.removeItem(key)
+      }
+    } catch {
+      // localStorage disabled — nothing to do.
+    }
+  }
+
   const onCancel = async () => {
     if (submitting) return
     setSubmitting(true)
     try {
       await submitForm(data.run_id, data.issue_id, { cancelled: true })
+      clearLocalPersistence()
       setDone("cancelled")
     } catch (e) {
       handleErr(e)
@@ -75,6 +94,7 @@ export function FormPage({ data }: { data: FormResponse }) {
     setSubmitting(true)
     try {
       await submitForm(data.run_id, data.issue_id, { values })
+      clearLocalPersistence()
       setDone("submitted")
     } catch (e) {
       handleErr(e)
@@ -97,7 +117,12 @@ export function FormPage({ data }: { data: FormResponse }) {
           <FormProvider {...form}>
             <form onSubmit={(e) => e.preventDefault()} className="space-y-5">
               {step.blocks.map((block, i) => (
-                <BlockRenderer key={i} block={block} control={form.control} />
+                <BlockRenderer
+                  key={i}
+                  block={block}
+                  control={form.control}
+                  storageKeyPrefix={storageKeyPrefix}
+                />
               ))}
             </form>
           </FormProvider>
