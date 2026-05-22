@@ -273,3 +273,21 @@ class TestScaffoldHasReviewState:
         review_on = _on(review)
         assert review_on["reviewed"] == "done"
         assert review_on["skipped"] == "done"
+
+        # The form is comment-driven; the four action checkboxes were removed
+        # in favor of a CLI-driven step-by-step proposal walk from comments.
+        # Regression guard against accidentally re-adding them to the scaffold.
+        prompt_text = review["worker"]["prompt"]["text"]
+        for dropped in (
+            "update_prompts",
+            "update_assertions",
+            "update_input",
+            "commit_after",
+        ):
+            assert dropped not in prompt_text, (
+                f"scaffold prompt unexpectedly references dropped action field {dropped!r}"
+            )
+
+        # result_format no longer carries `actions`.
+        assert "actions" not in review["worker"]["result_format"]
+        assert "comments" in review["worker"]["result_format"]

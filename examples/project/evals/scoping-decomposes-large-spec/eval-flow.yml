@@ -101,6 +101,10 @@ states:
           # Review
 
           You are assembling a human-review form for an eval that just finished.
+          The form is comment-driven: the user reads the assertions and the
+          worktree diff, leaves inline comments where they want changes, and
+          submits. The agent then drives the prompt/assertion edits step-by-step
+          from those comments — there are no action checkboxes on the form.
 
           1. Read {{ run.run_dir }}/report.md — it has a Markdown table
              `| ID | Status | Reason |` with one row per criterion.
@@ -118,16 +122,11 @@ states:
                (`added` / `modified` / `deleted` / `renamed`), `language`
                (best-effort from extension), `additions`, `deletions`, and
                `diff` (the unified diff hunks for that file).
-             - Leave the action checkbox fields with `required: false`.
           4. When the user submits, you will receive a JSON envelope on stdin.
              Parse it and write {{ result_path }} with:
-             - `outcome: reviewed` if the user submitted with at least one
-               action checked OR with at least one comment;
-             - `outcome: skipped` if the user submitted with no actions and no
-               comments (e.g. clicked Skip).
-             - `actions`: a JSON-stringified dict mirroring the submitted
-               checkbox values (`update_prompts`, `update_assertions`,
-               `update_input`, `commit_after`), preserving booleans.
+             - `outcome: reviewed` if the user left at least one comment;
+             - `outcome: skipped` if the user submitted with no comments or
+               cancelled the form.
              - `comments`: the changeset block's line-anchored comments
                as a list of `"<path>:<line> <body>"` strings (may be empty).
 
@@ -137,8 +136,8 @@ states:
           ```json
           {
             "title": "Review eval results",
-            "description": "Choose which fixes (if any) to apply.",
-            "submit_label": "Apply selected",
+            "description": "Comment inline where you want changes; submit when done.",
+            "submit_label": "Submit comments",
             "cancel_label": "Skip",
             "steps": [
               {
@@ -148,35 +147,7 @@ states:
                     "content": "<one-line summary of report.md overall outcome>"
                   },
                   {"kind": "assertions", "criteria": []},
-                  {"kind": "changeset", "name": "review", "files": []},
-                  {
-                    "kind": "field",
-                    "name": "update_prompts",
-                    "type": "checkbox",
-                    "label": "Update production prompts",
-                    "required": false
-                  },
-                  {
-                    "kind": "field",
-                    "name": "update_assertions",
-                    "type": "checkbox",
-                    "label": "Update assertions.md",
-                    "required": false
-                  },
-                  {
-                    "kind": "field",
-                    "name": "update_input",
-                    "type": "checkbox",
-                    "label": "Update input.md",
-                    "required": false
-                  },
-                  {
-                    "kind": "field",
-                    "name": "commit_after",
-                    "type": "checkbox",
-                    "label": "Commit accepted changes",
-                    "required": false
-                  }
+                  {"kind": "changeset", "name": "review", "files": []}
                 ]
               }
             ]
@@ -193,13 +164,10 @@ states:
         outcome:
           type: enum
           values: [reviewed, skipped]
-          description: "Did the user act on the form?"
+          description: "Did the user leave any comments?"
           values_description:
-            reviewed: "User submitted with at least one action or comment"
-            skipped: "User submitted with no actions or cancelled the form"
-        actions:
-          type: string
-          description: "JSON-stringified dict of the submitted checkbox values"
+            reviewed: "User submitted with at least one comment"
+            skipped: "User submitted with no comments or cancelled"
         comments:
           type: list
           items: "string"

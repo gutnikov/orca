@@ -229,53 +229,55 @@ Shape:
 ```json
 {
   "outcome": "reviewed",
-  "actions": "{\"update_prompts\": true, \"update_assertions\": false, \"update_input\": false, \"commit_after\": true}",
-  "comments": ["src/foo.ts:42 prefer renaming `x`"]
+  "comments": [
+    "src/foo.ts:42 prefer renaming `x`",
+    "src/foo.ts:91 this branch needs a unit test"
+  ]
 }
 ```
 
-`actions` is a JSON-stringified dict — parse it with `json.loads` before
-acting on the booleans. If `outcome` is `skipped`, end Phase 3 and report
-the eval result without applying any edits.
+If `outcome` is `skipped` (no comments left, or the user clicked Skip),
+end Phase 3 and report the eval result without applying any edits.
 
-### Step 3.3 - Attribute failures before applying
+The form no longer has action checkboxes. The user's comments — both
+WHAT they want changed and (often) WHERE — are the entire signal.
 
-Before applying any actions, agree with the user on the attribution.
-Use this taxonomy:
+### Step 3.3 - Propose updates from comments, step-by-step
 
-| Failure mode | Symptom | Fix |
-|---|---|---|
-| Prompt | Assertion is clear; scenario is valid; worker output missed it. | Update the production prompt through `orca-prompt-create` Update mode. |
-| Assertion | Criterion is ambiguous, subjective, or references unavailable evidence. | Edit `.orca/evals/<eval>/assertions.md`. |
-| Scenario | `input.md` or the state branch does not actually exercise the behavior. | Edit `input.md` or commit new fixture bytes on `orca-eval-state/<eval>`. |
-| `result_format` | The criterion needs evidence the body state never emits. | Coordinate a production workflow `result_format` change plus prompt update. |
-| Flow | The eval slice entry expects fields not seeded by `input.md`. | Add the fields to `input.md` frontmatter or fix the upstream production state. |
+Phase 3 from this point is conversational, not form-driven. Your job is
+to translate each comment into a concrete prompt or assertion edit and
+propose it one at a time.
 
-The form's action checkboxes are the user's intent; the comments column
-of the changeset block is where they say WHICH prompt/assertion/file
-they want changed and how.
+For each comment, decide which axis it points at:
 
-### Step 3.4 - Apply chosen actions
+| Comment subject | Likely fix |
+|---|---|
+| A line in a changed file (the worker's output) | A prompt edit in `.orca/prompts/<state>.md` — change the instruction the worker followed. |
+| A criterion's assertion text (the spec) | An assertions edit in `.orca/evals/<eval>/assertions.md`. |
+| An ambiguity in the report.md outcome | Usually an assertions tightening (same as above). |
 
-For each `true` key in the parsed `actions` dict, run the matching
-procedure:
+Then walk one proposal at a time:
 
-- `update_prompts` → use [`orca-prompt-create.md`](orca-prompt-create.md)
-  Update mode on the prompts the user flagged. The user's intent comes
-  from `comments` and the conversational follow-up; ask if comments are
-  absent.
-- `update_assertions` → edit `.orca/evals/<eval>/assertions.md` per the
-  comments.
-- `update_input` → edit `.orca/evals/<eval>/input.md` per the comments.
-- `commit_after` → run Step 3.5.
+> "Comment on `src/foo.ts:42` — 'prefer renaming x'. I read this as a
+> prompt-side fix on `.orca/prompts/<state>.md` — specifically: add a
+> rule that variable names match the existing module style. Apply?"
 
-Never edit the eval run worktree under `.orca-state/worktrees/...` as
-the fix; it will be discarded on the next eval run.
+On yes, run [`orca-prompt-create.md`](orca-prompt-create.md) Update
+mode (for prompts) or edit `assertions.md` directly. On no, move to the
+next comment. Track every file you edit so you can offer a commit at
+the end.
 
-If `comments` is non-empty but no action checkbox was ticked, ask the
-user whether the comments should drive an edit anyway.
+Do **not** ask about `input.md` updates or about committing as a yes/no
+gesture. Those used to be form checkboxes and were removed because:
 
-### Step 3.5 - Commit (only if `commit_after` is true)
+- `input.md` changes are rare; if a comment really points at the
+  scenario seed, raise it conversationally — it's a discussion, not a
+  checkbox.
+- Commits should be explicit, never bundled into a "yes I agreed with
+  the changes" signal. Offer Step 3.4 only after the user has seen all
+  the edits you applied.
+
+### Step 3.4 - Commit (only if the user explicitly asks)
 
 The commit step is explicit and defensive.
 
@@ -297,7 +299,7 @@ If the state branch changed, it already has its own commit on the parsed
 `state_ref`; mention that it must be pushed alongside the main repo
 commit when sharing the eval.
 
-### Step 3.6 - Restart?
+### Step 3.5 - Restart?
 
 Conversationally:
 
@@ -321,10 +323,11 @@ conversationally:
    git -C .orca-state/worktrees/orca-eval-run-<eval-name> log --oneline --decorate --max-count=20
    ```
 
-3. Use the same attribution taxonomy from Step 3.3 above.
-4. Apply the chosen edits per Step 3.4.
-5. Commit per Step 3.5 if the user asks.
-6. Ask about restart per Step 3.6.
+3. Use the same comment-driven proposal walk from Step 3.3 above —
+   except the "comments" here come from the conversational summary in
+   step 1, not from a submitted form.
+4. Commit per Step 3.4 if the user asks.
+5. Ask about restart per Step 3.5.
 
 This fallback exists for backward compatibility with evals scaffolded
 before the review state shipped. The form path is the default for any
