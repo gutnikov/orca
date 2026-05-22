@@ -1,6 +1,6 @@
 [project]
 name = "orca"
-version = "0.4.5"
+version = "0.4.6"
 description = ""
 requires-python = ">=3.12"
 dependencies = [
