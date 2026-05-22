@@ -1,6 +1,6 @@
 {
   "name": "orca",
-  "version": "0.4.6",
+  "version": "0.4.7",
   "description": "Coding agent orchestrator. Spawns Claude Code / Codex / OpenCode workers in git worktrees, drives state machines, exposes MCP tools.",
   "author": {
     "name": "Alex Gutnikov",
