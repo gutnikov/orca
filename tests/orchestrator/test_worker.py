@@ -149,7 +149,7 @@ class TestCommandAssembly:
         assert args[0] == "run"
         # Prompt is the second arg (positional after subcommand)
         assert len(args[1]) > 0  # prompt text
-        assert "-m" in args
+        assert "--model" in args
         assert "anthropic/claude-sonnet-4-5" in args
         assert stdin_data is None
 
@@ -160,7 +160,7 @@ class TestCommandAssembly:
         assert args[0] == "exec"
         # Prompt is the second arg (positional after subcommand).
         assert len(args[1]) > 0
-        assert "-m" in args
+        assert "--model" in args
         assert "gpt-5.4" in args
         assert stdin_data is None
 
@@ -178,7 +178,7 @@ class TestCommandAssembly:
     async def test_model_ignored_when_none(self, tmp_path: Path) -> None:
         kind_config = KIND_REGISTRY["claude-code"]
         cmd, args, stdin_data = await self._spawn_and_capture(kind_config, tmp_path, model=None)
-        assert "-m" not in args
+        assert "--model" not in args
 
 
 @pytest.mark.asyncio()
