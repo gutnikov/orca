@@ -24,8 +24,11 @@ restart.
 
 Conversational with the user. Most steps are plain chat. Two moments use
 richer web UI: the explanation page (auto-opened in the browser) and the
-review form (opened after the eval finishes). The playbook walks through
-every step.
+review form. The review form lives at `/forms/<run-id>/<issue-id>` on
+the daemon (default `localhost:7891`); when the eval finishes the agent
+surfaces the URL and the user clicks it to inspect assertions + the
+worktree changeset and tick the action checkboxes that drive the next
+agent step. The playbook walks through every step.
 
 Follow the playbook for the full procedure. **Track every file you edit
 during discussions** — Phase 3 step 3.5's commit step depends on that
