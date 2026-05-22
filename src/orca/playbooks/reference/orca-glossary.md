@@ -71,7 +71,20 @@ A run (the active execution of one root issue's workflow) has a status:
 | `interrupted` | Daemon was stopped/restarted mid-run. `orca resume` continues. |
 | `stopped` | User stopped the run via `orca stop`. Resume or drop. |
 
-Worker activity is reported separately: `worker_active: bool` indicates whether a worker tmux session is currently alive for any issue in the run.
+Worker activity is reported separately on each issue:
+
+- **`worker_active: bool`** — a worker tmux session is alive for this issue. **Does NOT mean "currently making progress"** — a worker that has emitted `outcome: waiting` and is parked awaiting HITL input still has `worker_active: true` (the session is open, just blocked). Treat this as "a session exists," not "work is happening." (gh#16)
+
+To disambiguate "working" vs "waiting" vs "idle," combine signals:
+
+| `worker_active` | `pending_form` | Last `worker_*` event | Meaning |
+|---|---|---|---|
+| `true` | `null` | `worker_dispatched` / `worker_progress` | **Working** — actively executing. |
+| `true` | non-null | `worker_waiting` | **Waiting (form)** — HITL form pending at `/forms/<runId>/<issueId>`. |
+| `true` | `null` | `worker_waiting` not yet followed by `worker_resumed` | **Waiting (text)** — `reason` carries the blocker; resume via `orca unblock`. |
+| `false` | `null` | any | **Idle / between states** — either between dispatches, or the run reached a terminal state. |
+
+For programmatic polling: `runs[*].waiting_issues` in the `/api/runs` payload aggregates the waiting cases above so a caller doesn't need to walk event logs themselves. `orca runs --waiting` filters the listing to just runs with at least one waiting issue.
 
 ## Common abbreviations / Jinja conventions
 

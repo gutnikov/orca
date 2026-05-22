@@ -84,6 +84,16 @@ class TestCliDispatch:
         parser = build_parser()
         args = parser.parse_args(["runs"])
         assert args.subcommand == "runs"
+        assert args.waiting is False
+
+    def test_runs_subcommand_waiting_flag(self) -> None:
+        """gh#16 — `orca runs --waiting` filters to runs currently parked
+        on HITL input (a `waiting_issues` field with at least one entry).
+        """
+        parser = build_parser()
+        args = parser.parse_args(["runs", "--waiting"])
+        assert args.subcommand == "runs"
+        assert args.waiting is True
 
     def test_logs_subcommand(self) -> None:
         parser = build_parser()

@@ -10,8 +10,15 @@ from pathlib import Path
 import aiohttp
 
 
-def runs_command(root: Path | None = None) -> None:
-    """Connect to daemon, GET /api/runs, print table."""
+def runs_command(root: Path | None = None, *, waiting_only: bool = False) -> None:
+    """Connect to daemon, GET /api/runs, print table.
+
+    Args:
+        root: repo root (or auto-detect).
+        waiting_only: When True, only print runs that have at least one
+            issue currently parked on HITL input. Useful for "what's
+            waiting on me right now" polling (gh#16).
+    """
     import asyncio
 
     from orca.cli.daemon_cmd import _repo_root
@@ -32,8 +39,14 @@ def runs_command(root: Path | None = None) -> None:
         ):
             runs = await resp.json()
 
+        if waiting_only:
+            runs = [r for r in runs if r.get("waiting_issues")]
+
         if not runs:
-            print("No runs found.")
+            if waiting_only:
+                print("No runs waiting for input.")
+            else:
+                print("No runs found.")
             return
 
         # Print a simple table

@@ -86,8 +86,13 @@ def build_parser() -> argparse.ArgumentParser:
     clean_parser.add_argument("--dry-run", action="store_true", help="Show what would be cleaned without removing")
     clean_parser.add_argument("-y", "--yes", action="store_true", help="Skip the confirmation prompt")
 
-    # orca runs
-    sub.add_parser("runs", help="List all runs")
+    # orca runs [--waiting]
+    runs_parser = sub.add_parser("runs", help="List all runs")
+    runs_parser.add_argument(
+        "--waiting",
+        action="store_true",
+        help="Only show runs with at least one issue currently waiting on HITL input",
+    )
 
     # orca logs <run_id> [issue_id] [--tail N]
     logs_parser = sub.add_parser("logs", help="Print worker logs")
@@ -175,7 +180,7 @@ def main() -> None:
     elif args.subcommand == "runs":
         from orca.cli.list_cmd import runs_command
 
-        runs_command(root=args.root)
+        runs_command(root=args.root, waiting_only=args.waiting)
 
     elif args.subcommand == "logs":
         from orca.cli.list_cmd import logs_command
