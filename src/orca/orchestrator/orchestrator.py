@@ -520,6 +520,11 @@ class Orchestrator:
                 self.now,
             )
             self.persistence.save(self._state)
+            # Mark the active session as waiting so the TUI WORKERS panel
+            # renders a distinct indicator (gh#15) instead of the regular
+            # in-flight spinner.
+            if self._session_sync is not None:
+                self._session_sync.manifest.update_waiting(tracking_id, waiting=True)
             if form is not None:
                 # Derive run_id (branch:workflow) from the persistence state path.
                 state_path = self.persistence.state_path
@@ -539,6 +544,10 @@ class Orchestrator:
                 self.now,
             )
             self.persistence.save(self._state)
+            # Worker resumed — clear the waiting flag so the panel re-shows
+            # the in-flight treatment.
+            if self._session_sync is not None:
+                self._session_sync.manifest.update_waiting(tracking_id, waiting=False)
 
         try:
             outcome = await worker.execute(

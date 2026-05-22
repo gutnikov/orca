@@ -153,27 +153,40 @@ class PhasesPanel(VerticalScroll):
             is_selected = session_id == self._selected_session_id
 
             if is_active:
-                frame = _SPINNER[self._tick % len(_SPINNER)]
+                is_waiting = bool(session.get("waiting", False))
                 prefix = "→ " if is_selected else "  "
                 lines.append(prefix)
-                lines.append(f"{frame} ", style="bold yellow")
-                lines.append(state_name, style="bold yellow")
 
-                progress = session.get("progress")
-                status_text = session.get("status")
-                progress_updated_at = session.get("progress_updated_at")
-                stale = _is_progress_stale(progress_updated_at)
+                if is_waiting:
+                    # gh#15 — distinguish HITL-paused sessions from active ones.
+                    # No spinner, no progress bar (inactivity_timeout is paused),
+                    # blue chosen for "waiting on you" vs yellow "in flight".
+                    lines.append("⏸ ", style="bold blue")
+                    lines.append(state_name, style="bold blue")
+                    lines.append("  WAITING", style="bold blue")
+                    elapsed = _elapsed_str(str(session.get("started_at", "")))
+                    if elapsed:
+                        lines.append(f"\n  paused for {elapsed}", style="dim blue")
+                else:
+                    frame = _SPINNER[self._tick % len(_SPINNER)]
+                    lines.append(f"{frame} ", style="bold yellow")
+                    lines.append(state_name, style="bold yellow")
 
-                if status_text and not stale:
-                    lines.append(f"\n  {status_text}", style="dim")
+                    progress = session.get("progress")
+                    status_text = session.get("status")
+                    progress_updated_at = session.get("progress_updated_at")
+                    stale = _is_progress_stale(progress_updated_at)
 
-                if progress is not None and progress > 0 and not stale:
-                    lines.append("\n")
-                    _render_progress_bar(lines, progress, "yellow")
+                    if status_text and not stale:
+                        lines.append(f"\n  {status_text}", style="dim")
 
-                elapsed = _elapsed_str(str(session.get("started_at", "")))
-                if elapsed:
-                    lines.append(f"\n  {elapsed}", style="dim")
+                    if progress is not None and progress > 0 and not stale:
+                        lines.append("\n")
+                        _render_progress_bar(lines, progress, "yellow")
+
+                    elapsed = _elapsed_str(str(session.get("started_at", "")))
+                    if elapsed:
+                        lines.append(f"\n  {elapsed}", style="dim")
             else:
                 is_failed = session.get("failed", False)
                 is_interrupted = session.get("interrupted", False)

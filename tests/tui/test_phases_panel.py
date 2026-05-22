@@ -188,3 +188,54 @@ class TestProgressRendering:
             await pilot.pause()
             text = _get_static_text(panel)
             assert "━" not in text
+
+    @pytest.mark.asyncio
+    async def test_active_worker_with_waiting_flag_shows_distinct_indicator(self) -> None:
+        """gh#15 — a session with `waiting: True` must render a visibly
+        distinct indicator (no spinner / progress bar) so the user can
+        tell parked-on-HITL from actively-working at a glance."""
+        app = PhasesPanelApp()
+        async with app.run_test() as pilot:
+            panel = app.query_one(PhasesPanel)
+            sessions = [
+                {
+                    **_make_session("s1", state="implementing", completed_at=None),
+                    "waiting": True,
+                    # Even if a progress value lingers from before, it must
+                    # not render — inactivity_timeout is paused during wait.
+                    "progress": 25,
+                    "status": "should not appear",
+                    "progress_updated_at": datetime.now(UTC).isoformat(),
+                },
+            ]
+            panel.show_phases("issue-1", sessions)
+            await pilot.pause()
+            text = _get_static_text(panel)
+            assert "⏸" in text, "expected pause icon for waiting session"
+            assert "WAITING" in text, "expected explicit WAITING label"
+            # The active-state progress bar must be suppressed.
+            assert "25%" not in text
+            assert "━" not in text
+            assert "should not appear" not in text
+
+    @pytest.mark.asyncio
+    async def test_active_worker_without_waiting_flag_still_shows_spinner(self) -> None:
+        """gh#15 regression guard — the waiting branch only kicks in when
+        `waiting: True`; default active sessions keep the spinner path."""
+        app = PhasesPanelApp()
+        async with app.run_test() as pilot:
+            panel = app.query_one(PhasesPanel)
+            sessions = [
+                {
+                    **_make_session("s1", state="implementing", completed_at=None),
+                    "progress": 25,
+                    "status": "still working",
+                    "progress_updated_at": datetime.now(UTC).isoformat(),
+                },
+            ]
+            panel.show_phases("issue-1", sessions)
+            await pilot.pause()
+            text = _get_static_text(panel)
+            assert "⏸" not in text
+            assert "WAITING" not in text
+            assert "25%" in text

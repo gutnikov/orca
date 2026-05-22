@@ -100,6 +100,24 @@ class SessionManifest:
                 return
         logger.warning("update_progress: session %s not found in manifest", session_id)
 
+    def update_waiting(self, session_id: str, *, waiting: bool) -> None:
+        """Toggle the `waiting` flag for a session.
+
+        Set when the worker emits `outcome: waiting` and clear when it
+        resumes. The TUI's WORKERS panel reads this to distinguish a
+        HITL-paused session from an actively-working one (gh#15).
+        """
+        entries = self.read()
+        for entry in entries:
+            if entry["session_id"] == session_id:
+                if waiting:
+                    entry["waiting"] = True
+                else:
+                    entry.pop("waiting", None)
+                self._write(entries)
+                return
+        logger.warning("update_waiting: session %s not found in manifest", session_id)
+
     def mark_orphans_completed(self, completed_at: str, *, interrupted: bool = False, failed: bool = False) -> int:
         """Mark all incomplete sessions as completed (orphans from a crashed or stopped run)."""
         entries = self.read()

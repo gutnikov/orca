@@ -153,3 +153,36 @@ class TestUpdateProgress:
 
         entries = manifest.read()
         assert "progress" not in entries[0]
+
+    def test_update_waiting_sets_and_clears_flag(self, tmp_path: Path) -> None:
+        """update_waiting toggles a per-session `waiting` flag the TUI uses
+        to distinguish HITL-paused sessions from actively-working ones
+        (gh#15). True writes the flag; False removes it."""
+        manifest = SessionManifest(tmp_path / "runs" / "main")
+        manifest.append(
+            issue_id="issue-1",
+            state="implementing",
+            session_id="sess-aaa",
+            worktree_path="/tmp/wt/main",
+            started_at="2026-03-22T10:00:00Z",
+        )
+
+        manifest.update_waiting("sess-aaa", waiting=True)
+        assert manifest.read()[0]["waiting"] is True
+
+        manifest.update_waiting("sess-aaa", waiting=False)
+        assert "waiting" not in manifest.read()[0]
+
+    def test_update_waiting_unknown_session_is_noop(self, tmp_path: Path) -> None:
+        manifest = SessionManifest(tmp_path / "runs" / "main")
+        manifest.append(
+            issue_id="issue-1",
+            state="implementing",
+            session_id="sess-aaa",
+            worktree_path="/tmp/wt/main",
+            started_at="2026-03-22T10:00:00Z",
+        )
+
+        manifest.update_waiting("sess-zzz", waiting=True)
+
+        assert "waiting" not in manifest.read()[0]
