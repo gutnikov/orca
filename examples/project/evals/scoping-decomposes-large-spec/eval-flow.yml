@@ -89,6 +89,121 @@ states:
           items: "string"
           description: "Per-criterion grading records"
     on:
-      passed: done
-      failed: done
-      inconclusive: done
+      passed: review
+      failed: review
+      inconclusive: review
+
+  review:
+    worker:
+      kind: claude-code
+      prompt:
+        text: |
+          # Review
+
+          You are assembling a human-review form for an eval that just finished.
+
+          1. Read {{ run.run_dir }}/report.md — it has a Markdown table
+             `| ID | Status | Reason |` with one row per criterion.
+          2. From the current working directory (already inside the eval
+             worktree), run `git diff --no-color HEAD~3..HEAD --stat` to learn
+             which files the worker changed, then `git diff` per file for the
+             unified hunks. If there is no diff, the worktree is unchanged and
+             the changeset block's `files` list should be empty.
+          3. Emit `outcome: waiting` with the form below. Fill in:
+             - `criteria`: one entry per row of the report table, mapping the
+               row's status text to `"passed"` / `"failed"` / `"skipped"`
+               exactly. `summary` is the row's reason text (first sentence is
+               fine).
+             - `files`: one entry per changed file with `path`, `status`
+               (`added` / `modified` / `deleted` / `renamed`), `language`
+               (best-effort from extension), `additions`, `deletions`, and
+               `diff` (the unified diff hunks for that file).
+             - Leave the action checkbox fields with `required: false`.
+          4. When the user submits, you will receive a JSON envelope on stdin.
+             Parse it and write {{ result_path }} with:
+             - `outcome: reviewed` if the user submitted with at least one
+               action checked OR with at least one comment;
+             - `outcome: skipped` if the user submitted with no actions and no
+               comments (e.g. clicked Skip).
+             - `actions`: a JSON-stringified dict mirroring the submitted
+               checkbox values (`update_prompts`, `update_assertions`,
+               `update_input`, `commit_after`), preserving booleans.
+             - `comments`: the changeset block's line-anchored comments
+               as a list of `"<path>:<line> <body>"` strings (may be empty).
+
+          Form schema (copy this exact shape into your waiting payload, with
+          the placeholders filled):
+
+          ```json
+          {
+            "title": "Review eval results",
+            "description": "Choose which fixes (if any) to apply.",
+            "submit_label": "Apply selected",
+            "cancel_label": "Skip",
+            "steps": [
+              {
+                "blocks": [
+                  {
+                    "kind": "markdown",
+                    "content": "<one-line summary of report.md overall outcome>"
+                  },
+                  {"kind": "assertions", "criteria": []},
+                  {"kind": "changeset", "name": "review", "files": []},
+                  {
+                    "kind": "field",
+                    "name": "update_prompts",
+                    "type": "checkbox",
+                    "label": "Update production prompts",
+                    "required": false
+                  },
+                  {
+                    "kind": "field",
+                    "name": "update_assertions",
+                    "type": "checkbox",
+                    "label": "Update assertions.md",
+                    "required": false
+                  },
+                  {
+                    "kind": "field",
+                    "name": "update_input",
+                    "type": "checkbox",
+                    "label": "Update input.md",
+                    "required": false
+                  },
+                  {
+                    "kind": "field",
+                    "name": "commit_after",
+                    "type": "checkbox",
+                    "label": "Commit accepted changes",
+                    "required": false
+                  }
+                ]
+              }
+            ]
+          }
+          ```
+
+          Required result shape:
+
+          ```json
+          {{ result_example | tojson(indent=2) }}
+          ```
+      inactivity_timeout: 3600
+      result_format:
+        outcome:
+          type: enum
+          values: [reviewed, skipped]
+          description: "Did the user act on the form?"
+          values_description:
+            reviewed: "User submitted with at least one action or comment"
+            skipped: "User submitted with no actions or cancelled the form"
+        actions:
+          type: string
+          description: "JSON-stringified dict of the submitted checkbox values"
+        comments:
+          type: list
+          items: "string"
+          description: "Line-anchored comments from the changeset block, formatted '<path>:<line> <body>'"
+    on:
+      reviewed: done
+      skipped: done
