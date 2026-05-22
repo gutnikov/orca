@@ -108,24 +108,18 @@ def test_empty_optional_field_skipped() -> None:
     assert errs == {}
 
 
-def test_assertions_and_changeset_blocks_pass_through() -> None:
-    """Eval review forms use `assertions` and `changeset` display blocks
-    alongside regular fields. The validator must treat them as no-op
-    display blocks (only `field` blocks contribute to value validation).
+def test_changeset_display_block_passes_through() -> None:
+    """The validator treats display blocks as no-op blocks.
+
+    Only `field` blocks contribute to scalar value validation; value-carrying
+    display blocks such as `changeset` are accepted by name.
     """
     schema: dict[str, Any] = {
-        "title": "Review eval results",
+        "title": "Review proposed changes",
         "steps": [
             {
                 "blocks": [
                     {"kind": "markdown", "content": "Review the run"},
-                    {
-                        "kind": "assertions",
-                        "criteria": [
-                            {"name": "c1", "status": "passed", "summary": "ok"},
-                            {"name": "c2", "status": "failed", "summary": "missing detail"},
-                        ],
-                    },
                     {
                         "kind": "changeset",
                         "name": "review",

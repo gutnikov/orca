@@ -11,9 +11,7 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as ReviewDemoRouteImport } from './routes/review-demo'
 import { Route as InboxRouteImport } from './routes/inbox'
-import { Route as ExplainDemoRouteImport } from './routes/explain-demo'
 import { Route as IndexRouteImport } from './routes/index'
-import { Route as ExplainFlowRouteImport } from './routes/explain.$flow'
 import { Route as FormsRunIdIssueIdRouteImport } from './routes/forms.$runId.$issueId'
 
 const ReviewDemoRoute = ReviewDemoRouteImport.update({
@@ -26,19 +24,9 @@ const InboxRoute = InboxRouteImport.update({
   path: '/inbox',
   getParentRoute: () => rootRouteImport,
 } as any)
-const ExplainDemoRoute = ExplainDemoRouteImport.update({
-  id: '/explain-demo',
-  path: '/explain-demo',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const ExplainFlowRoute = ExplainFlowRouteImport.update({
-  id: '/explain/$flow',
-  path: '/explain/$flow',
   getParentRoute: () => rootRouteImport,
 } as any)
 const FormsRunIdIssueIdRoute = FormsRunIdIssueIdRouteImport.update({
@@ -49,62 +37,35 @@ const FormsRunIdIssueIdRoute = FormsRunIdIssueIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
-  '/explain-demo': typeof ExplainDemoRoute
   '/inbox': typeof InboxRoute
   '/review-demo': typeof ReviewDemoRoute
-  '/explain/$flow': typeof ExplainFlowRoute
   '/forms/$runId/$issueId': typeof FormsRunIdIssueIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
-  '/explain-demo': typeof ExplainDemoRoute
   '/inbox': typeof InboxRoute
   '/review-demo': typeof ReviewDemoRoute
-  '/explain/$flow': typeof ExplainFlowRoute
   '/forms/$runId/$issueId': typeof FormsRunIdIssueIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
-  '/explain-demo': typeof ExplainDemoRoute
   '/inbox': typeof InboxRoute
   '/review-demo': typeof ReviewDemoRoute
-  '/explain/$flow': typeof ExplainFlowRoute
   '/forms/$runId/$issueId': typeof FormsRunIdIssueIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths:
-    | '/'
-    | '/explain-demo'
-    | '/inbox'
-    | '/review-demo'
-    | '/explain/$flow'
-    | '/forms/$runId/$issueId'
+  fullPaths: '/' | '/inbox' | '/review-demo' | '/forms/$runId/$issueId'
   fileRoutesByTo: FileRoutesByTo
-  to:
-    | '/'
-    | '/explain-demo'
-    | '/inbox'
-    | '/review-demo'
-    | '/explain/$flow'
-    | '/forms/$runId/$issueId'
-  id:
-    | '__root__'
-    | '/'
-    | '/explain-demo'
-    | '/inbox'
-    | '/review-demo'
-    | '/explain/$flow'
-    | '/forms/$runId/$issueId'
+  to: '/' | '/inbox' | '/review-demo' | '/forms/$runId/$issueId'
+  id: '__root__' | '/' | '/inbox' | '/review-demo' | '/forms/$runId/$issueId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
-  ExplainDemoRoute: typeof ExplainDemoRoute
   InboxRoute: typeof InboxRoute
   ReviewDemoRoute: typeof ReviewDemoRoute
-  ExplainFlowRoute: typeof ExplainFlowRoute
   FormsRunIdIssueIdRoute: typeof FormsRunIdIssueIdRoute
 }
 
@@ -124,25 +85,11 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof InboxRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/explain-demo': {
-      id: '/explain-demo'
-      path: '/explain-demo'
-      fullPath: '/explain-demo'
-      preLoaderRoute: typeof ExplainDemoRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/': {
       id: '/'
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/explain/$flow': {
-      id: '/explain/$flow'
-      path: '/explain/$flow'
-      fullPath: '/explain/$flow'
-      preLoaderRoute: typeof ExplainFlowRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/forms/$runId/$issueId': {
@@ -157,10 +104,8 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
-  ExplainDemoRoute: ExplainDemoRoute,
   InboxRoute: InboxRoute,
   ReviewDemoRoute: ReviewDemoRoute,
-  ExplainFlowRoute: ExplainFlowRoute,
   FormsRunIdIssueIdRoute: FormsRunIdIssueIdRoute,
 }
 export const routeTree = rootRouteImport

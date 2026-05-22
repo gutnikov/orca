@@ -36,7 +36,22 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orca", description="Orca workflow orchestrator")
     parser.add_argument("-v", "--version", action="store_true", help="Print version and exit")
     parser.add_argument("--root", type=Path, default=None, help="Repository root (default: auto-detect via git)")
-    sub = parser.add_subparsers(dest="subcommand")
+    visible_subcommands = (
+        "daemon",
+        "run",
+        "tui",
+        "mcp",
+        "stop",
+        "resume",
+        "drop",
+        "retry",
+        "init",
+        "clean",
+        "runs",
+        "logs",
+        "unblock",
+    )
+    sub = parser.add_subparsers(dest="subcommand", metavar="{" + ",".join(visible_subcommands) + "}")
 
     # orca daemon start|stop|status
     daemon_parser = sub.add_parser("daemon", help="Manage the orca daemon")
@@ -106,10 +121,11 @@ def build_parser() -> argparse.ArgumentParser:
     unblock_parser.add_argument("issue_id", type=str)
     unblock_parser.add_argument("-m", "--message", type=str, required=True, help="Message to send to the worker")
 
-    # orca eval [<name> | add <name>] [--all]
-    eval_parser = sub.add_parser("eval", help="Run orca evals under .orca/evals/")
-    eval_parser.add_argument("args", nargs="*", help="<name> | add <name>")
-    eval_parser.add_argument("--all", action="store_true", help="Run every eval serially")
+    # Kept as a hidden compatibility stub so old automation fails clearly.
+    eval_parser = sub.add_parser("eval", help=argparse.SUPPRESS)
+    eval_parser.add_argument("args", nargs="*")
+    eval_parser.add_argument("--all", action="store_true")
+    sub._choices_actions = [action for action in sub._choices_actions if action.dest != "eval"]
 
     return parser
 
@@ -193,9 +209,8 @@ def main() -> None:
         unblock_command(args.run_id, args.issue_id, args.message, root=args.root)
 
     elif args.subcommand == "eval":
-        from orca.cli.eval_cmd import eval_command
-
-        eval_command(args, root=args.root)
+        print("Error: `orca eval` has been removed.", file=sys.stderr)
+        sys.exit(2)
 
     else:
         parser.print_help()

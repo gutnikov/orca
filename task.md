@@ -1,6 +1,4 @@
-Pick an eval to run
+Review the demo workflow
 
-Demo invocation of the `run-evals` workflow. This single-state flow
-scans `.orca/evals/`, presents the directories via the web form UI, and
-records which one the user picked. The flow does not yet run the chosen
-eval — selection is the entire scope of step 1.
+Demo task for exercising Orca's workflow and form UI surfaces without relying
+on repository-specific runtime state.

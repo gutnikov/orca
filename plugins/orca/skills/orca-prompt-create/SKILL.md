@@ -1,13 +1,13 @@
 ---
 name: orca-prompt-create
-description: Use when the user wants to create or update a state prompt under `.orca/prompts/{state}.md`. Triggers on "write a prompt for the planning state", "create the implementing prompt", "add a constraint to the review prompt", "rephrase step 2 in the scoping prompt", or whenever a user wants to author or modify a single state's worker instructions. Handles prompt creation and edits as a pure procedure — no test execution, no iteration on grading reports.
+description: Use when the user wants to create or update a state prompt under `.orca/prompts/{state}.md`. Triggers on "write a prompt for the planning state", "create the implementing prompt", "add a constraint to the review prompt", "rephrase step 2 in the scoping prompt", or whenever a user wants to author or modify a single state's worker instructions. Handles prompt creation and edits as a pure procedure — no test execution, no workflow runs.
 ---
 
 # Build or update a state prompt
 
 You are a prompt-authoring agent for orca. Each active state in `.orca/{flow}.yml` has exactly one prompt file under `.orca/prompts/{state}.md`. Each state's `result_format` lives in `.orca/{flow}.yml`. The prompt-creator receives this schema as input and emits a prompt that makes the worker produce a result matching it.
 
-You are a **pure procedure**: given a state specification (state name, one-sentence job, `result_format`, inputs, constraints, verification), produce a prompt. You do not run tests, do not consult grading reports, and do not iterate against test outcomes. Those concerns belong to other agents and other playbooks. Stay in your lane: receive a spec, emit a prompt.
+You are a **pure procedure**: given a state specification (state name, one-sentence job, `result_format`, inputs, constraints, verification), produce a prompt. You do not run tests, modify workflow YAML, or iterate against run outcomes. Stay in your lane: receive a spec, emit a prompt.
 
 ## Mode detection
 

@@ -5,7 +5,7 @@ description: Use when the user wants to create, update, audit, or review an orca
 
 # Build, update, and audit Orca workflows
 
-You are a workflow builder agent. Produce complete packages of `.orca/{flow}.yml` config + all Jinja2 prompt templates as a unit. Prompts can live in separate files (`.orca/prompts/*.md` referenced by `worker.prompt`) or inline in the YAML via `worker.prompt: { text: "..." }` for very short single-state flows — see `orca-prompt-create.md` for when to pick which. Adaptive to user expertise — if they provide a detailed spec, skip basics; if they say "I want a workflow that does code review", start from scratch.
+You are a workflow builder agent. Produce complete packages of `.orca/{flow}.yml` config + all Jinja2 prompt templates as a unit. Prompts can live in separate files (`.orca/prompts/*.md` referenced by `worker.prompt`) or inline in the YAML via `worker.prompt: { text: "..." }` for very short single-state flows. Adaptive to user expertise — if they provide a detailed spec, skip basics; if they say "I want a workflow that does code review", start from scratch.
 
 ## Mode detection
 

@@ -11,12 +11,6 @@ One-line definitions for terms that recur across the playbooks. Use this as a ti
 - **Passive state.** Has no `worker:` and no `on:`. Issue parks here until a manual `AdvanceEvent` from the TUI/API surface. Used for human gates.
 - **Issue.** A single unit of work flowing through the state machine. Has fields, a current state, an event log, and (optionally) children. The starting issue of a run is the *root issue*.
 
-## Eval shape
-
-- **Slice.** The body of an orca eval: one or more states copied from a production workflow YAML into `.orca/evals/<name>/eval-flow.yml`. The slice's `result_format`, production prompt targets, and internal transitions match production; prompt paths are made relative to the eval workflow, and outgoing transitions to states outside the slice are rewritten to `assert`. A slice may be single-state (unit), multi-state (subgraph), or the full workflow (end-to-end).
-- **Assert (state).** The tail state of every orca eval. Reads `assertions.md`, inspects the worktree plus run state/log evidence, grades each criterion, writes `report.md`, and emits a structured outcome (`passed` / `failed` / `inconclusive`). All three outcomes terminate the eval by routing to `done`.
-- **State branch.** An orphan git branch under the `orca-eval-state/` namespace whose tip is the worktree the slice's first state will see. Created by `orca eval add <name>` and edited via the persistent worktree at `.orca-state/eval-states/<name>/`. Referenced from an eval's `input.md` frontmatter via the `state_ref:` line. Carries the deterministic fixture bytes; nothing produced at run time should depend on what the LLM did the previous time.
-
 ## Outcomes vs transitions vs targets
 
 These three terms are routinely conflated. They are distinct:
@@ -99,7 +93,5 @@ For programmatic polling: `runs[*].waiting_issues` in the `/api/runs` payload ag
 
 - `.orca/{flow}.yml` — workflow config.
 - `.orca/prompts/{state}.md` — common prompt-template path for active states. The source of truth is each state's `worker.prompt`; typed workflows may use more specific filenames when state names repeat across types.
-- `.orca/evals/<name>/` — orca evals (`eval-flow.yml`, `input.md`, `assertions.md`).
-- `orca-eval-state/<name>` — orphan git branches that hold the worktree state for each eval (created by `orca eval add`). Do not edit them from the main checkout; author them from the persistent worktree under `.orca-state/eval-states/<name>/`.
-- `.orca-state/` — runtime data, worker logs, run/eval worktrees. Gitignored.
+- `.orca-state/` — runtime data, worker logs, and run worktrees. Gitignored.
 - Playbooks (the doc you're reading) ship inside the installed orca package and are served on demand via the `orca_get_playbook` / `orca_list_playbooks` MCP tools — there is no per-project `.orca/playbooks/` directory.

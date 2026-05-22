@@ -46,21 +46,11 @@ export type ReviewComment = {
   body: string
 }
 
-export type AssertionStatus = "passed" | "failed" | "skipped"
-
-export type Criterion = {
-  name: string
-  status: AssertionStatus
-  summary?: string
-  detail?: string
-}
-
 export type FormBlock =
   | { kind: "markdown"; content: string }
   | { kind: "code"; language?: string; content: string }
   | { kind: "diff"; filename?: string; content: string }
   | { kind: "changeset"; name: string; files: ChangesetFile[]; require_comment?: boolean }
-  | { kind: "assertions"; criteria: Criterion[] }
   | FieldBlock
 
 export type FormStep = {

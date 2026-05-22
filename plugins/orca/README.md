@@ -2,7 +2,7 @@
 
 Codex plugin package for Orca. It provides:
 
-- `orca-install`, `orca-workflow-create`, `orca-workflow-run`, `orca-prompt-create`, and `orca-eval-create` skills
+- `orca-install`, `orca-workflow-create`, `orca-workflow-run`, and `orca-prompt-create` skills
 - Orca MCP server registration via `.mcp.json`
 - A session hook that nudges setup when Orca is missing and starts the daemon in Orca-enabled projects
 

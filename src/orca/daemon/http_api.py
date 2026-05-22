@@ -14,7 +14,6 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
-from orca.daemon.explanations import ExplanationCorruptedError, read_explanation
 from orca.daemon.form_validator import validate_submission
 from orca.daemon.lifecycle import read_browser_port
 from orca.daemon.manager import RunManager, RunStatus
@@ -68,7 +67,6 @@ async def _start_run(request: Request) -> JSONResponse:
             run_id=body.get("run_id"),
             max_hops=body.get("max_hops"),
             max_retries=body.get("max_retries"),
-            state_ref=body.get("state_ref"),
             insights=bool(body.get("insights", False)),
         )
     except Exception as exc:
@@ -313,33 +311,6 @@ async def _list_pending_forms(request: Request) -> JSONResponse:
     return JSONResponse({"pending": manager.list_pending_forms()})
 
 
-async def _get_explanation(request: Request) -> JSONResponse:
-    manager: RunManager = request.app.state.manager
-    flow: str = request.path_params["flow"]
-    lang: str = request.query_params.get("lang", "en")
-
-    try:
-        payload = read_explanation(manager.repo_root, flow, lang)
-    except ExplanationCorruptedError as exc:
-        return JSONResponse(
-            {"error": "corrupted", "detail": str(exc)},
-            status_code=500,
-        )
-
-    if payload is None:
-        return JSONResponse(
-            {
-                "error": "not_found",
-                "hint": (
-                    f"No explanation cached for flow '{flow}' in language '{lang}'. "
-                    "Generate it by running the orca-workflow-explain playbook."
-                ),
-            },
-            status_code=404,
-        )
-    return JSONResponse(payload)
-
-
 async def _hot_session(request: Request) -> JSONResponse:
     manager: RunManager = request.app.state.manager
     run_id: str = request.path_params["run_id"]
@@ -373,7 +344,6 @@ def _form_routes() -> list[Route]:
         Route("/api/runs/{run_id:path}/forms/{issue_id}", _get_form, methods=["GET"]),
         Route("/api/runs/{run_id:path}/forms/{issue_id}/submit", _submit_form, methods=["POST"]),
         Route("/api/forms/pending", _list_pending_forms, methods=["GET"]),
-        Route("/api/explanations/{flow}", _get_explanation, methods=["GET"]),
     ]
 
 

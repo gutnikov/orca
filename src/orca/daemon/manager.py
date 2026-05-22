@@ -5,7 +5,6 @@ import contextlib
 import enum
 import json as _json
 import logging
-import shutil
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -33,68 +32,12 @@ from orca.orchestrator.worktree import WorktreeManager
 logger = logging.getLogger(__name__)
 
 
-def _derive_eval_name(config_path: Path) -> str | None:
-    """If config_path matches `.orca/evals/<name>/eval-flow.yml`, return <name>.
-
-    Otherwise return None. Matching is structural: at least three trailing
-    path parts where the third-to-last is "evals" and the last is
-    "eval-flow.yml".
-    """
-    parts = config_path.parts
-    if len(parts) < 3:
-        return None
-    if parts[-1] != "eval-flow.yml":
-        return None
-    if parts[-3] != "evals":
-        return None
-    return parts[-2]
-
-
 def _generate_id() -> str:
     return str(uuid4())
 
 
 def _now() -> str:
     return datetime.now(UTC).isoformat()
-
-
-def _git_ref_exists(repo_root: Path, ref: str) -> bool:
-    """Return True if `ref` resolves in the repo at `repo_root`."""
-    import subprocess
-
-    result = subprocess.run(
-        ["git", "-C", str(repo_root), "rev-parse", "--verify", ref],
-        capture_output=True,
-    )
-    return result.returncode == 0
-
-
-async def _reset_eval_worktree(repo_root: Path, branch: str, worktree_path: Path) -> None:
-    """Tear down a prior eval worktree + its short-lived branch.
-
-    Idempotent: missing worktree / branch is not an error.
-    """
-    import subprocess
-
-    subprocess.run(
-        ["git", "-C", str(repo_root), "worktree", "remove", "--force", str(worktree_path)],
-        capture_output=True,
-    )
-    subprocess.run(
-        ["git", "-C", str(repo_root), "branch", "-D", branch],
-        capture_output=True,
-    )
-
-
-def _reset_eval_run_dir(run_dir: Path) -> None:
-    """Clear persisted eval run state so `orca eval <name>` starts fresh."""
-    if not run_dir.exists():
-        return
-    for child in run_dir.iterdir():
-        if child.is_dir() and not child.is_symlink():
-            shutil.rmtree(child)
-        else:
-            child.unlink(missing_ok=True)
 
 
 class RunStatus(enum.Enum):
@@ -190,7 +133,6 @@ class RunManager:
         run_id: str | None = None,
         max_hops: int | None = None,
         max_retries: int | None = None,
-        state_ref: str | None = None,
         *,
         insights: bool = False,
     ) -> str:
@@ -204,25 +146,6 @@ class RunManager:
         config = parse_config(config_path.read_text())
         flow_root = config_path.parent
 
-        # If state_ref is set, validate it resolves before doing any setup.
-        if state_ref is not None and not _git_ref_exists(self.repo_root, state_ref):
-            msg = (
-                f"state ref '{state_ref}' not found — create it "
-                f"(e.g. `orca eval add <name>`) or fix the marker in input.md"
-            )
-            raise ValueError(msg)
-
-        # state_ref is only meaningful for eval runs (`.orca/evals/<name>/eval-flow.yml`).
-        # Reject early so a state_ref accidentally passed with a non-eval config can't
-        # silently set up the run with a bogus run-branch.
-        eval_name = _derive_eval_name(config_path)
-        if state_ref is not None and eval_name is None:
-            msg = (
-                "state_ref is only supported for eval runs — "
-                f"config_path '{config_path}' is not an eval-flow.yml under .orca/evals/<name>/"
-            )
-            raise ValueError(msg)
-
         # Derive effective_workflow name (short name for run directory)
         if workflow and ("/" in workflow or workflow.endswith(".yml")):
             # External flow — derive name from filename
@@ -234,15 +157,8 @@ class RunManager:
         if max_retries is not None:
             object.__setattr__(config, "max_worker_retries", max_retries)
 
-        # Resolve branch. For eval runs we use an eval-specific ephemeral branch
-        # so the run worktree branched from state_ref doesn't collide with the
-        # user's current checkout (the iteration branch) and so the cleanup in
-        # _reset_eval_worktree can't accidentally `git branch -D` user code.
         if branch is None:
-            if state_ref is not None and eval_name is not None:
-                branch = f"orca-eval-run-{eval_name}"
-            else:
-                branch = resolve_branch()
+            branch = resolve_branch()
 
         run_id = run_id or self.make_run_id(branch, effective_workflow)
 
@@ -252,11 +168,7 @@ class RunManager:
             msg = f"Run '{run_id}' is already running"
             raise ValueError(msg)
 
-        # Set up run directory and persistence. Eval invocations are fresh test
-        # attempts; resuming an interrupted eval is handled through resume_run().
         run_dir = self.repo_root / ".orca-state" / "runs" / branch / effective_workflow
-        if state_ref is not None:
-            _reset_eval_run_dir(run_dir)
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "config_source.json").write_text(_json.dumps({"config_path": str(config_path.resolve())}))
         persistence = Persistence(self.repo_root, branch, effective_workflow)
@@ -317,18 +229,6 @@ class RunManager:
         # Find root issue ID
         root_issue_id = _find_root_issue(state)
 
-        if state_ref is not None:
-            run_worktree = worktree_mgr.resolve(branch)
-            # Reset any prior run's worktree + short-lived branch.
-            await _reset_eval_worktree(self.repo_root, branch, run_worktree)
-            # Create the run worktree branched off the state ref's tip.
-            # Orchestrator._ensure_worktree will find this path and reuse it.
-            await worktree_mgr.create(
-                issue_id=root_issue_id,
-                branch_name=branch,
-                parent_branch=state_ref,
-            )
-
         # Set up workers and orchestrator
         workers = {name: CliAgentWorker(self.repo_root, kc) for name, kc in KIND_REGISTRY.items()}
 
@@ -348,7 +248,6 @@ class RunManager:
             flow_root=flow_root,
             session_sync=session_sync,
             insights_enabled=insights,
-            eval_name=_derive_eval_name(config_path),
         )
 
         # Create RunInfo and launch
@@ -583,7 +482,6 @@ class RunManager:
             flow_root=flow_root,
             session_sync=session_sync,
             insights_enabled=run_info.insights,
-            eval_name=_derive_eval_name(config_path),
         )
         run_info.orchestrator = orchestrator
         run_info.issue_count = len(state.issues)

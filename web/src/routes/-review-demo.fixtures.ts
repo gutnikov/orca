@@ -61,34 +61,6 @@ export const demoForm: FormResponse = {
               "**Heads up:** this is a demo of the new changeset block. Hover any line to add a comment.",
           },
           {
-            kind: "assertions",
-            criteria: [
-              {
-                name: "uses_oauth_provider",
-                status: "passed",
-                summary: "Calls the OAuth provider's login URL",
-                detail: "Found `await provider.login()` at `src/lib/greet.ts:5` — passes.",
-              },
-              {
-                name: "no_password_in_logs",
-                status: "passed",
-                summary: "Password is never logged in plaintext",
-              },
-              {
-                name: "returns_session_token",
-                status: "failed",
-                summary: "Session token is missing from the final response",
-                detail:
-                  "Expected `response.session_token` to be a non-empty string. Got `undefined`. The implementation returns the user object but doesn't include the freshly-minted token in the wire format.",
-              },
-              {
-                name: "rate_limited",
-                status: "skipped",
-                summary: "Rate limiter check (not applicable for this run)",
-              },
-            ],
-          },
-          {
             kind: "changeset",
             name: "review",
             require_comment: true,

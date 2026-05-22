@@ -629,27 +629,7 @@ class TestBuildRunContext:
         assert "state" in ctx["formats"]
         assert "sessions" in ctx["formats"]
 
-    def test_eval_name_included_when_provided(self, tmp_path: _Path) -> None:
-        run_dir = tmp_path / "run"
-        run_dir.mkdir()
-        sessions_dir = tmp_path / "sessions"
-        sessions_dir.mkdir()
-
-        state = State(issues={}, worker_queues={})
-
-        ctx = build_run_context(
-            state=state,
-            run_dir=run_dir,
-            sessions_dir=sessions_dir,
-            sessions=[],
-            branch="b",
-            workflow="eval-flow",
-            eval_name="my-eval",
-        )
-
-        assert ctx["eval_name"] == "my-eval"
-
-    def test_eval_name_absent_by_default(self, tmp_path: _Path) -> None:
+    def test_run_context_has_no_removed_eval_key(self, tmp_path: _Path) -> None:
         run_dir = tmp_path / "run"
         run_dir.mkdir()
         sessions_dir = tmp_path / "sessions"

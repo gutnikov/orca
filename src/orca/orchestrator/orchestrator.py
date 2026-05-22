@@ -100,7 +100,6 @@ class Orchestrator:
         hot_sessions: set[str] | None = None,
         session_log_paths: dict[str, str] | None = None,
         insights_state: dict[str, str] | None = None,
-        eval_name: str | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -113,7 +112,6 @@ class Orchestrator:
         self.worktree_mgr = worktree_mgr
         self.repo_root = repo_root
         self.flow_root = flow_root or repo_root
-        self.eval_name = eval_name
         self._session_sync = session_sync
         self._insights_enabled = insights_enabled
         self._insights_state = insights_state
@@ -500,7 +498,6 @@ class Orchestrator:
                 sessions=self._session_sync.manifest.read(),
                 branch=self.root_branch,
                 workflow=run_dir.name,
-                eval_name=self.eval_name,
             )
 
         # Create unblock channel for this worker

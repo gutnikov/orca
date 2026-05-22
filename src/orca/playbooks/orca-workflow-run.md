@@ -97,7 +97,7 @@ If start fails, surface the error to the user — do not retry blindly.
 
 ## Phase C — Supervise (the watch loop)
 
-Discover the workflow's effective `max_worker_retries` and `max_hops`. CLI `orca run` applies defaults of **3** retries and **10** hops unless the user passed `--max-retries` / `--max-hops`; workflow YAML does not currently set these limits. `orca eval` submits 2 / 10. MCP starts may not expose effective limits, so if you cannot read them from the caller context, use 3 / 10 as supervision thresholds and note the assumption. Call them `MAX_RETRIES` and `MAX_HOPS` below.
+Discover the workflow's effective `max_worker_retries` and `max_hops`. CLI `orca run` applies defaults of **3** retries and **10** hops unless the user passed `--max-retries` / `--max-hops`; workflow YAML does not currently set these limits. MCP starts may not expose effective limits, so if you cannot read them from the caller context, use 3 / 10 as supervision thresholds and note the assumption. Call them `MAX_RETRIES` and `MAX_HOPS` below.
 
 ### Loop
 

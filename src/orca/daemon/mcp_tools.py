@@ -209,7 +209,7 @@ def create_mcp_server() -> FastMCP:
         """Fetch an orca playbook by name.
 
         Playbooks are the agent-facing reference material that drive every
-        orca skill (`orca-workflow-create`, `orca-eval-create`, etc.). They
+        orca skill (`orca-workflow-create`, `orca-prompt-create`, etc.). They
         are bundled inside the installed orca package — call this tool
         instead of looking for them in the project's `.orca/playbooks/`
         directory; that directory no longer exists.
