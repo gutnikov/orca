@@ -786,3 +786,97 @@ class TestScanInterruptedRuns:
         assert len(runs) == 1
         assert runs[0].run_id == "feat-x:default"
         assert runs[0].status == RunStatus.INTERRUPTED
+
+
+class TestCollectWaitingIssues:
+    """`_collect_waiting_issues` walks each issue's event_log to find ones
+    currently parked at a `worker_waiting` event (gh#14)."""
+
+    @staticmethod
+    def _make_issue(events: list[tuple[str, dict[str, Any]]], state: str = "doing") -> Any:
+        from orca.engine.types import EventLogEntry, Issue
+
+        return Issue(
+            type="default",
+            fields={},
+            state=state,
+            worker_active=False,
+            decomposed_from=None,
+            depends_on=[],
+            event_log=[
+                EventLogEntry(timestamp=f"2026-05-22T00:00:{i:02d}+00:00", type=t, data=d)
+                for i, (t, d) in enumerate(events)
+            ],
+        )
+
+    @staticmethod
+    def _make_state(issues: dict[str, Any]) -> Any:
+        from orca.engine.types import State
+
+        return State(issues=issues, worker_queues={})
+
+    def test_includes_issue_with_unresolved_worker_waiting(self) -> None:
+        from orca.daemon.manager import _collect_waiting_issues
+
+        issue = self._make_issue([("worker_waiting", {"reason": "needs PR approval"})])
+        state = self._make_state({"issue-1": issue})
+
+        out = _collect_waiting_issues(state)
+
+        assert out == [{"issue_id": "issue-1", "state": "doing", "reason": "needs PR approval"}]
+
+    def test_excludes_issue_already_resumed(self) -> None:
+        from orca.daemon.manager import _collect_waiting_issues
+
+        issue = self._make_issue(
+            [
+                ("worker_waiting", {"reason": "needs PR"}),
+                ("worker_resumed", {"message": "done"}),
+            ]
+        )
+        state = self._make_state({"issue-1": issue})
+
+        out = _collect_waiting_issues(state)
+
+        assert out == []
+
+    def test_uses_most_recent_waiting_when_multiple(self) -> None:
+        from orca.daemon.manager import _collect_waiting_issues
+
+        issue = self._make_issue(
+            [
+                ("worker_waiting", {"reason": "first pause"}),
+                ("worker_resumed", {"message": "ok"}),
+                ("worker_waiting", {"reason": "second pause"}),
+            ]
+        )
+        state = self._make_state({"issue-1": issue})
+
+        out = _collect_waiting_issues(state)
+
+        assert out == [{"issue_id": "issue-1", "state": "doing", "reason": "second pause"}]
+
+    def test_returns_empty_when_no_issues_waiting(self) -> None:
+        from orca.daemon.manager import _collect_waiting_issues
+
+        issue = self._make_issue([("worker_result", {"outcome": "done"})])
+        state = self._make_state({"issue-1": issue})
+
+        assert _collect_waiting_issues(state) == []
+
+    def test_aggregates_across_multiple_issues(self) -> None:
+        from orca.daemon.manager import _collect_waiting_issues
+
+        a = self._make_issue([("worker_waiting", {"reason": "A blocked"})], state="state-a")
+        b = self._make_issue([("worker_result", {"outcome": "done"})], state="state-b")
+        c = self._make_issue([("worker_waiting", {"reason": "C blocked"})], state="state-c")
+        state = self._make_state({"a": a, "b": b, "c": c})
+
+        out = _collect_waiting_issues(state)
+        # Sort to make assertion order-independent.
+        out_sorted = sorted(out, key=lambda d: d["issue_id"])
+
+        assert out_sorted == [
+            {"issue_id": "a", "state": "state-a", "reason": "A blocked"},
+            {"issue_id": "c", "state": "state-c", "reason": "C blocked"},
+        ]

@@ -105,6 +105,31 @@ class RunStatus(enum.Enum):
     INTERRUPTED = "interrupted"
 
 
+def _collect_waiting_issues(state: Any) -> list[dict[str, Any]]:
+    """Return per-issue `worker_waiting` records that have no subsequent
+    `worker_resumed` — i.e. issues currently parked awaiting human input.
+
+    Each record: `{issue_id, state, reason}`. Used by `RunInfo.to_summary`
+    to surface stuck runs in `orca runs` without forcing the user to
+    `tmux capture-pane` for the worker's actual blocker (gh#14).
+    """
+    result: list[dict[str, Any]] = []
+    for issue_id, issue in state.issues.items():
+        for entry in reversed(issue.event_log):
+            if entry.type == "worker_resumed":
+                break  # Most recent waiting was already resumed.
+            if entry.type == "worker_waiting":
+                result.append(
+                    {
+                        "issue_id": issue_id,
+                        "state": issue.state,
+                        "reason": entry.data.get("reason", ""),
+                    }
+                )
+                break
+    return result
+
+
 @dataclass
 class RunInfo:
     run_id: str
@@ -121,8 +146,10 @@ class RunInfo:
     def to_summary(self) -> dict[str, Any]:
         """JSON-serializable summary."""
         terminal_count = 0
+        waiting_issues: list[dict[str, Any]] = []
         if self.orchestrator is not None:
             terminal_count = sum(1 for issue in self.orchestrator.state.issues.values() if issue.state == "done")
+            waiting_issues = _collect_waiting_issues(self.orchestrator.state)
         # Update issue_count from live state if available
         issue_count = self.issue_count
         if self.orchestrator is not None:
@@ -135,6 +162,7 @@ class RunInfo:
             "issue_count": issue_count,
             "terminal_count": terminal_count,
             "created_at": self.created_at,
+            "waiting_issues": waiting_issues,
         }
 
 

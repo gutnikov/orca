@@ -42,6 +42,19 @@ def runs_command(root: Path | None = None) -> None:
         print("-" * len(header))
         for r in runs:
             print(f"{r['run_id']:<40} {r['status']:<14} {r['issue_count']:<10} {r['created_at']}")
+            # Surface waiting issues so stuck runs are diagnosable from the
+            # listing alone, without having to drill into state.json. (gh#14)
+            for w in r.get("waiting_issues", []) or []:
+                issue_short = str(w.get("issue_id", ""))[:12]
+                state = w.get("state", "")
+                reason = (w.get("reason", "") or "").strip().replace("\n", " ")
+                # Truncate so the line stays under terminal width.
+                if len(reason) > 80:
+                    reason = reason[:77] + "..."
+                if reason:
+                    print(f"  ⏸  {issue_short} [{state}]: {reason}")
+                else:
+                    print(f"  ⏸  {issue_short} [{state}]: (form-based — open in /forms/<run>/<issue>)")
 
     asyncio.run(_list())
 

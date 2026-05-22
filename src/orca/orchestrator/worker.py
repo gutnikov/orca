@@ -236,14 +236,56 @@ class CliAgentWorker:
                         # Check session is still alive before entering waiting state
                         if not pty_session.alive:
                             return WorkerFailure(error="session died while reporting waiting")
+                        reason = candidate.get("reason", "")
+                        form_schema = candidate.get("form")
+
+                        # Validate: reason must be non-empty unless a `form` is
+                        # present. An empty reason with no form leaves the run
+                        # un-diagnosable from state.json / `orca runs` — the
+                        # waiting issue records `reason: ""` and the only place
+                        # the worker's actual blocker is described is the tmux
+                        # pane (gh#14). Nudge the worker to rewrite with a
+                        # non-empty reason.
+                        if (not isinstance(reason, str) or not reason.strip()) and form_schema is None:
+                            result_path.unlink(missing_ok=True)
+                            logger.warning(
+                                "Worker reported outcome:waiting with empty `reason` and no `form` for issue %s",
+                                effect.issue_id,
+                                extra={
+                                    "event": "waiting_reason_empty",
+                                    "issue_id": effect.issue_id,
+                                },
+                            )
+                            if not correction_sent and pty_session.alive:
+                                correction_msg = (
+                                    f"URGENT: Your result file at {result_path} declared "
+                                    f"`outcome: waiting` but the `reason` field was empty "
+                                    f"(and no `form` was provided). Rewrite the file with a "
+                                    f"`reason` of at least one sentence describing what is "
+                                    f"blocking. Workers that pause without a reason leave the "
+                                    f"run un-diagnosable from state.json or `orca runs`."
+                                )
+                                if pty_session.send_keys(correction_msg):
+                                    correction_sent = True
+                                    logger.info(
+                                        "Sent empty-reason correction to worker for issue %s",
+                                        effect.issue_id,
+                                        extra={
+                                            "event": "correction_sent",
+                                            "issue_id": effect.issue_id,
+                                            "kind": "empty_waiting_reason",
+                                        },
+                                    )
+                            # Keep polling — worker may rewrite, or we'll
+                            # hit the inactivity timeout.
+                            continue
+
                         result_path.unlink(missing_ok=True)
                         logger.info(
                             "Worker waiting for issue %s — pausing timer",
                             effect.issue_id,
                             extra={"event": "worker_waiting", "issue_id": effect.issue_id},
                         )
-                        reason = candidate.get("reason", "")
-                        form_schema = candidate.get("form")
                         if on_blocked is not None:
                             on_blocked(reason, form_schema)
 
