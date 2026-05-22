@@ -106,3 +106,39 @@ def test_empty_optional_field_skipped() -> None:
     """Empty string in an optional field is not a type error."""
     errs = validate_submission(SCHEMA, {"name": "x", "email": "", "accept": True})
     assert errs == {}
+
+
+def test_assertions_and_changeset_blocks_pass_through() -> None:
+    """Eval review forms use `assertions` and `changeset` display blocks
+    alongside regular fields. The validator must treat them as no-op
+    display blocks (only `field` blocks contribute to value validation).
+    """
+    schema: dict[str, Any] = {
+        "title": "Review eval results",
+        "steps": [
+            {
+                "blocks": [
+                    {"kind": "markdown", "content": "Review the run"},
+                    {
+                        "kind": "assertions",
+                        "criteria": [
+                            {"name": "c1", "status": "passed", "summary": "ok"},
+                            {"name": "c2", "status": "failed", "summary": "missing detail"},
+                        ],
+                    },
+                    {
+                        "kind": "changeset",
+                        "name": "review",
+                        "files": [
+                            {"path": "src/foo.ts", "status": "added", "additions": 5, "deletions": 0, "diff": "+ x"},
+                        ],
+                    },
+                    {"kind": "field", "name": "commit_after", "type": "checkbox", "label": "Commit"},
+                ]
+            }
+        ],
+    }
+    assert validate_submission(schema, {"commit_after": True}) == {}
+    assert validate_submission(schema, {"commit_after": False}) == {}
+    # Unknown field still flagged
+    assert validate_submission(schema, {"commit_after": True, "bogus": 1}) == {"bogus": "unknown_field"}
