@@ -132,6 +132,9 @@ class Issue:
     visit_counts: dict[str, int] = field(default_factory=dict)
     hop_count: int = 0
     failure_count: int = 0
+    state_base_commit: str | None = None
+    debug_pending: bool = False
+    modify_pending: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -145,6 +148,9 @@ class Issue:
             "visit_counts": self.visit_counts,
             "hop_count": self.hop_count,
             "failure_count": self.failure_count,
+            "state_base_commit": self.state_base_commit,
+            "debug_pending": self.debug_pending,
+            "modify_pending": self.modify_pending,
         }
 
     @classmethod
@@ -160,6 +166,9 @@ class Issue:
             visit_counts=data.get("visit_counts", {}),
             hop_count=data.get("hop_count", 0),
             failure_count=data.get("failure_count", 0),
+            state_base_commit=data.get("state_base_commit"),
+            debug_pending=data.get("debug_pending", False),
+            modify_pending=data.get("modify_pending", False),
         )
 
 
