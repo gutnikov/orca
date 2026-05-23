@@ -784,6 +784,17 @@ def _handle_debug_decision(
         )
         return
 
+    if event.action == "stop":
+        issue.debug_pending = False
+        return
+
+    effects.append(
+        ErrorEffect(
+            issue_id=event.issue_id,
+            message=f"Unknown debug action: {event.action!r}",
+        )
+    )
+
 
 def _handle_debug_modify_request(
     config: StateMachineConfig,

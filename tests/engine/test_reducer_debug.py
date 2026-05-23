@@ -144,3 +144,30 @@ def test_debug_decision_modify_restart_marks_modify_pending_and_logs_request() -
     assert issue.debug_pending is False
     assert issue.worker_active is False
     assert any(e.type == "debug_modify_request" for e in issue.event_log)
+
+
+def test_debug_decision_stop_clears_pending_and_emits_no_effects() -> None:
+    from orca.engine.types import DebugDecisionEvent, DispatchWorkerEffect
+
+    config = _make_config()
+    state = _make_state(worker_active=False)
+    state.issues["i1"].debug_pending = True
+
+    event = DebugDecisionEvent(issue_id="i1", action="stop", comments=[], timestamp="t1")
+    new_state, effects = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
+
+    assert new_state.issues["i1"].debug_pending is False
+    assert not any(isinstance(e, DispatchWorkerEffect) for e in effects)
+
+
+def test_debug_decision_rejects_unknown_action_with_error_effect() -> None:
+    from orca.engine.types import DebugDecisionEvent, ErrorEffect
+
+    config = _make_config()
+    state = _make_state(worker_active=False)
+    state.issues["i1"].debug_pending = True
+
+    event = DebugDecisionEvent(issue_id="i1", action="weird", comments=[], timestamp="t1")
+    _, effects = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
+
+    assert any(isinstance(e, ErrorEffect) for e in effects)
