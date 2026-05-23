@@ -28,6 +28,7 @@ from orca.orchestrator.pty_session import PtySession
 from orca.orchestrator.session_sync import SessionSync
 from orca.orchestrator.worker import Worker, WorkerFailure, WorkerOutcome, WorkerSuccess
 from orca.orchestrator.worktree import WorktreeManager
+from orca.orchestrator.worktree_helpers import current_head
 
 logger = logging.getLogger(__name__)
 
@@ -393,6 +394,14 @@ class Orchestrator:
     ) -> WorkerOutcome:
         """Create worktree if needed, then execute the worker."""
         workdir = await self._ensure_worktree(effect.issue_id)
+
+        # Record state_base_commit before dispatching so debug-mode restart knows
+        # where to rewind the worktree.
+        head = await current_head(workdir)
+        issue_obj = self._state.issues.get(effect.issue_id)
+        if issue_obj is not None and head is not None:
+            issue_obj.state_base_commit = head
+            self.persistence.save(self._state)
 
         # Update the manifest with the real worktree path (may differ from the
         # preliminary path recorded in _spawn_worker when the branch didn't exist yet).
