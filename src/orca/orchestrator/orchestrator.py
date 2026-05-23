@@ -97,6 +97,14 @@ class Orchestrator:
         self._progress_sessions: set[str] = set()
         # Maps issue_id -> (unblock_event, message_box) for waiting workers
         self._waiting_workers: dict[str, tuple[asyncio.Event, list[str]]] = {}
+        # Run-level debug flag. When True, after every successful worker
+        # completion, the orchestrator builds a DebugReviewSnapshot, emits
+        # DebugReviewRequiredEvent, and awaits a DebugDecisionEvent before
+        # applying the worker's transition.
+        self.debug: bool = False
+        # Maps issue_id -> (decision_event, decision_box). decision_box is a
+        # one-element list holding {"action": str, "comments": list[dict]}.
+        self._debug_decision_events: dict[str, tuple[asyncio.Event, list[dict[str, Any]]]] = {}
         # Track used branch slugs to avoid collisions
         self._used_slugs: set[str] = set()
         for branch in self.branches.values():
@@ -201,6 +209,26 @@ class Orchestrator:
     def is_waiting(self, issue_id: str) -> bool:
         """True if a worker for this issue is currently blocked awaiting unblock."""
         return issue_id in self._waiting_workers
+
+    def submit_debug_decision(
+        self,
+        issue_id: str,
+        action: str,
+        comments: list[dict[str, Any]],
+    ) -> bool:
+        """Submit a debug decision for a paused issue. Returns False if no debug pause is active."""
+        entry = self._debug_decision_events.get(issue_id)
+        if entry is None:
+            return False
+        event, box = entry
+        box.clear()
+        box.append({"action": action, "comments": comments})
+        event.set()
+        return True
+
+    def is_debug_pending(self, issue_id: str) -> bool:
+        """True if an issue is currently paused awaiting a debug decision."""
+        return issue_id in self._debug_decision_events
 
     def _is_terminal(self, issue_id: str) -> bool:
         """Return True if the issue's current state is terminal in config."""
@@ -540,6 +568,104 @@ class Orchestrator:
 
         return outcome
 
+    def _resolve_config_path(self) -> Path:
+        """Locate the workflow YAML file for the current run."""
+        if self.flow_root is not None:
+            for candidate in sorted(self.flow_root.glob("*.yml")):
+                return candidate
+        return (self.flow_root / "orca.yml") if self.flow_root else Path("/dev/null")
+
+    async def _pause_for_debug_review(self, issue_id: str) -> None:
+        """Build the debug snapshot, emit DebugReviewRequiredEvent, and await a decision."""
+        from orca.engine.types import DebugReviewRequiredEvent
+        from orca.orchestrator.snapshot import build_snapshot
+        from orca.orchestrator.template_persist import rendered_prompt_path
+
+        issue = self._state.issues.get(issue_id)
+        if issue is None:
+            return
+        base_commit = issue.state_base_commit
+        if base_commit is None:
+            logger.warning("Cannot pause for debug review: no state_base_commit for issue %s", issue_id)
+            return
+
+        branch = self.branches.get(issue_id) or self.root_branch
+        workdir = self.worktree_mgr.resolve(branch)
+        if not workdir.exists() and self.repo_root is not None:
+            workdir = self.repo_root
+
+        session_id = ""
+        if self._session_sync is not None:
+            entries = self._session_sync.manifest.read()
+            for entry in entries:
+                if entry.get("issue_id") == issue_id:
+                    session_id = entry.get("session_id", "")
+        prompt_path = rendered_prompt_path(workdir, issue.state, session_id) if session_id else workdir / "missing"
+
+        config_path = self._resolve_config_path()
+
+        worker_result: dict[str, Any] = {}
+        for log_entry in reversed(issue.event_log):
+            if log_entry.type == "worker_result":
+                worker_result = log_entry.data
+                break
+
+        snapshot = await build_snapshot(
+            worktree_path=workdir,
+            base_commit=base_commit,
+            rendered_prompt_path=prompt_path,
+            worker_result=worker_result,
+            config_path=config_path,
+            issue_type=issue.type,
+            state_id=issue.state,
+        )
+
+        ts = self.now()
+        review_event = DebugReviewRequiredEvent(
+            issue_id=issue_id,
+            snapshot=snapshot,
+            timestamp=ts,
+        )
+        self._state, _ = reduce(
+            self._config,
+            self._state,
+            review_event,
+            self.generate_id,
+            self.now,
+        )
+        self.persistence.save(self._state)
+
+        decision_event = asyncio.Event()
+        decision_box: list[dict[str, Any]] = []
+        self._debug_decision_events[issue_id] = (decision_event, decision_box)
+        logger.info(
+            "Debug review pause for issue %s at state %s",
+            issue_id,
+            issue.state,
+            extra={"event": "debug_review_pause", "issue_id": issue_id, "state": issue.state},
+        )
+        await decision_event.wait()
+
+    async def _reset_worktree_for_issue(self, issue_id: str) -> None:
+        """Reset the worktree branch back to its state_base_commit."""
+        issue = self._state.issues.get(issue_id)
+        if issue is None or issue.state_base_commit is None:
+            logger.warning("Cannot reset worktree for issue %s: no state_base_commit", issue_id)
+            return
+        branch = self.branches.get(issue_id)
+        if branch is None:
+            return
+        try:
+            await self.worktree_mgr.reset_to(branch, issue.state_base_commit)
+        except Exception as exc:
+            logger.error(
+                "Worktree reset failed for issue %s: %s",
+                issue_id,
+                exc,
+                extra={"event": "worktree_reset_failed", "issue_id": issue_id},
+            )
+            raise
+
     def _process_retry_signals(self, pending: list[DispatchWorkerEffect]) -> bool:
         """Check for retry signal files from the TUI. Returns True if any retries were queued."""
         retry_dir = self.persistence.state_path.parent / "retry"
@@ -752,15 +878,51 @@ class Orchestrator:
                 old_issues = set(self._state.issues.keys())
                 old_issue_state = self._state.issues[issue_id].state if issue_id in self._state.issues else None
 
-                self._state, new_effects = reduce(
-                    self._config,
-                    self._state,
-                    event,
-                    self.generate_id,
-                    self.now,
-                )
+                # v1: only pause for root issues. Decomposed (child) issues run
+                # through without a debug pause — documented spec limitation.
+                _issue_for_debug = self._state.issues.get(issue_id)
+                _is_root = _issue_for_debug is not None and _issue_for_debug.decomposed_from is None
 
-                self.persistence.save(self._state)
+                if self.debug and isinstance(outcome, WorkerSuccess) and _is_root:
+                    self._state, _ = reduce(
+                        self._config,
+                        self._state,
+                        event,
+                        self.generate_id,
+                        self.now,
+                        run_debug=True,
+                    )
+                    self.persistence.save(self._state)
+                    await self._pause_for_debug_review(issue_id)
+                    decision = self._debug_decision_events[issue_id][1][0]
+                    self._debug_decision_events.pop(issue_id, None)
+                    from orca.engine.types import DebugDecisionEvent, InlineComment
+
+                    decision_event = DebugDecisionEvent(
+                        issue_id=issue_id,
+                        action=decision["action"],
+                        comments=[InlineComment.from_dict(c) for c in decision["comments"]],
+                        timestamp=self.now(),
+                    )
+                    if decision["action"] == "restart":
+                        await self._reset_worktree_for_issue(issue_id)
+                    self._state, new_effects = reduce(
+                        self._config,
+                        self._state,
+                        decision_event,
+                        self.generate_id,
+                        self.now,
+                    )
+                    self.persistence.save(self._state)
+                else:
+                    self._state, new_effects = reduce(
+                        self._config,
+                        self._state,
+                        event,
+                        self.generate_id,
+                        self.now,
+                    )
+                    self.persistence.save(self._state)
 
                 # Log worker outcome
                 if isinstance(outcome, WorkerSuccess):
