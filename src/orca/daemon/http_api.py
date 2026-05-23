@@ -341,7 +341,7 @@ def create_app(manager: RunManager) -> Starlette:
     return app
 
 
-class _SPAStaticFiles(StaticFiles):  # type: ignore[misc]
+class _SPAStaticFiles(StaticFiles):  # type: ignore[misc,unused-ignore]
     """StaticFiles that falls back to index.html for SPA client-side routes."""
 
     async def get_response(self, path: str, scope: Scope) -> Response:
