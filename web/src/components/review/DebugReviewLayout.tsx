@@ -309,29 +309,51 @@ export function DebugReviewLayout({
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-zinc-950">
-      <header className="border-b bg-white dark:bg-zinc-900 px-6 py-3 flex items-center gap-4">
-        <div>
-          <h1 className="font-semibold">orca · debug review</h1>
-          <div className="text-xs opacity-60">
-            {runId} · state: <code>{state}</code> · base:{" "}
-            <code>{snapshot.base_commit.slice(0, 8)}</code>
+    <div className="min-h-screen bg-background text-foreground">
+      <div className="max-w-[1280px] mx-auto px-6 py-6 pr-32">
+        {/* Commit-card header */}
+        <header className="rounded-lg border border-border bg-card p-5 mb-5">
+          <div className="flex items-start gap-4">
+            <div className="flex-1 min-w-0">
+              <h1 className="text-[15px] font-semibold tracking-tight">
+                orca · debug review
+              </h1>
+              <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-muted-foreground font-mono">
+                <span className="text-foreground/85">{runId}</span>
+                <span className="text-muted-foreground/60">·</span>
+                <span>
+                  state{" "}
+                  <span className="text-foreground bg-muted px-1.5 py-0.5 rounded">
+                    {state}
+                  </span>
+                </span>
+                <span className="text-muted-foreground/60">·</span>
+                <span>
+                  base{" "}
+                  <span className="text-foreground bg-muted px-1.5 py-0.5 rounded">
+                    {snapshot.base_commit.slice(0, 8)}
+                  </span>
+                </span>
+              </div>
+            </div>
+            <div className="shrink-0">
+              <ActionButton onSubmit={handleSubmit} disabled={submitting} />
+            </div>
           </div>
+        </header>
+
+        {/* Two-pane layout: sticky sidebar + scrollable main */}
+        <div className="flex gap-5 items-start">
+          <div className="w-[260px] shrink-0 sticky top-6 max-h-[calc(100vh-3rem)] overflow-hidden">
+            <FileTreeSidebar
+              virtualFiles={virtualFiles}
+              realFiles={realFiles}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+            />
+          </div>
+          <main className="flex-1 min-w-0">{renderMain()}</main>
         </div>
-        <div className="ml-auto">
-          <ActionButton onSubmit={handleSubmit} disabled={submitting} />
-        </div>
-      </header>
-      <div className="flex-1 flex">
-        <aside className="w-[220px] border-r bg-white dark:bg-zinc-900">
-          <FileTreeSidebar
-            virtualFiles={virtualFiles}
-            realFiles={realFiles}
-            selectedId={selectedId}
-            onSelect={setSelectedId}
-          />
-        </aside>
-        <main className="flex-1 p-4 overflow-auto">{renderMain()}</main>
       </div>
     </div>
   );

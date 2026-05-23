@@ -1,3 +1,6 @@
+import { useMemo, useState } from "react"
+import { Search } from "lucide-react"
+
 import { cn } from "@/lib/utils"
 import type { FileStatus } from "./types"
 
@@ -31,90 +34,144 @@ export function FileTreeSidebar({
   selectedId: string
   onSelect: (id: string) => void
 }) {
+  const [filter, setFilter] = useState("")
+  const q = filter.trim().toLowerCase()
+
+  const matchesQ = (s: string) => !q || s.toLowerCase().includes(q)
+
+  const filteredVirtual = useMemo(
+    () => virtualFiles.filter((f) => matchesQ(f.label) || matchesQ(f.id)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [virtualFiles, q],
+  )
+  const filteredReal = useMemo(
+    () => realFiles.filter((f) => matchesQ(f.path)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [realFiles, q],
+  )
+
   return (
-    <aside className="sticky top-4 w-[280px] shrink-0 h-[calc(100vh-2rem)] overflow-y-auto pr-2">
-      {/* Virtual review surfaces: prompt, result, flow state */}
-      {virtualFiles.length > 0 ? (
-        <>
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground px-2 pb-2 font-semibold">
-            Review surfaces
-          </div>
-          <ul className="space-y-0.5">
-            {virtualFiles.map((f) => {
-              const active = selectedId === f.id
-              return (
-                <li key={f.id}>
-                  <button
-                    type="button"
-                    onClick={() => onSelect(f.id)}
-                    className={cn(
-                      "w-full text-left rounded-md px-2 py-1.5 flex items-center gap-2",
-                      "hover:bg-muted/60 transition-colors",
-                      active && "bg-muted",
-                    )}
-                  >
-                    <span className="h-1.5 w-1.5 rounded-full shrink-0 bg-primary/40" />
-                    <span className="font-mono text-xs truncate min-w-0 flex-1 font-semibold">
-                      {f.label}
-                    </span>
-                    {f.commentCount > 0 ? (
-                      <span className="ml-1 rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[10px] font-medium shrink-0">
-                        {f.commentCount}
-                      </span>
-                    ) : null}
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-        </>
-      ) : null}
+    <aside className="w-full h-full flex flex-col gap-3 overflow-hidden">
+      {/* Filter input */}
+      <div className="relative shrink-0">
+        <Search
+          size={13}
+          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/70"
+        />
+        <input
+          type="text"
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+          placeholder="Filter files…"
+          className={cn(
+            "w-full h-8 pl-8 pr-2 text-[13px]",
+            "bg-background border border-border rounded-md",
+            "placeholder:text-muted-foreground/70",
+            "focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring",
+          )}
+        />
+      </div>
 
-      {/* Divider between virtual and real files */}
-      {virtualFiles.length > 0 && realFiles.length > 0 ? (
-        <div className="my-2 border-t border-border/60" />
-      ) : null}
-
-      {/* Real changeset files */}
-      {realFiles.length > 0 ? (
-        <>
-          <div className="text-[11px] uppercase tracking-wider text-muted-foreground px-2 pb-2 font-semibold">
-            Changes ({realFiles.length} {realFiles.length === 1 ? "file" : "files"})
-          </div>
-          <ul className="space-y-0.5">
-            {realFiles.map((f) => {
-              const segments = f.path.split("/")
-              const filename = segments.at(-1) ?? f.path
-              const dir = segments.slice(0, -1).join("/")
-              const active = selectedId === f.path
-              return (
-                <li key={f.path}>
-                  <button
-                    type="button"
-                    onClick={() => onSelect(f.path)}
-                    className={cn(
-                      "w-full text-left rounded-md px-2 py-1.5 flex items-center gap-2",
-                      "hover:bg-muted/60 transition-colors",
-                      active && "bg-muted",
-                    )}
-                  >
-                    <span className={cn("h-1.5 w-1.5 rounded-full shrink-0", STATUS_DOT[f.status])} />
-                    <span className="font-mono text-xs truncate min-w-0 flex-1">
-                      {dir ? <span className="text-muted-foreground">{dir}/</span> : null}
-                      <span className="font-semibold">{filename}</span>
-                    </span>
-                    {f.commentCount > 0 ? (
-                      <span className="ml-1 rounded-full bg-primary/10 text-primary px-1.5 py-0.5 text-[10px] font-medium shrink-0">
-                        {f.commentCount}
+      <div className="flex-1 overflow-y-auto -mr-2 pr-2 space-y-3">
+        {/* Virtual review surfaces */}
+        {filteredVirtual.length > 0 ? (
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80 px-2 pb-1.5 font-semibold">
+              Review surfaces
+            </div>
+            <ul className="space-y-0.5">
+              {filteredVirtual.map((f) => {
+                const active = selectedId === f.id
+                return (
+                  <li key={f.id}>
+                    <button
+                      type="button"
+                      onClick={() => onSelect(f.id)}
+                      className={cn(
+                        "w-full text-left rounded-md px-2 py-1.5 flex items-center gap-2 cursor-pointer",
+                        "transition-colors",
+                        active
+                          ? "bg-primary/10 text-foreground"
+                          : "hover:bg-muted/60 text-foreground/85",
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "h-1.5 w-1.5 rounded-full shrink-0",
+                          active ? "bg-primary" : "bg-primary/40",
+                        )}
+                      />
+                      <span className="font-mono text-[12px] truncate min-w-0 flex-1 font-semibold">
+                        {f.label}
                       </span>
-                    ) : null}
-                  </button>
-                </li>
-              )
-            })}
-          </ul>
-        </>
-      ) : null}
+                      {f.commentCount > 0 ? (
+                        <span className="ml-1 rounded-full bg-primary/15 text-primary px-1.5 py-0.5 text-[10px] font-semibold shrink-0 tabular-nums">
+                          {f.commentCount}
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ) : null}
+
+        {/* Real changeset files */}
+        {filteredReal.length > 0 ? (
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80 px-2 pb-1.5 font-semibold flex items-center justify-between">
+              <span>Changes</span>
+              <span className="text-muted-foreground/60 tabular-nums">
+                {filteredReal.length}
+              </span>
+            </div>
+            <ul className="space-y-0.5">
+              {filteredReal.map((f) => {
+                const segments = f.path.split("/")
+                const filename = segments.at(-1) ?? f.path
+                const dir = segments.slice(0, -1).join("/")
+                const active = selectedId === f.path
+                return (
+                  <li key={f.path}>
+                    <button
+                      type="button"
+                      onClick={() => onSelect(f.path)}
+                      className={cn(
+                        "w-full text-left rounded-md px-2 py-1.5 flex items-center gap-2 cursor-pointer",
+                        "transition-colors",
+                        active
+                          ? "bg-primary/10 text-foreground"
+                          : "hover:bg-muted/60 text-foreground/85",
+                      )}
+                      title={f.path}
+                    >
+                      <span
+                        className={cn("h-1.5 w-1.5 rounded-full shrink-0", STATUS_DOT[f.status])}
+                      />
+                      <span className="font-mono text-[12px] truncate min-w-0 flex-1">
+                        {dir ? <span className="text-muted-foreground/70">{dir}/</span> : null}
+                        <span className="font-semibold">{filename}</span>
+                      </span>
+                      {f.commentCount > 0 ? (
+                        <span className="ml-1 rounded-full bg-primary/15 text-primary px-1.5 py-0.5 text-[10px] font-semibold shrink-0 tabular-nums">
+                          {f.commentCount}
+                        </span>
+                      ) : null}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+          </div>
+        ) : null}
+
+        {filteredVirtual.length === 0 && filteredReal.length === 0 ? (
+          <div className="px-2 py-4 text-[12px] text-muted-foreground/70 italic">
+            No files match “{filter}”
+          </div>
+        ) : null}
+      </div>
     </aside>
   )
 }
