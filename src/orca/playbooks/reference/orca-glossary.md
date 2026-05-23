@@ -61,7 +61,7 @@ A run (the active execution of one root issue's workflow) has a status:
 |---|---|
 | `running` | At least one worker is active or about to be. |
 | `completed` | The root issue reached `done`. |
-| `failed` | A worker exceeded `max_worker_retries`, or another unrecoverable error. `orca resume` may pick it back up. |
+| `failed` | A worker exceeded `max_worker_retries`, the orchestrator deadlocked (nothing in flight, no pending effects, root not `done`), or another unrecoverable error. `orca resume` may pick it back up. |
 | `interrupted` | Daemon was stopped/restarted mid-run. `orca resume` continues. |
 | `stopped` | User stopped the run via `orca stop`. Resume or drop. |
 
@@ -71,12 +71,11 @@ Worker activity is reported separately on each issue:
 
 To disambiguate "working" vs "waiting" vs "idle," combine signals:
 
-| `worker_active` | `pending_form` | Last `worker_*` event | Meaning |
-|---|---|---|---|
-| `true` | `null` | `worker_dispatched` / `worker_progress` | **Working** — actively executing. |
-| `true` | non-null | `worker_waiting` | **Waiting (form)** — HITL form pending at `/forms/<runId>/<issueId>`. |
-| `true` | `null` | `worker_waiting` not yet followed by `worker_resumed` | **Waiting (text)** — `reason` carries the blocker; resume via `orca unblock`. |
-| `false` | `null` | any | **Idle / between states** — either between dispatches, or the run reached a terminal state. |
+| `worker_active` | Last `worker_*` event | Meaning |
+|---|---|---|
+| `true` | `worker_dispatched` / `worker_progress` | **Working** — actively executing. |
+| `true` | `worker_waiting` not yet followed by `worker_resumed` | **Waiting** — `reason` carries the blocker; resume via `orca unblock`. |
+| `false` | any | **Idle / between states** — either between dispatches, or the run reached a terminal state. |
 
 For programmatic polling: `runs[*].waiting_issues` in the `/api/runs` payload aggregates the waiting cases above so a caller doesn't need to walk event logs themselves. `orca runs --waiting` filters the listing to just runs with at least one waiting issue.
 

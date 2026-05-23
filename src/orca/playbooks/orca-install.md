@@ -52,7 +52,9 @@ Notes:
 ```bash
 orca -v          # prints version hash
 orca --help      # full subcommand list (daemon, run, runs, resume, retry,
-                 # stop, drop, logs, unblock, tui, mcp, init, clean, …)
+                 # stop, drop, logs, unblock, tui, mcp, clean, …). `init`
+                 # also appears but is a legacy no-op kept only to remove a
+                 # stale .orca/playbooks/ directory from very old setups.
 ```
 
 If `orca -v` works but `command -v orca` doesn't resolve in a new shell, `pipx ensurepath` may be needed (then restart the shell).

@@ -14,7 +14,6 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
-from orca.daemon.form_validator import validate_submission
 from orca.daemon.lifecycle import read_browser_port
 from orca.daemon.manager import RunManager, RunStatus
 
@@ -234,83 +233,6 @@ async def _unblock_worker(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
-async def _get_form(request: Request) -> JSONResponse:
-    manager: RunManager = request.app.state.manager
-    run_id: str = request.path_params["run_id"]
-    issue_id: str = request.path_params["issue_id"]
-
-    info = manager.get_pending_form(run_id, issue_id)
-    if info is None:
-        return JSONResponse({"error": "not_found"}, status_code=404)
-    if info["submitted_at"] is not None:
-        return JSONResponse(
-            {"error": "already_submitted", "submitted_at": info["submitted_at"]},
-            status_code=410,
-        )
-    return JSONResponse(
-        {
-            "run_id": run_id,
-            "issue_id": issue_id,
-            "schema": info["schema"],
-            "context": {
-                "state": info["state"],
-                "reason": info["reason"],
-                "started_waiting_at": info["started_waiting_at"],
-            },
-        }
-    )
-
-
-async def _submit_form(request: Request) -> JSONResponse:
-    manager: RunManager = request.app.state.manager
-    run_id: str = request.path_params["run_id"]
-    issue_id: str = request.path_params["issue_id"]
-
-    try:
-        body: dict[str, Any] = await request.json()
-    except Exception:
-        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
-
-    cancelled = body.get("cancelled") is True
-    values = body.get("values")
-    if not cancelled and not isinstance(values, dict):
-        return JSONResponse({"error": "values must be an object, or set cancelled=true"}, status_code=400)
-
-    info = manager.get_pending_form(run_id, issue_id)
-    if info is None:
-        return JSONResponse({"error": "not_found"}, status_code=404)
-    if info["submitted_at"] is not None:
-        return JSONResponse({"error": "already_submitted"}, status_code=410)
-
-    schema = info["schema"]
-    if not cancelled:
-        field_errors = validate_submission(schema, values or {})
-        if field_errors:
-            return JSONResponse(
-                {"error": "validation_failed", "field_errors": field_errors},
-                status_code=422,
-            )
-
-    envelope: dict[str, Any] = (
-        {"submitted": False, "cancelled": True} if cancelled else {"submitted": True, "values": values}
-    )
-
-    result = manager.submit_form(run_id, issue_id, envelope)
-    if result == "not_found":
-        return JSONResponse({"error": "not_found"}, status_code=404)
-    if result == "gone":
-        return JSONResponse({"error": "already_submitted"}, status_code=410)
-    if result == "not_waiting":
-        return JSONResponse({"error": "worker_not_waiting"}, status_code=409)
-
-    return JSONResponse({"ok": True})
-
-
-async def _list_pending_forms(request: Request) -> JSONResponse:
-    manager: RunManager = request.app.state.manager
-    return JSONResponse({"pending": manager.list_pending_forms()})
-
-
 async def _hot_session(request: Request) -> JSONResponse:
     manager: RunManager = request.app.state.manager
     run_id: str = request.path_params["run_id"]
@@ -338,15 +260,6 @@ async def _hot_session(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
-def _form_routes() -> list[Route]:
-    """Browser-facing routes — safe to expose on TCP."""
-    return [
-        Route("/api/runs/{run_id:path}/forms/{issue_id}", _get_form, methods=["GET"]),
-        Route("/api/runs/{run_id:path}/forms/{issue_id}/submit", _submit_form, methods=["POST"]),
-        Route("/api/forms/pending", _list_pending_forms, methods=["GET"]),
-    ]
-
-
 def create_app(manager: RunManager) -> Starlette:
     """Full daemon HTTP API — UDS-only privileged surface."""
     routes = [
@@ -363,7 +276,6 @@ def create_app(manager: RunManager) -> Starlette:
         Route("/api/runs/{run_id:path}/retry/{issue_id}", _retry_issue, methods=["POST"]),
         Route("/api/runs/{run_id:path}/unblock/{issue_id}", _unblock_worker, methods=["POST"]),
         Route("/api/runs/{run_id:path}/hot-session", _hot_session, methods=["POST"]),
-        *_form_routes(),
         Route("/api/runs/{run_id:path}", _get_run, methods=["GET"]),
     ]
 
@@ -432,13 +344,14 @@ def _web_dist_dir() -> Path:
 
 
 def create_browser_app(manager: RunManager) -> Starlette:
-    """Browser-facing app: form endpoints + SPA static assets only.
+    """Browser-facing app: SPA static assets only.
 
-    The full privileged surface (start/stop/unblock/etc.) is intentionally
-    absent — those stay UDS-only. Mounted on a localhost TCP listener.
+    The full privileged surface (start/stop/unblock/etc.) stays UDS-only.
+    Mounted on a localhost TCP listener.
     """
-    routes: list[Any] = list(_form_routes())
-    routes.append(Mount("/", app=_SPAStaticFiles(directory=str(_web_dist_dir()), html=True), name="web"))
+    routes: list[Any] = [
+        Mount("/", app=_SPAStaticFiles(directory=str(_web_dist_dir()), html=True), name="web"),
+    ]
 
     app = Starlette(routes=routes)
     app.state.manager = manager

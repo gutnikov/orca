@@ -75,7 +75,7 @@ class Worker(Protocol):
         run_context: dict[str, Any] | None = None,
         unblock_event: asyncio.Event | None = None,
         unblock_message: list[str] | None = None,
-        on_blocked: Callable[[str, dict[str, Any] | None], None] | None = None,
+        on_blocked: Callable[[str], None] | None = None,
         on_unblocked: Callable[[str], None] | None = None,
         prompt_text: str | None = None,
     ) -> WorkerOutcome: ...
@@ -146,7 +146,7 @@ class CliAgentWorker:
         run_context: dict[str, Any] | None = None,
         unblock_event: asyncio.Event | None = None,
         unblock_message: list[str] | None = None,
-        on_blocked: Callable[[str, dict[str, Any] | None], None] | None = None,
+        on_blocked: Callable[[str], None] | None = None,
         on_unblocked: Callable[[str], None] | None = None,
         prompt_text: str | None = None,
     ) -> WorkerOutcome:
@@ -237,19 +237,17 @@ class CliAgentWorker:
                         if not pty_session.alive:
                             return WorkerFailure(error="session died while reporting waiting")
                         reason = candidate.get("reason", "")
-                        form_schema = candidate.get("form")
 
-                        # Validate: reason must be non-empty unless a `form` is
-                        # present. An empty reason with no form leaves the run
-                        # un-diagnosable from state.json / `orca runs` — the
-                        # waiting issue records `reason: ""` and the only place
-                        # the worker's actual blocker is described is the tmux
-                        # pane (gh#14). Nudge the worker to rewrite with a
-                        # non-empty reason.
-                        if (not isinstance(reason, str) or not reason.strip()) and form_schema is None:
+                        # Validate: reason must be non-empty. An empty reason
+                        # leaves the run un-diagnosable from state.json /
+                        # `orca runs` — the waiting issue records `reason: ""`
+                        # and the only place the worker's actual blocker is
+                        # described is the tmux pane (gh#14). Nudge the worker
+                        # to rewrite with a non-empty reason.
+                        if not isinstance(reason, str) or not reason.strip():
                             result_path.unlink(missing_ok=True)
                             logger.warning(
-                                "Worker reported outcome:waiting with empty `reason` and no `form` for issue %s",
+                                "Worker reported outcome:waiting with empty `reason` for issue %s",
                                 effect.issue_id,
                                 extra={
                                     "event": "waiting_reason_empty",
@@ -259,11 +257,11 @@ class CliAgentWorker:
                             if not correction_sent and pty_session.alive:
                                 correction_msg = (
                                     f"URGENT: Your result file at {result_path} declared "
-                                    f"`outcome: waiting` but the `reason` field was empty "
-                                    f"(and no `form` was provided). Rewrite the file with a "
-                                    f"`reason` of at least one sentence describing what is "
-                                    f"blocking. Workers that pause without a reason leave the "
-                                    f"run un-diagnosable from state.json or `orca runs`."
+                                    f"`outcome: waiting` but the `reason` field was empty. "
+                                    f"Rewrite the file with a `reason` of at least one "
+                                    f"sentence describing what is blocking. Workers that "
+                                    f"pause without a reason leave the run un-diagnosable "
+                                    f"from state.json or `orca runs`."
                                 )
                                 if pty_session.send_keys(correction_msg):
                                     correction_sent = True
@@ -287,7 +285,7 @@ class CliAgentWorker:
                             extra={"event": "worker_waiting", "issue_id": effect.issue_id},
                         )
                         if on_blocked is not None:
-                            on_blocked(reason, form_schema)
+                            on_blocked(reason)
 
                         # Blocked sub-loop: wait for unblock or session death
                         while True:

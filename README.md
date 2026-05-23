@@ -43,7 +43,7 @@ Then ask Claude Code:
 set up orca in this project
 ```
 
-The `orca-install` skill installs or verifies the Orca CLI, starts the daemon, adds `.orca-state/` to `.gitignore`, creates `.orca/default.yml` and `.orca/prompts/implement.md`, and runs a smoke task. Playbooks (the reference docs agents use to build and audit workflows) are served via the `orca_get_playbook` MCP tool — no copy in your project.
+The `orca-install` skill installs or verifies the Orca CLI, starts the daemon, adds `.orca-state/` to `.gitignore`, creates `.orca/default.yml` and `.orca/prompts/implementing.md`, and runs a smoke task. Playbooks (the reference docs agents use to build and audit workflows) are served via the `orca_get_playbook` MCP tool — no copy in your project.
 
 ### Codex Marketplace
 
@@ -165,7 +165,7 @@ implementing:
 
 **Passive states** have no `worker`. Issues can be moved into passive states programmatically (via `AdvanceEvent`) but no agent is dispatched. Useful for wait states or manual gates.
 
-**Terminal states** are the built-in `done` and `failed`. You never define these — they exist automatically. `done` means the issue completed successfully. `failed` triggers retry logic: if a transition targets `failed`, the engine increments the failure counter and re-dispatches the worker (up to `max_worker_retries`).
+**Built-in transition targets** are `done` and `failed`. You never define these as states — they exist automatically as right-hand-side values in `on:` rules. `done` is the actual terminal sink: routing to `done` ends an issue cleanly and triggers cascading unblock of parents/dependents. `failed` is a **control directive, not a destination**: routing an outcome to `failed` tells the engine to treat that outcome as a worker failure — it bumps `failure_count` and either re-dispatches the worker (under `max_worker_retries`) or surfaces a stuck issue. The issue stays in its current state with a bumped counter; it does not "live" in `failed`.
 
 ### Workers
 
@@ -174,7 +174,7 @@ A **worker** is a CLI coding agent that runs inside a tmux session with its own 
 - **Isolated** — each worker gets its own copy of the repo via `git worktree`. Workers can commit, branch, and edit files without interfering with each other.
 - **Prompted** — the worker receives a Jinja2-rendered prompt with issue context, the expected result schema, and the path to write `result.json`.
 - **Validated** — the orchestrator polls for `result.json`, validates it against the `result_format` schema, and sends correction messages if the output is malformed.
-- **Supervised** — workers have timeouts (hard and inactivity-based), retry logic with exponential backoff, and progress reporting.
+- **Supervised** — workers have an inactivity timeout (no-progress kill, paused while `outcome: waiting`), retry logic with exponential backoff, and progress reporting.
 
 The worker lifecycle:
 
@@ -412,6 +412,8 @@ scoping -> planning -> implementing -> applying -> retro -> done
 ```yaml
 # .orca/default.yml
 
+# base_branch is accepted for compatibility but ignored by the
+# daemon-backed run path — see Config Reference below.
 base_branch: origin/main
 
 issue:
@@ -520,7 +522,7 @@ states:
 
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
-| `base_branch` | string | `origin/main` | Git ref to branch from when using `-b` mode. Overridden by `--base` CLI flag. |
+| `base_branch` | string | legacy runner: `origin/main`; daemon path: ignored | Compatibility/intent. In the current daemon-backed `orca run` path, root run branches are **not** created from this value — do not rely on it for branch setup. Prompts still receive a live `{{ issue.base_branch }}` value resolved from the run/parent branch. See the *Branching* notes below and [`reference/orca-config-reference`](src/orca/playbooks/reference/orca-config-reference.md) for details. |
 | `initial` | string | *required* | The state every new issue starts in. Must reference an existing state. |
 | `issue` | mapping | — | Schema for issue data. Contains `fields`. |
 | `states` | mapping | *required* | All states in the workflow. |
@@ -574,10 +576,10 @@ The `worker` block defines which AI agent runs and how:
 ```yaml
 worker:
   kind: claude-code              # required: see Worker kinds table below
-  prompt: prompts/implement.md   # required: Jinja2 template path (relative to .orca/ directory)
-  timeout: 3600                  # optional: hard timeout in seconds
-  inactivity_timeout: 300        # optional: kill if no result.json within N seconds
-  model: claude-sonnet-4-20250514           # optional: model override
+  prompt: prompts/implementing.md   # required: Jinja2 template path (relative to .orca/ directory)
+  timeout: 3600                  # optional: compatibility fallback for inactivity_timeout; not a wall-clock cap
+  inactivity_timeout: 300        # optional: kill if no progress for N seconds (default: 300)
+  model: claude-sonnet-4-6       # optional: model override
   args: ["--max-turns", "100"]   # optional: extra CLI args
   progress: true                 # optional: inject progress reporting (default: false)
   result_format:                 # required for active states
@@ -588,8 +590,8 @@ worker:
 |-----|------|---------|-------------|
 | `kind` | string | *required* | `"claude-code"`, `"codex"`, or `"opencode"`. |
 | `prompt` | string | *required* | Path to Jinja2 template, relative to the `.orca/` directory (the directory containing the `.yml` file). |
-| `timeout` | int | none | Hard timeout in seconds. Worker is killed after this duration. |
-| `inactivity_timeout` | int | 300 | Seconds without a valid `result.json` before the worker is killed. |
+| `timeout` | int | none | Compatibility fallback for `inactivity_timeout`. When `inactivity_timeout` is unset, this value becomes the no-progress timeout. **Not** a hard wall-clock cap on worker runtime. |
+| `inactivity_timeout` | int | 300 | Seconds without progress before the worker is killed. Paused while the worker's last outcome is `waiting`, so HITL pauses don't trip the timer. |
 | `model` | string | none | Override the AI model, passed to the CLI agent as `-m <model>`. Values are accepted by the selected CLI. |
 | `args` | list | none | Extra CLI arguments appended to the worker command. |
 | `progress` | bool | `false` | When `true`, workers emit `PROGRESS: <percent> \| <status>` lines shown in the TUI. |
@@ -664,12 +666,14 @@ on:
 
 Targets must be existing states or the built-in states `done` and `failed`.
 
-#### Built-in States
+#### Built-in Transition Targets
 
-Two states exist automatically — do not define them in `states:`:
+Both targets are always-valid in any `on:` rule. Neither may be defined explicitly under `states:` — the parser will reject it.
 
-- **`done`** — terminal success. When an issue reaches `done`, its parent and dependent issues are checked for unblocking.
-- **`failed`** — terminal failure. Triggers retry semantics governed by `max_worker_retries`.
+- **`done`** — a terminal sink. The issue parks here permanently and triggers cascading unblock of parents/dependents.
+- **`failed`** — a *control directive*, not a destination state. Routing an outcome to `failed` (e.g. `on: { irrecoverable: failed }`) tells the engine to treat that outcome as a worker failure: it bumps `failure_count` and re-dispatches the worker if under `max_worker_retries`, otherwise surfaces a stuck issue. The issue does not "live" in `failed` — it stays in its current state.
+
+The naming asymmetry is intentional: `done` is where issues *end up*; `failed` is what happens *to them*. Note also that an **outcome value named `failed`** (e.g. `values: [applied, failed]` with `on: { failed: implementing }`) is a user-defined outcome going to a user-defined state and has no special semantics — only the right-hand side of an `on:` rule triggers the failure-handling control directive.
 
 #### Built-in Outcome: `waiting`
 
@@ -824,16 +828,21 @@ The `run` variable is available in all prompts and contains:
 
 | `run.*` | Description |
 |---------|-------------|
-| `run.branch` | Git branch name |
+| `run.repo_root` | Absolute path to the repository root |
+| `run.run_dir` | Absolute path to this run's state directory (under `.orca-state/runs/`) |
+| `run.sessions_dir` | Absolute path to the directory holding per-worker session logs |
+| `run.branch` | Run branch / run label used in `run_id` and child branch naming |
 | `run.workflow` | Workflow name |
+| `run.log` | Path to the structured event log (JSONL) |
+| `run.state` | Path to the state snapshot (JSON) |
+| `run.insights` | Path to insights file (JSON), `None` if insights aren't enabled or the file hasn't been created yet |
 | `run.sessions` | List of worker sessions with `state`, `log`, `duration`, `outcome` |
+| `run.summary.current_state` | Current state of the (root) issue |
 | `run.summary.states_visited` | States the run has passed through |
 | `run.summary.total_duration` | Total elapsed time |
-| `run.summary.outcomes` | Map of state -> outcome for each completed phase |
-| `run.summary.failures` | Map of state -> error for any failures |
-| `run.log` | Path to the structured event log (JSONL) |
-| `run.insights` | Path to insights file (JSON), if insights are enabled |
-| `run.state` | Path to the state snapshot (JSON) |
+| `run.summary.outcomes` | Map of state → outcome for each completed phase |
+| `run.summary.failures` | Map of state → error for any failures |
+| `run.formats` | Self-describing format hints: `{log, insights, state, sessions}` — short strings explaining the on-disk shape of each artifact above. Useful in retro/insights prompts that want to teach the worker how to read the files. |
 
 Playbooks (the reference material agents use to build and audit workflows) are bundled inside the installed orca package and served via the `orca_get_playbook` MCP tool — no copy lives in your project. Notable ones include [`orca-prompt-create`](src/orca/playbooks/orca-prompt-create.md) (writing principles, pitfalls, template anatomy), [`reference/orca-config-reference`](src/orca/playbooks/reference/orca-config-reference.md), [`reference/orca-workflow-patterns`](src/orca/playbooks/reference/orca-workflow-patterns.md), and [`orca-workflow-review`](src/orca/playbooks/orca-workflow-review.md). When creating or modifying workflows, tell your coding agent: *"Fetch the relevant orca playbooks and update my workflow."*
 
@@ -849,12 +858,13 @@ orca daemon stop               # stop the daemon
 orca daemon status             # check daemon status
 
 orca run <task.md> [options]   # start a run
-orca runs                     # list all runs
+orca runs [--waiting]         # list all runs (or just runs with waiting issues)
 orca stop <run_id>            # stop a run
 orca resume <run_id>          # resume a stopped/failed run
 orca drop <run_id>            # stop + delete run state
 orca retry <run_id> <issue_id>  # retry a failed issue
 orca clean [--dry-run] [-y]   # drop terminal runs + clean accumulated artifacts
+orca init                     # legacy no-op; removes a stale .orca/playbooks/ dir if found
 
 orca logs <run_id> [issue_id] [--tail N]        # view worker logs
 orca unblock <run_id> <issue_id> -m "message"   # unblock a waiting worker
@@ -868,7 +878,8 @@ orca mcp                      # start MCP stdio bridge
 |------|---------|-------------|
 | `-w WORKFLOW` | `default` | Workflow name or path. `-w develop` loads `.orca/develop.yml`. |
 | `-b BRANCH` | current branch | Integration branch name. Enables concurrent run isolation. |
-| `--base REF` | config `base_branch` | Git ref to branch from. Requires `-b`. |
+| `--run-id ID` | `<branch>:<workflow>` | Override the run identifier. Rarely needed — use to disambiguate when multiple runs share a branch/workflow pair. |
+| `--base REF` | — | Accepted for compatibility but **not honored** by the current daemon-backed run path; root run branches are not created from this ref. Check out the desired base before invoking `orca run`. |
 | `--headless` | off | Run without TUI. |
 | `--insights` | off | Enable insights agent for progress monitoring. |
 | `--max-hops N` | `10` | Max state transitions per issue before stopping. |
@@ -1031,7 +1042,8 @@ The config parser validates on load. These are the most common errors and what t
 | States must be reachable | `state 'X' is not reachable from any on rule` |
 | `max_workers` must be positive | `max_workers for state 'X' must be a positive integer` |
 | `timeout` must be positive | `worker timeout for state 'X' must be a positive integer` |
-| `max_hops` must be positive | `max_hops must be a positive integer` |
+
+(`max_hops` and `max_worker_retries` are launch-time CLI flags rather than workflow YAML fields, so they are not validated by the workflow parser — the daemon checks them when applying the `orca run` defaults.)
 
 ---
 
@@ -1112,10 +1124,15 @@ Run multiple independent workflows in the same repo. Each run gets its own integ
 # Start the daemon once
 orca daemon start
 
-# Submit multiple tasks on separate branches
+# Submit multiple tasks on separate branches.
+# Check out the intended base branch before each run — `--base` is accepted
+# but not honored by the daemon-backed run path.
+git checkout -b feature-search origin/develop
+orca run task-search.md -b feature-search
+git checkout -b feature-auth main
 orca run task-auth.md -b feature-auth
+git checkout -b feature-billing main
 orca run task-billing.md -b feature-billing
-orca run task-search.md -b feature-search --base origin/develop
 ```
 
 Each run is identified by `branch:workflow` (e.g., `feature-auth:default`). Runs share the daemon but are fully isolated — separate state, separate worktrees, separate workers.
@@ -1131,17 +1148,14 @@ orca stop feature-auth:default
 orca tui
 ```
 
-Set the default base ref in your workflow config:
-
-```yaml
-base_branch: origin/main      # branches are created from here
-```
-
-Override per-run with `--base`:
+Workflow-level `base_branch` and the `--base` CLI flag are accepted for compatibility but **not honored** by the current daemon-backed run path — the daemon does not create the root run branch from this ref. Use `-b/--branch` to set the run branch explicitly, and check out your intended base before invoking `orca run` if branch setup matters:
 
 ```bash
-orca run task.md -b hotfix-123 --base origin/release/v2
+git checkout -b hotfix-123 origin/release/v2
+orca run task.md -b hotfix-123
 ```
+
+Prompts still receive a live `{{ issue.base_branch }}` value at dispatch time, resolved from the run/parent branch.
 
 ---
 

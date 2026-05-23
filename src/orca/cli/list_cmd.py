@@ -64,10 +64,7 @@ def runs_command(root: Path | None = None, *, waiting_only: bool = False) -> Non
                 # Truncate so the line stays under terminal width.
                 if len(reason) > 80:
                     reason = reason[:77] + "..."
-                if reason:
-                    print(f"  ⏸  {issue_short} [{state}]: {reason}")
-                else:
-                    print(f"  ⏸  {issue_short} [{state}]: (form-based — open in /forms/<run>/<issue>)")
+                print(f"  ⏸  {issue_short} [{state}]: {reason}")
 
     asyncio.run(_list())
 

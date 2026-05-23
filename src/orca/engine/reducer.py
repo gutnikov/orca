@@ -440,30 +440,6 @@ def _handle_worker_waiting(
 
     append_log(issue, event.timestamp, "worker_waiting", {"reason": event.reason})
 
-    if event.form is not None:
-        seen: set[str] = set()
-        duplicates: list[str] = []
-        for step in event.form.get("steps", []):
-            for block in step.get("blocks", []):
-                if block.get("kind") == "field":
-                    name = block.get("name")
-                    if name in seen:
-                        duplicates.append(name)
-                    seen.add(name)
-        if duplicates:
-            effects.append(
-                ErrorEffect(
-                    issue_id=event.issue_id,
-                    message=(
-                        f"Form schema for '{event.issue_id}' has duplicate field name(s): "
-                        f"{', '.join(sorted(set(duplicates)))}"
-                    ),
-                )
-            )
-        else:
-            issue.pending_form = event.form
-            issue.pending_form_submitted_at = None
-
 
 def _handle_worker_resumed(
     config: StateMachineConfig,
@@ -491,9 +467,6 @@ def _handle_worker_resumed(
         return
 
     append_log(issue, event.timestamp, "worker_resumed", {"message": event.message})
-
-    issue.pending_form = None
-    issue.pending_form_submitted_at = None
 
 
 def _apply_transition(

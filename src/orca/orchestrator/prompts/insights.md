@@ -20,7 +20,7 @@ All paths are relative to the repo root: `{repo_root}`
 | `{run_dir}/sessions.json` | Worker session history: started_at, completed_at, state name, worktree_path |
 | `{run_dir}/orca.log.jsonl` | Structured orchestrator logs (JSON lines). Look for ERROR and WARNING levels. |
 | `{repo_root}/.orca-state/sessions/*.log` | Worker session terminal logs (tmux scrollback). Shows exactly what each worker did. |
-| `{config_path}` | The flow config (`.orca/default.yml` or other) — states, transitions, worker prompts, settings |
+| `{config_path}` | The flow config (`.orca/default.yml` or other) — states, transitions, worker prompts, settings. May be empty if not auto-discovered; in that case, look under `.orca/*.yml` for the active workflow. |
 | Worker prompt files | Discover paths from the flow config (`worker.prompt` field per state). Read these to understand what workers were told to do. |
 
 ## Your Output
@@ -77,7 +77,7 @@ Look for:
 - **Bad transitions** — outcomes routing to wrong states, missing loopback conditions
 - **Prompt issues** — workers misunderstanding instructions, missing context, conflicting guidance. Quote the specific prompt lines and session log evidence.
 - **Parallelism opportunities** — states that could run in parallel but are sequential
-- **Setting issues** — timeouts too short/long, retry counts wrong, max_visits too low
+- **Setting issues** — timeouts too short/long, retry counts wrong, `--max-hops` set too low for the workflow's natural cycle count
 
 When proposing workflow changes, include the concrete flow config diff in the remediation field:
 

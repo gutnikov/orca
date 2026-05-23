@@ -20,8 +20,8 @@ repos:
   - repo: local
     hooks:
       - id: check-playbooks
-        name: Check playbook link integrity
+        name: Check playbook and plugin-skill link integrity
         entry: tools/check_playbooks.py
         language: script
-        files: ^(src/orca/playbooks/.*\.md|tools/check_playbooks\.py)$
+        files: ^(src/orca/playbooks/.*\.md|plugin/orca/skills/.*\.md|plugins/orca/skills/.*\.md|tools/check_playbooks\.py)$
         pass_filenames: false

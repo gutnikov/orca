@@ -164,7 +164,7 @@ If the user says **no**, note it in the final report and move on.
 - **Hidden fan-out on a merge state.** A merge/apply state must have `max_workers: 1`. Surface this explicitly to the user.
 - **Mystery field references.** If a prompt references `{{ issue.fields.X }}`, `X` must be declared in that issue type's `fields:` block. If an upstream state's `result_format` emits `X`, declare `X` as a carried field too; otherwise the reducer drops it instead of making it available to later prompts.
 - **Free-form outcomes.** Every value in `result_format.outcome.values` must appear in `on:` (or it's an unhandled terminal — confirm with the user).
-- **Generating a wrapper skill with a generic description.** Skill routing is description-driven; the offer in Step 9 is wasted if the trigger phrases don't match how the team actually speaks. Walk the description-authoring step from [`reference/wrapper-skill-template.md`](reference/wrapper-skill-template.md) — don't shortcut it.
+- **Generating a wrapper skill with a generic description.** Skill routing is description-driven; the offer in Step 8 is wasted if the trigger phrases don't match how the team actually speaks. Walk the description-authoring step from [`reference/wrapper-skill-template.md`](reference/wrapper-skill-template.md) — don't shortcut it.
 
 ## Done
 

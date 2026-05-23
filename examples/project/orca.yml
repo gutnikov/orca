@@ -90,7 +90,9 @@ states:
       needs_rescope: scoping           # loop back if planning discovers the issue is too big
 
   # Stage 3: Implement the feature following the plan, making all tests pass.
-  # If the worker needs user clarification, it uses Slack tools directly.
+  # If the worker needs user clarification, it emits `outcome: waiting` with a
+  # reason — supervisors (CLI or the orca-workflow-run skill) surface it and
+  # resume the worker via `orca unblock`.
   implementing:
     worker:
       kind: claude-code

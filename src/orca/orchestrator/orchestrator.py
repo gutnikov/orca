@@ -32,43 +32,11 @@ from orca.orchestrator.worktree import WorktreeManager
 logger = logging.getLogger(__name__)
 
 
-def _notify_form_pending(run_id: str, issue_id: str, repo_root: Path | None) -> None:
-    """Log the form URL and try to open the user's browser.
-
-    The daemon's localhost TCP listener serves the React form app; this
-    helper builds a URL pointing at it and best-effort opens the user's
-    default browser. Both the log line and the browser open are safe to
-    fail (e.g. headless SSH session — the URL is still in the log).
-
-    The bound port lives in ``daemon_dir/browser_port`` — preferred over
-    the env var because the daemon may have fallen back to a different
-    port when the requested one was busy. The env var is only honored
-    when no on-disk record exists.
-    """
-    port: int | None = None
-    if repo_root is not None:
-        from orca.daemon.lifecycle import read_browser_port
-
-        port = read_browser_port(repo_root)
-    if port is None:
-        raw = os.environ.get("ORCA_DAEMON_TCP_PORT", "7891")
-        if raw.strip().lower() in ("", "0", "off", "false"):
-            return
-        try:
-            port = int(raw)
-        except ValueError:
-            return
-    from urllib.parse import quote
-
-    url = f"http://127.0.0.1:{port}/forms/{quote(run_id, safe='')}/{quote(issue_id, safe='')}"
-    logger.info("⏳ Form pending for issue %s — open %s", issue_id, url)
-    try:
-        import webbrowser
-
-        webbrowser.open(url)
-    except Exception:
-        # Headless / no display — URL is still in the log.
-        pass
+class DeadlockError(RuntimeError):
+    """Raised when the run loop has nothing in flight and no pending effects,
+    yet the root issue is not in a terminal state — a workflow gap that
+    leaves the root un-finishable. The daemon marks the run FAILED so callers
+    don't conflate this with a clean COMPLETED."""
 
 
 def _slugify(title: str, max_len: int = 60) -> str:
@@ -232,18 +200,6 @@ class Orchestrator:
     def is_waiting(self, issue_id: str) -> bool:
         """True if a worker for this issue is currently blocked awaiting unblock."""
         return issue_id in self._waiting_workers
-
-    def mark_form_submitted(self, issue_id: str, ts: str) -> None:
-        """Stamp `pending_form_submitted_at` on an issue and persist.
-
-        Subsequent GETs on the form endpoint will return 410 until the worker
-        actually resumes (which clears both pending_form fields).
-        """
-        issue = self._state.issues.get(issue_id)
-        if issue is None:
-            return
-        issue.pending_form_submitted_at = ts
-        self.persistence.save(self._state)
 
     def _is_terminal(self, issue_id: str) -> bool:
         """Return True if the issue's current state is terminal in config."""
@@ -505,14 +461,14 @@ class Orchestrator:
         unblock_message: list[str] = []
         self._waiting_workers[effect.issue_id] = (unblock_event, unblock_message)
 
-        def _on_blocked(reason: str, form: dict[str, Any] | None) -> None:
+        def _on_blocked(reason: str) -> None:
             from orca.engine.types import WorkerWaitingEvent
 
             ts = self.now()
             self._state, _ = reduce(
                 self._config,
                 self._state,
-                WorkerWaitingEvent(issue_id=effect.issue_id, reason=reason, timestamp=ts, form=form),
+                WorkerWaitingEvent(issue_id=effect.issue_id, reason=reason, timestamp=ts),
                 self.generate_id,
                 self.now,
             )
@@ -522,12 +478,6 @@ class Orchestrator:
             # in-flight spinner.
             if self._session_sync is not None:
                 self._session_sync.manifest.update_waiting(tracking_id, waiting=True)
-            if form is not None:
-                # Derive run_id (branch:workflow) from the persistence state path.
-                state_path = self.persistence.state_path
-                branch = state_path.parent.parent.name
-                workflow = state_path.parent.name
-                _notify_form_pending(f"{branch}:{workflow}", effect.issue_id, self.repo_root)
 
         def _on_unblocked(message: str) -> None:
             from orca.engine.types import WorkerResumedEvent
@@ -651,9 +601,15 @@ class Orchestrator:
         run_dir = self.persistence.state_path.parent
         config_path = ""
         if self.repo_root:
-            for candidate in sorted(self.repo_root.glob("orca*.yml")):
-                config_path = str(candidate)
-                break
+            orca_dir = self.repo_root / ".orca"
+            if orca_dir.is_dir():
+                for candidate in sorted(orca_dir.glob("*.yml")):
+                    config_path = str(candidate)
+                    break
+            if not config_path:
+                for candidate in sorted(self.repo_root.glob("orca*.yml")):
+                    config_path = str(candidate)
+                    break
         return template.format(
             run_dir=str(run_dir),
             branch_name=self.root_branch,
@@ -741,7 +697,7 @@ class Orchestrator:
                     "Deadlock detected: no tasks in flight and no pending effects. Stopping.",
                     extra={"event": "deadlock_detected"},
                 )
-                break
+                raise DeadlockError(f"Deadlock: root issue {root_issue_id!r} not done and no pending work")
 
             # Wait for at least one task to complete, with timeout to check for retry signals
             done, _ = await asyncio.wait(

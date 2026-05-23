@@ -67,9 +67,20 @@ If the plan is insufficient or you need files outside your scope, report
 ### If Waiting for External Action
 
 If you need something outside your control (e.g., a PR to be merged, a
-dependency to be deployed, a manual approval), write `{"outcome": "waiting"}`
-to the result file. This is a built-in outcome — it pauses your session timer
-and keeps you alive until an operator unblocks you with a message.
+dependency to be deployed, a manual approval), write a result with
+`outcome: waiting` AND a non-empty `reason` field describing exactly what
+you're blocked on:
+
+```json
+{"outcome": "waiting", "reason": "Waiting on PR #1234 to merge before the new auth schema is available"}
+```
+
+This is a built-in outcome — it pauses your session timer and keeps you
+alive until an operator unblocks you with a message. The `reason` is
+required: if you write `outcome: waiting` with an empty or missing reason,
+the orchestrator will delete your result file and send you a correction
+message asking you to rewrite it. Workers that pause without a reason leave
+the run un-diagnosable from `state.json` or `orca runs`.
 
 ## Output
 

@@ -87,7 +87,7 @@ Or via MCP (if invoked through Claude Code / Cursor / etc.):
 orca_start_run(root="<absolute path>", task_file="<task-file>", workflow="<flow-name>", branch=None, run_id=None)
 ```
 
-The MCP form exposes only the four common arguments (`root`, `task_file`, `workflow`, `branch`, `run_id`). For `--max-hops`, `--max-retries`, and `--insights` you need the CLI form. `--base` is also CLI-only, but the daemon-backed run path currently does not apply it.
+The MCP form exposes only the five common arguments (`root`, `task_file`, `workflow`, `branch`, `run_id`). For `--max-hops`, `--max-retries`, and `--insights` you need the CLI form. `--base` is also CLI-only, but the daemon-backed run path currently does not apply it.
 
 `workflow` is optional — omit it to load `.orca/default.yml`. Pass it only when the project has multiple workflows under `.orca/` and you need a specific one.
 
@@ -163,6 +163,7 @@ When the run reaches `completed`, decide if a merge applies.
    `orca_list_runs` includes the run's `branch`; `orca_get_run` gives the issue state, sessions, and final output. If you only have the full run state, derive the branch from the `run_id` prefix before the final `:<workflow>` segment.
 
 2. **Merge applies** when:
+   - The root issue's state is `done` (a `completed` run with a non-`done` root indicates the orchestrator surfaced an unrecoverable error — though as of v0.4.9 deadlock is reported as `failed`, older state.json may still show `completed` with a non-`done` root).
    - The run summary has a `branch` value that isn't the project's default (`main` / `master`).
    - `git log <default>..<branch>` shows commits.
 

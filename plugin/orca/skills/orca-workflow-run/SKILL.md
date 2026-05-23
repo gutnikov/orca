@@ -14,7 +14,7 @@ You are stateful within the session. Track decisions you've already made (retrie
 - Detect health (worker active, log progressing, failure_count, hop_count)
 - Surface `waiting` outcomes to the user with whatever the worker actually asked
 - Unblock when the user replies
-- Handle terminal states (`COMPLETED`, `FAILED`, `INTERRUPTED`, `STOPPED`) appropriately
+- Handle terminal states (`completed`, `failed`, `interrupted`, `stopped`) appropriately
 
 You are not expected to understand what each state in the workflow means. Trust the worker's output to convey that.
 
@@ -24,15 +24,17 @@ You are not expected to understand what each state in the workflow means. Trust 
 |---|---|---|
 | `POLL_INTERVAL_SECONDS` | 45 | Seconds to wait between health-check polls during the watch loop |
 
-### Workflow-derived thresholds
+**Insights:** `--insights` and the matching `orca_get_insights` MCP tool are a CLI-side opt-in for a separate insights agent — not surfaced by this supervisor SKILL. If a user mentions insights, point them at the CLI (`orca run … --insights`) and at the `orca_get_insights` tool to read the resulting log.
 
-Read these from the workflow config on the first poll (via `orca_get_run`) and cache for the session. They're user-configurable per workflow — don't hardcode:
+### Run-derived thresholds
+
+`max_worker_retries` and `max_hops` are launch-time flags on `orca run` (`--max-retries` / `--max-hops`), **not** workflow YAML fields — the parser ignores top-level YAML keys with those names. The CLI applies defaults of **3** retries and **10** hops unless the user overrode them; MCP-started runs may not expose the effective values back to the supervisor. If you cannot read them from the caller context, fall back to those CLI defaults and note the assumption.
 
 | Name | Source | Fallback if unset |
 |---|---|---|
-| `MAX_RETRIES` | workflow `max_worker_retries` | 5 |
-| `MAX_HOPS` | workflow `max_hops` | 20 |
-| `HOP_ASK_THRESHOLD` | `MAX_HOPS - 2` | 18 |
+| `MAX_RETRIES` | `--max-retries` flag at launch | 3 |
+| `MAX_HOPS` | `--max-hops` flag at launch | 10 |
+| `HOP_ASK_THRESHOLD` | `MAX_HOPS - 2` | 8 |
 
 ## Context
 
@@ -43,7 +45,9 @@ Read these from the workflow config on the first poll (via `orca_get_run`) and c
 
 ## Pipeline
 
-Five phases. Phase 1 routes; phases 2, 3, 4 are mutually exclusive at any decision point. Phase 2's watch loop transitions to Phase 3 when the run completes.
+Four phases. Phase 1 routes; phases 2, 3, 4 are mutually exclusive at any decision point. Phase 2's watch loop transitions to Phase 3 when the run completes.
+
+The companion playbook (`orca_get_playbook("orca-workflow-run")`) uses lettered phases A–E that map to the SKILL phases as follows: Phase 1 ↔ A (pre-flight), Phase 4 ↔ B (start new work), Phase 2 ↔ C (watch), Phase 3 ↔ D (post-completion). The playbook's Phase E (wrap-up) happens implicitly here when the watch loop returns control to the user.
 
 ---
 
@@ -53,7 +57,7 @@ Gather state. Take no actions in this phase.
 
 1. Call `orca_list_runs(root)`. Do not filter by workflow — show whatever runs exist.
 2. Run `git status`.
-   - If the tree is dirty AND a `RUNNING` run with `worker_active: true` exists, the dirty state is expected (worker is mid-work). Proceed.
+   - If the tree is dirty AND a `running` run with `worker_active: true` exists, the dirty state is expected (worker is mid-work). Proceed.
    - Otherwise, if dirty: report to the user and ask before doing anything else.
 3. If a run exists, call `orca_get_run(root, run_id, compact=true)` to get its workflow name, current state name, `worker_active`, `failure_count`, `hop_count`, and `branch` (if any).
 
@@ -61,20 +65,20 @@ Route on what you found:
 
 | Found | Next |
 |---|---|
-| `RUNNING` run | Phase 2 (watch) |
-| `COMPLETED` run | Phase 3 (post-completion) |
-| `FAILED` or `INTERRUPTED` run | Call `orca_resume_run(root, run_id)`, then Phase 2 |
-| `STOPPED` run | Report to user. Ask whether to resume, drop, or leave it. Act on their decision. |
+| `running` run | Phase 2 (watch) |
+| `completed` run | Phase 3 (post-completion) |
+| `failed` or `interrupted` run | Call `orca_resume_run(root, run_id)`, then Phase 2 |
+| `stopped` run | Report to user. Ask whether to resume, drop, or leave it. Act on their decision. |
 | No runs, user provided a task | Phase 4 (start) |
 | No runs, no task | Tell the user "no active runs and no task provided — what would you like to work on?" and wait |
 
-If multiple runs exist (shouldn't happen under serial execution), handle in priority order: `RUNNING` > `COMPLETED` > `FAILED`/`INTERRUPTED` > `STOPPED`.
+If multiple runs exist (shouldn't happen under serial execution), handle in priority order: `running` > `completed` > `failed`/`interrupted` > `stopped`.
 
 ---
 
 ## Phase 2: Watch the Run
 
-A run is `RUNNING`. Enter a polling loop. Each iteration:
+A run is `running`. Enter a polling loop. Each iteration:
 
 1. Sleep `POLL_INTERVAL_SECONDS` (skip the sleep on the very first poll).
 2. Call `orca_get_run(root, run_id, compact=true)` and `orca_get_worker_log(root, run_id, issue_id, tail=50)`.
@@ -85,9 +89,9 @@ Extract `issue_id` from the run's `issues` dict.
 
 ### Routing within the watch loop
 
-**Healthy** — `worker_active: true`, log shows new output since last poll, `failure_count` low, `hop_count` below threshold: continue polling.
+**Healthy** — `worker_active: true`, log shows new output since last poll, `failure_count < MAX_RETRIES`, `hop_count < HOP_ASK_THRESHOLD`: continue polling.
 
-**Run completed** — status becomes `COMPLETED`: exit the watch loop and proceed to Phase 3.
+**Run completed** — status becomes `completed`: exit the watch loop and proceed to Phase 3.
 
 **Worker `waiting` outcome** — the worker paused and is asking for human input. This is the normal handoff and can occur at any state in the workflow.
 
@@ -101,7 +105,7 @@ Compose a clear summary for the user:
 
 End your turn. When the user replies, call `orca_unblock_worker(root, run_id, issue_id, message)` with their reply text and resume polling.
 
-**Worker not active, run still `RUNNING`** (worker crashed between retries):
+**Worker not active, run still `running`** (worker crashed between retries):
 - If `failure_count` < `MAX_RETRIES`: orca will auto-retry. Note this in your session state and poll again.
 - If `failure_count` >= `MAX_RETRIES`: treat as stuck.
 
@@ -135,7 +139,7 @@ Wait for the user's decision. Act on it. **Do not stop the run unless the user s
 
 ## Phase 3: Run Completed
 
-A run has status `COMPLETED`. What "completed" means depends on the workflow. Some workflows produce a feature branch ready to merge; others finish a one-shot operation with no merge step (analysis, deploy, scripted task, etc.). Decide whether merge applies based on what the run actually produced.
+A run has status `completed`. What "completed" means depends on the workflow. Some workflows produce a feature branch ready to merge; others finish a one-shot operation with no merge step (analysis, deploy, scripted task, etc.). Decide whether merge applies based on what the run actually produced.
 
 1. Call `orca_get_run(root, run_id)` to get the full run state. Extract `branch`, workflow name, and any final worker output.
 2. **Surface what was produced** in 2-3 sentences before deciding on merge/drop — the key result, the touched files (if any), and the final state's headline. This gives the user a chance to object *to the output* before being asked to act on it.
@@ -173,7 +177,7 @@ The user described a task in chat. There are no active runs.
 
 1. **Determine the workflow:**
    - If the user's request specifies one (e.g., "start an issue run for X"), use that.
-   - Otherwise, look at `.orca/workflows/` (or wherever workflows are defined in this project) to see what's available, and ask the user which to use.
+   - Otherwise, look at `.orca/*.yml` (each workflow is a YAML file directly under `.orca/`) to see what's available, and ask the user which to use.
    - If only one workflow exists, default to it but tell the user which one you picked.
 2. **Propose an issue ID:** short, slugified, lowercase (e.g., `add-dark-mode`, `fix-board-drag`). Show it and let the user override.
 3. **Learn the input schema:**
@@ -197,14 +201,14 @@ Quick reference for the watch loop. Apply at most one auto-remediation per sessi
 
 | Failure Mode | Detection | First Auto-Remediation | If That Fails |
 |---|---|---|---|
-| Worker crash | `worker_active: false`, run RUNNING, `failure_count` rising | Let orca auto-retry; note in session state | Surface to user |
-| Worker timeout / FAILED | Run becomes `FAILED` | `orca_resume_run` | Surface to user |
-| Run INTERRUPTED | Daemon restart mid-run | `orca_resume_run` | Surface to user |
+| Worker crash | `worker_active: false`, run still `running`, `failure_count` rising | Let orca auto-retry; note in session state | Surface to user |
+| Worker timeout / failed | Run becomes `failed` | `orca_resume_run` | Surface to user |
+| Run interrupted | Daemon restart mid-run | `orca_resume_run` | Surface to user |
 | Stuck in `waiting` | Worker outcome is `waiting` | Not stuck — this is the normal handoff. Surface the worker's request to the user. | n/a |
 | State cycle / loop | `hop_count` > threshold, repeating cycle between states | None — surface to user (judgment call) | n/a |
 | Repeated identical errors | Same error across retries | `orca_retry_issue` once | Surface to user |
 | Zombie worker | `worker_active: true`, no new log output, idle prompt | `orca_unblock_worker` with a generic nudge | Surface to user |
-| Git dirty, no active worker | Dirty tree, no RUNNING run with `worker_active: true` | None — surface immediately | n/a |
+| Git dirty, no active worker | Dirty tree, no `running` run with `worker_active: true` | None — surface immediately | n/a |
 
 When surfacing, always include: what went wrong (1-2 sentences), what you tried, last 20-30 log lines, and concrete options.
 

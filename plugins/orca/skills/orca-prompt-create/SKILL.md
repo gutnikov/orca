@@ -25,7 +25,7 @@ Fetch these via the `orca_get_playbook` MCP tool before doing anything. Pass the
 - `orca-prompt-create` — end-to-end procedure (Steps 1–5)
 - `reference/orca-config-reference` — template variables, `result_format` schema
 
-If `orca_get_playbook` is not available, the orca MCP server isn't running or is on an older version — tell the user to run `orca daemon start` (or `pipx upgrade orca && orca daemon restart` if the tool genuinely doesn't exist).
+If `orca_get_playbook` is not available, the orca MCP server isn't running or is on an older version — tell the user to run `orca daemon start` (or, if the tool genuinely doesn't exist, reinstall and restart: `pipx install --force "git+ssh://git@github.com/gutnikov/orca.git" && orca daemon stop && orca daemon start`. Git installs require `pipx install --force` rather than `pipx upgrade`, and the CLI exposes only `orca daemon start|stop|status` — there is no `daemon restart`).
 
 ## Create mode
 

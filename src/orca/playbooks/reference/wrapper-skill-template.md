@@ -2,7 +2,7 @@
 
 A **wrapper skill** is a thin SKILL.md scaffolded into a user's project alongside an orca workflow, so anyone on the team can invoke the workflow with natural language ("fix this bug", "ship a feature") without knowing Orca exists. The wrapper composes a `task.md` from the user's ask and starts the run via the orca MCP tool — fire-and-forget. Supervision stays in the `orca-workflow-run` skill.
 
-This doc is the source of truth for **what** to write and **where**, used by Step 9 of [`../orca-workflow-create.md`](../orca-workflow-create.md).
+This doc is the source of truth for **what** to write and **where**, used by Step 8 of [`../orca-workflow-create.md`](../orca-workflow-create.md).
 
 ## When to use this
 

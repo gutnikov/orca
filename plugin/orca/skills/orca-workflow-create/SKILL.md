@@ -20,7 +20,7 @@ Infer the mode from context:
 
 ## Required reading (you, the agent — not the user)
 
-Fetch these via the `orca_get_playbook` MCP tool before doing anything. Pass the name without `.md`. Markdown links inside any returned playbook (e.g. `[orca-glossary](reference/orca-glossary.md)`) are also playbook names — follow them by calling the tool again with the link target.
+Fetch these via the `orca_get_playbook` MCP tool before doing anything. Pass the name without `.md`. Markdown link targets inside any returned playbook (e.g. a link pointing at `reference/orca-glossary.md`) are also playbook names — strip the `.md` and pass the remainder to `orca_get_playbook` to follow them.
 
 - `reference/orca-glossary` — terms used below (outcome vs target, `failed` ambiguity, bounds and timers)
 - `reference/orca-config-reference` — full schema, validation rules, recommended defaults
@@ -29,7 +29,7 @@ Fetch these via the `orca_get_playbook` MCP tool before doing anything. Pass the
 - `orca-workflow-create` — end-to-end procedure for **Create** mode
 - `orca-workflow-review` — three-layer audit procedure for **Audit** mode
 
-If `orca_get_playbook` is not available, the orca MCP server isn't running or is on an older version — tell the user to run `orca daemon start` (or `pipx upgrade orca && orca daemon restart` if the tool genuinely doesn't exist).
+If `orca_get_playbook` is not available, the orca MCP server isn't running or is on an older version — tell the user to run `orca daemon start` (or, if the tool genuinely doesn't exist, reinstall and restart: `pipx install --force "git+ssh://git@github.com/gutnikov/orca.git" && orca daemon stop && orca daemon start`. Git installs require `pipx install --force` rather than `pipx upgrade`, and the CLI exposes only `orca daemon start|stop|status` — there is no `daemon restart`).
 
 For a complete worked example, fetch `examples/project/orca.yml` and `examples/project/prompts/` from https://github.com/gutnikov/orca/tree/main/examples/project.
 
@@ -91,4 +91,4 @@ If yes, follow the `orca-workflow-run` skill (or the `orca-workflow-run.md` play
 
 ## Wrapper skill integration
 
-After the workflow is created (and optionally smoke-tested), offer a thin convenience wrapper skill so the team can invoke the workflow without knowing Orca exists. See Step 9 of the `orca-workflow-create` playbook and the template at `reference/wrapper-skill-template` — both fetched via `orca_get_playbook`. The wrapper is fire-and-forget — it composes `task.md` from natural-language input and starts the run via `orca_start_run` once. Always write both `.claude/skills/<name>/SKILL.md` and `.agents/skills/<name>/SKILL.md` so the wrapper works regardless of host CLI.
+After the workflow is created (and optionally smoke-tested), offer a thin convenience wrapper skill so the team can invoke the workflow without knowing Orca exists. See Step 8 of the `orca-workflow-create` playbook and the template at `reference/wrapper-skill-template` — both fetched via `orca_get_playbook`. The wrapper is fire-and-forget — it composes `task.md` from natural-language input and starts the run via `orca_start_run` once. Always write both `.claude/skills/<name>/SKILL.md` and `.agents/skills/<name>/SKILL.md` so the wrapper works regardless of host CLI.

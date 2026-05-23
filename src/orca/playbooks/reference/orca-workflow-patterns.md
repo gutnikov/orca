@@ -92,6 +92,9 @@ types:
         on:
           done: applying
           blocked: implementing
+      # `conflict` (below) is a domain-specific outcome name. Avoid naming it
+       # `failed` — that would collide with the built-in `failed` target,
+       # which has retry semantics rather than transition semantics.
       applying:
         max_workers: 1
         worker:
@@ -100,9 +103,9 @@ types:
           result_format:
             outcome:
               type: enum
-              values: [applied, conflict]   # use a domain-specific name; avoid `failed`
-        on:                                  # to keep it visibly distinct from the built-in
-          applied: done                      # `failed` target (which triggers retry semantics)
+              values: [applied, conflict]
+        on:
+          applied: done
           conflict: implementing
 ```
 

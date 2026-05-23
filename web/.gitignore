@@ -3,6 +3,7 @@ dist-ssr
 _dist_stub
 *.local
 *.tsbuildinfo
+.tanstack
 
 # Editor
 .vscode/*

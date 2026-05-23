@@ -19,7 +19,7 @@ pipx install "git+ssh://git@github.com/gutnikov/orca.git"
 
 Verify: `orca -v` should print a version hash. If `which orca` doesn't resolve afterwards, `pipx` likely needs `pipx ensurepath` followed by a shell restart — tell the user.
 
-For the full prereq checklist (pipx, git, tmux, an agent CLI, GitHub SSH), see [`orca-install.md`](../../../../src/orca/playbooks/orca-install.md) in the bundled playbooks.
+For the full prereq checklist (pipx, git, tmux, an agent CLI, GitHub SSH), fetch `orca-install` via the `orca_get_playbook` MCP tool — the bundled playbook ships with the installed orca package.
 
 ## 2. Start the daemon
 
@@ -86,18 +86,28 @@ states:
   implementing:
     worker:
       kind: codex
-      prompt: prompts/implement.md
+      prompt: prompts/implementing.md
       timeout: 600
       result_format:
         outcome:
           type: enum
-          values: [done]
+          values: [done, blocked]
           description: "Implementation result"
+          values_description:
+            done: "Implemented and verified"
+            blocked: "Cannot proceed; explain why in summary"
+        summary:
+          type: string
+          description: "Why the worker stopped (required when blocked)"
+          required_when: [blocked]
     on:
       done: done
+      blocked: failed
 ```
 
-Create `.orca/prompts/implement.md`:
+Every active state needs at least one non-success outcome so the worker has a routable way to report it cannot proceed — otherwise blocked work is silently reported as `done`. The built-in `failed` target above triggers retry logic up to `--max-retries` (CLI default 3); after that the issue surfaces as stuck for human intervention.
+
+Create `.orca/prompts/implementing.md`:
 
 ````markdown
 # Implementing Agent
@@ -119,7 +129,9 @@ You are an implementation agent working in an isolated git worktree.
 
 ## Output
 
-When you are finished, write a result file to `{{ result_path }}` with this exact shape:
+When you are finished, write a result file to `{{ result_path }}`.
+
+If everything was implemented and verified, write:
 
 ```json
 {
@@ -127,7 +139,16 @@ When you are finished, write a result file to `{{ result_path }}` with this exac
 }
 ```
 
-The `outcome` field must be the literal string `"done"`. Do not copy a schema definition into the file.
+If you cannot proceed — the requirements are ambiguous, a dependency is missing, tests are failing in a way you cannot fix within scope, etc. — write:
+
+```json
+{
+  "outcome": "blocked",
+  "summary": "One or two sentences explaining what is blocking you"
+}
+```
+
+The `outcome` field must be the literal string `"done"` or `"blocked"`. Do not copy a schema definition into the file.
 ````
 
 ## 7. Create a test task and run it
