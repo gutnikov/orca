@@ -67,6 +67,7 @@ async def _start_run(request: Request) -> JSONResponse:
             max_hops=body.get("max_hops"),
             max_retries=body.get("max_retries"),
             insights=bool(body.get("insights", False)),
+            debug=bool(body.get("debug", False)),
         )
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
@@ -260,12 +261,65 @@ async def _hot_session(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
+async def _get_debug_review(request: Request) -> JSONResponse:
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    issue_id: str = request.path_params["issue_id"]
+    snapshot = manager.get_debug_review(run_id, issue_id)
+    if snapshot is None:
+        return JSONResponse({"error": "not_pending"}, status_code=404)
+    return JSONResponse(snapshot)
+
+
+async def _post_debug_decide(request: Request) -> JSONResponse:
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    issue_id: str = request.path_params["issue_id"]
+    try:
+        body: dict[str, Any] = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+    action = body.get("action")
+    comments = body.get("comments", [])
+    if action not in ("accept", "restart", "modify_restart", "stop"):
+        return JSONResponse({"error": f"invalid action: {action!r}"}, status_code=400)
+
+    try:
+        manager.submit_debug_decision(run_id, issue_id, action, comments)
+    except ValueError as exc:
+        msg = str(exc)
+        if "not found" in msg:
+            return JSONResponse({"error": msg}, status_code=404)
+        if "already_decided" in msg:
+            return JSONResponse({"error": msg}, status_code=409)
+        if "run_stopped" in msg:
+            return JSONResponse({"error": msg}, status_code=410)
+        return JSONResponse({"error": msg}, status_code=400)
+
+    return JSONResponse({"accepted": True})
+
+
+async def _post_restart_state(request: Request) -> JSONResponse:
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    issue_id: str = request.path_params["issue_id"]
+    try:
+        await manager.restart_state(run_id, issue_id)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return JSONResponse({"status": "restarted"})
+
+
 def create_app(manager: RunManager) -> Starlette:
     """Full daemon HTTP API — UDS-only privileged surface."""
     routes = [
         Route("/api/status", _status, methods=["GET"]),
         Route("/api/runs", _list_runs, methods=["GET"]),
         Route("/api/runs/start", _start_run, methods=["POST"]),
+        Route("/api/runs/{run_id:path}/issues/{issue_id}/debug", _get_debug_review, methods=["GET"]),
+        Route("/api/runs/{run_id:path}/issues/{issue_id}/debug/decide", _post_debug_decide, methods=["POST"]),
+        Route("/api/runs/{run_id:path}/issues/{issue_id}/debug/restart", _post_restart_state, methods=["POST"]),
         Route("/api/runs/{run_id:path}/issues/{issue_id}", _get_issue, methods=["GET"]),
         Route("/api/runs/{run_id:path}/insights", _get_insights, methods=["GET"]),
         Route("/api/runs/{run_id:path}/logs/{issue_id}", _get_worker_log, methods=["GET"]),
