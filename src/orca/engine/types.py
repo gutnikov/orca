@@ -236,7 +236,39 @@ class WorkerResumedEvent:
     timestamp: str
 
 
-Event = CreateEvent | AdvanceEvent | WorkerResultEvent | WorkerFailedEvent | WorkerWaitingEvent | WorkerResumedEvent
+@dataclass(frozen=True)
+class DebugReviewRequiredEvent:
+    issue_id: str
+    snapshot: DebugReviewSnapshot
+    timestamp: str
+
+
+@dataclass(frozen=True)
+class DebugDecisionEvent:
+    issue_id: str
+    action: str  # "accept" | "restart" | "modify_restart" | "stop"
+    comments: list[InlineComment]
+    timestamp: str
+
+
+@dataclass(frozen=True)
+class DebugModifyRequestEvent:
+    issue_id: str
+    comments: list[InlineComment]
+    timestamp: str
+
+
+Event = (
+    CreateEvent
+    | AdvanceEvent
+    | WorkerResultEvent
+    | WorkerFailedEvent
+    | WorkerWaitingEvent
+    | WorkerResumedEvent
+    | DebugReviewRequiredEvent
+    | DebugDecisionEvent
+    | DebugModifyRequestEvent
+)
 
 
 # --- Effects (frozen) ---
