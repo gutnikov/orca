@@ -64,3 +64,51 @@ class WorktreeManager:
     def resolve(self, branch_name: str) -> Path:
         """Get the worktree path for a branch name."""
         return self.repo_root / ".orca-state" / "worktrees" / branch_name
+
+    async def reset_to(self, branch_name: str, commit: str) -> None:
+        """Hard-reset the worktree branch to a specific commit and clean untracked files."""
+        worktree_path = self.resolve(branch_name)
+        if not worktree_path.exists():
+            msg = f"Worktree for branch {branch_name!r} does not exist"
+            raise WorktreeError(msg)
+
+        check = await asyncio.create_subprocess_exec(
+            "git",
+            "rev-parse",
+            "--verify",
+            commit,
+            cwd=str(worktree_path),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await check.communicate()
+        if check.returncode != 0:
+            msg = f"Commit {commit!r} not found in worktree {branch_name!r}: {stderr.decode()}"
+            raise WorktreeError(msg)
+
+        reset = await asyncio.create_subprocess_exec(
+            "git",
+            "reset",
+            "--hard",
+            commit,
+            cwd=str(worktree_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await reset.communicate()
+        if reset.returncode != 0:
+            msg = f"Failed to reset {branch_name!r} to {commit!r}: {stderr.decode()}"
+            raise WorktreeError(msg)
+
+        clean = await asyncio.create_subprocess_exec(
+            "git",
+            "clean",
+            "-fd",
+            cwd=str(worktree_path),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await clean.communicate()
+        if clean.returncode != 0:
+            msg = f"Failed to clean {branch_name!r}: {stderr.decode()}"
+            raise WorktreeError(msg)
