@@ -734,7 +734,28 @@ def _handle_debug_decision(
         "debug_decision",
         {"action": event.action, "comments": [c.to_dict() for c in event.comments]},
     )
-    # Action branches implemented in Tasks 5-8.
+    if event.action == "accept":
+        last_result = next(
+            (e.data for e in reversed(issue.event_log) if e.type == "worker_result"),
+            None,
+        )
+        if last_result is None:
+            effects.append(
+                ErrorEffect(
+                    issue_id=event.issue_id,
+                    message=f"Issue '{event.issue_id}': no worker_result to accept",
+                )
+            )
+            return
+        issue.debug_pending = False
+        result_event = WorkerResultEvent(
+            issue_id=event.issue_id,
+            result=last_result,
+            timestamp=event.timestamp,
+        )
+        issue.worker_active = True
+        _handle_worker_result(config, state, result_event, effects, generate_id, ts, run_debug=False)
+        return
 
 
 def _handle_debug_modify_request(

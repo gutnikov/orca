@@ -92,3 +92,21 @@ def test_debug_review_required_event_appends_log_entry() -> None:
     entries = [e for e in new_state.issues["i1"].event_log if e.type == "debug_review_required"]
     assert len(entries) == 1
     assert entries[0].data["snapshot"]["base_commit"] == "abc"
+
+
+def test_debug_decision_accept_applies_transition() -> None:
+    config = _make_config()
+    state = _make_state(worker_active=False)
+    issue = state.issues["i1"]
+    issue.debug_pending = True
+    from orca.engine.types import EventLogEntry
+
+    issue.event_log.append(EventLogEntry(timestamp="t0", type="worker_result", data={"outcome": "done"}))
+
+    from orca.engine.types import DebugDecisionEvent
+
+    event = DebugDecisionEvent(issue_id="i1", action="accept", comments=[], timestamp="t1")
+    new_state, _ = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
+
+    assert new_state.issues["i1"].state == "done"
+    assert new_state.issues["i1"].debug_pending is False
