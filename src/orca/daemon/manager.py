@@ -85,6 +85,7 @@ class RunInfo:
     orchestrator: Orchestrator | None = None
     task: asyncio.Task[None] | None = field(default=None, repr=False)
     insights: bool = False
+    debug: bool = False
 
     def to_summary(self) -> dict[str, Any]:
         """JSON-serializable summary."""
@@ -106,6 +107,7 @@ class RunInfo:
             "terminal_count": terminal_count,
             "created_at": self.created_at,
             "waiting_issues": waiting_issues,
+            "debug": self.debug,
         }
 
 
@@ -135,6 +137,7 @@ class RunManager:
         max_retries: int | None = None,
         *,
         insights: bool = False,
+        debug: bool = False,
     ) -> str:
         """Start a new orchestrator run. Returns run_id.
 
@@ -249,6 +252,7 @@ class RunManager:
             session_sync=session_sync,
             insights_enabled=insights,
         )
+        orchestrator.debug = debug
 
         # Create RunInfo and launch
         now_str = _now()
@@ -262,6 +266,7 @@ class RunManager:
             config=config,
             orchestrator=orchestrator,
             insights=insights,
+            debug=debug,
         )
 
         async def _run_wrapper() -> None:
@@ -622,6 +627,60 @@ class RunManager:
         if not run_info.orchestrator.unblock_worker(issue_id, message):
             msg = f"Issue '{issue_id}' is not waiting in run '{run_id}'"
             raise ValueError(msg)
+
+    def submit_debug_decision(
+        self,
+        run_id: str,
+        issue_id: str,
+        action: str,
+        comments: list[dict[str, Any]],
+    ) -> None:
+        """Submit a debug decision. Raises ValueError with categorized messages
+        that the HTTP layer maps to 400/404/409/410."""
+        run_info = self._runs.get(run_id)
+        if run_info is None:
+            raise ValueError(f"Run {run_id!r} not found")
+        if run_info.status == RunStatus.STOPPED:
+            raise ValueError(f"Run {run_id!r}: run_stopped")
+        if run_info.orchestrator is None:
+            raise ValueError(f"Run {run_id!r}: no orchestrator")
+        if not run_info.orchestrator.is_debug_pending(issue_id):
+            issue = run_info.orchestrator.state.issues.get(issue_id)
+            if issue is not None:
+                last_decision = next(
+                    (e for e in reversed(issue.event_log) if e.type == "debug_decision"),
+                    None,
+                )
+                if last_decision is not None:
+                    raise ValueError(
+                        f"Issue {issue_id!r}: already_decided (prior action: {last_decision.data.get('action')})"
+                    )
+            raise ValueError(f"Issue {issue_id!r}: not_pending")
+        run_info.orchestrator.submit_debug_decision(issue_id, action, comments)
+
+    async def restart_state(self, run_id: str, issue_id: str) -> None:
+        """Restart a state after a modify_restart rewrite."""
+        run_info = self._runs.get(run_id)
+        if run_info is None:
+            raise ValueError(f"Run {run_id!r} not found")
+        if run_info.orchestrator is None:
+            raise ValueError(f"Run {run_id!r}: no orchestrator")
+        await run_info.orchestrator.restart_state(issue_id)
+
+    def get_debug_review(self, run_id: str, issue_id: str) -> dict[str, Any] | None:
+        """Return the latest DebugReviewSnapshot as a dict, or None if not pending."""
+        run_info = self._runs.get(run_id)
+        if run_info is None or run_info.orchestrator is None:
+            return None
+        if not run_info.orchestrator.is_debug_pending(issue_id):
+            return None
+        issue = run_info.orchestrator.state.issues.get(issue_id)
+        if issue is None:
+            return None
+        for entry in reversed(issue.event_log):
+            if entry.type == "debug_review_required":
+                return entry.data.get("snapshot")
+        return None
 
     def retry_issue(self, run_id: str, issue_id: str) -> None:
         """Retry a failed issue. If the orchestrator loop has finished, restart it."""
