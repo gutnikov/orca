@@ -666,6 +666,42 @@ class Orchestrator:
             )
             raise
 
+    async def restart_state(self, issue_id: str) -> None:
+        """Reset the worktree and re-dispatch the worker after a modify_restart rewrite."""
+        issue = self._state.issues.get(issue_id)
+        if issue is None:
+            raise ValueError(f"Issue {issue_id!r} not found")
+        if not issue.modify_pending:
+            raise ValueError(f"Issue {issue_id!r} is not in modify_pending state")
+
+        from orca.engine.config import parse_config
+
+        config_path = self._resolve_config_path()
+        try:
+            parse_config(config_path.read_text())
+        except Exception as exc:
+            raise ValueError(f"Workflow YAML failed validation after rewrite: {exc}") from exc
+
+        await self._reset_worktree_for_issue(issue_id)
+
+        issue.modify_pending = False
+        issue.worker_active = True
+        issue.failure_count = 0
+
+        from orca.engine.dispatch import append_log, build_issue_context, build_result_format
+        from orca.engine.types import DispatchWorkerEffect
+
+        effect = DispatchWorkerEffect(
+            issue_id=issue_id,
+            issue_type=issue.type,
+            state=issue.state,
+            result_format=build_result_format(self._config, issue.type, issue.state),
+            issue=build_issue_context(self._state, issue_id),
+        )
+        self._spawn_worker(effect)
+        append_log(issue, self.now(), "worker_dispatched", {"state": issue.state})
+        self.persistence.save(self._state)
+
     def _process_retry_signals(self, pending: list[DispatchWorkerEffect]) -> bool:
         """Check for retry signal files from the TUI. Returns True if any retries were queued."""
         retry_dir = self.persistence.state_path.parent / "retry"
