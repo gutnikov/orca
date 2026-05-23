@@ -105,6 +105,28 @@ Compose a clear summary for the user:
 
 End your turn. When the user replies, call `orca_unblock_worker(root, run_id, issue_id, message)` with their reply text and resume polling.
 
+**Debug-mode pause** — the run was started with `debug: true` and the worker has finished a state. The reducer pauses *before* applying the transition; the user reviews and decides via a browser UI.
+
+Detection: in the non-compact `orca_get_run` output, scan the issue's `event_log` from the tail for the most recent entry of `type == "debug_review_required"`. If there's no later `debug_decision` entry for the same issue, the pause is unresolved.
+
+Surface the review URL to the user — do NOT poll silently waiting for the worker. The URL pattern is:
+
+```
+http://localhost:<browser-port>/debug/<run_id>/<issue_id>
+```
+
+Get `<browser-port>` from `orca_daemon_status(root).browser_port` (or read `<root>/.orca-state/daemon/browser-port`). Tell the user:
+
+> Worker paused for debug review at state `<state-name>`.
+> Review: `http://localhost:<port>/debug/<run_id>/<issue_id>`
+> Pick one of: Modify prompt + config & restart / Restart without changes / Accept & continue / Stop run.
+
+Then wait for the user's action. After they submit, the next poll will show one of:
+
+- `debug_decision` with `action: accept` or `restart` → daemon handles dispatch; resume polling normally.
+- `debug_decision` with `action: stop` → run will transition to `stopped`; exit watch.
+- `debug_decision` with `action: modify_restart` followed by `debug_modify_request` → the user wants a prompt+config rewrite. Delegate to the `orca-prompt-config-rewrite` skill (pass `run_id` and `issue_id`). It reads the user's inline comments from the `debug_modify_request.data.comments`, edits the relevant files, and calls `orca_restart_state` — after which a new `worker_dispatched` log entry appears and polling resumes.
+
 **Worker not active, run still `running`** (worker crashed between retries):
 - If `failure_count` < `MAX_RETRIES`: orca will auto-retry. Note this in your session state and poll again.
 - If `failure_count` >= `MAX_RETRIES`: treat as stuck.

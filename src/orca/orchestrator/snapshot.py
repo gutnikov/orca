@@ -28,7 +28,16 @@ def extract_config_slice(config_yaml: str, issue_type: str, state_id: str) -> st
     if state_def is None:
         return f"# State {issue_type}.{state_id} not found in workflow YAML"
     sliced = {state_id: state_def}
-    return yaml.safe_dump(sliced, sort_keys=False, default_flow_style=False)
+    # allow_unicode keeps en-dashes, §, etc. as literal characters instead of
+    # \u-escapes; width=10**9 disables PyYAML's line-wrapping so long strings
+    # render on one line (much nicer for syntax-highlighted display).
+    return yaml.safe_dump(
+        sliced,
+        sort_keys=False,
+        default_flow_style=False,
+        allow_unicode=True,
+        width=10**9,
+    )
 
 
 _HUNK_HEADER = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
