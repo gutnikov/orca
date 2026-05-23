@@ -247,3 +247,41 @@ MCP tool equivalents (when invoked through a coding agent):
 | `orca_list_playbooks` | (no CLI) | Enumerate available playbooks. |
 
 If you're driving from a shell rather than a host CLI, the `orca logs <run_id> [issue_id] [--tail N]` command is the shell fallback for tailing worker output — same content as `orca_get_worker_log`. Omit `issue_id` to list issues in the run; pass `--tail` to bound output.
+
+## Debug-pause handling
+
+When `--debug` is set on a run, the daemon pauses every worker post-completion
+and surfaces a review URL. The host loop must handle three new event types:
+
+- `debug_review_required` — worker has paused. Print the review URL and wait.
+  Detect by polling `orca_get_run(run_id, compact=true)` and scanning each
+  issue's event log for an unresolved `debug_review_required` (no matching
+  `debug_decision` after it).
+- `debug_decision` with `action == "modify_restart"` — user wants the prompt
+  and config rewritten. Find the matching `debug_modify_request` event for
+  the same issue. Delegate to the `orca-prompt-config-rewrite` skill.
+- `debug_modify_request` — present in the event log right after a
+  `modify_restart` decision. Source for the rewrite skill's input.
+
+### Loop
+
+1. Poll `orca_get_run(run_id, compact=true)` every ~5s.
+2. For each issue, scan its event log in reverse order for the most recent
+   debug event.
+3. If the most recent is `debug_review_required` without a `debug_decision`
+   after it: print `http://localhost:<browser-port>/debug/<run_id>/<issue_id>`.
+   Wait and poll again.
+4. If the most recent is `debug_modify_request` and the issue's
+   `modify_pending` is True: invoke `orca-prompt-config-rewrite` for that
+   issue. After the skill completes (calls `orca_restart_state`), the issue's
+   `modify_pending` becomes False and a new `worker_dispatched` log entry
+   appears.
+5. If the most recent is `debug_decision` with action `restart` or `accept`:
+   nothing to do — the daemon handles dispatch.
+6. If the most recent is `debug_decision` with action `stop`: the run is
+   being stopped. Wait for `status` to become `stopped` and exit the loop.
+
+### Browser port
+
+Read `<repo>/.orca-state/daemon/browser-port` for the active browser-facing
+TCP port. Use it to construct the review URL.
