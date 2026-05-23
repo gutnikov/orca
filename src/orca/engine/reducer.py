@@ -757,6 +757,22 @@ def _handle_debug_decision(
         _handle_worker_result(config, state, result_event, effects, generate_id, ts, run_debug=False)
         return
 
+    if event.action == "restart":
+        issue.debug_pending = False
+        issue.worker_active = True
+        issue.failure_count = 0
+        effects.append(
+            DispatchWorkerEffect(
+                issue_id=event.issue_id,
+                issue_type=issue.type,
+                state=issue.state,
+                result_format=build_result_format(config, issue.type, issue.state),
+                issue=build_issue_context(state, event.issue_id),
+            )
+        )
+        append_log(issue, ts, "worker_dispatched", {"state": issue.state})
+        return
+
 
 def _handle_debug_modify_request(
     config: StateMachineConfig,

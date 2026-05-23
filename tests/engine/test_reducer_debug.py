@@ -110,3 +110,19 @@ def test_debug_decision_accept_applies_transition() -> None:
 
     assert new_state.issues["i1"].state == "done"
     assert new_state.issues["i1"].debug_pending is False
+
+
+def test_debug_decision_restart_emits_dispatch_effect() -> None:
+    from orca.engine.types import DebugDecisionEvent, DispatchWorkerEffect
+
+    config = _make_config()
+    state = _make_state(worker_active=False)
+    state.issues["i1"].debug_pending = True
+
+    event = DebugDecisionEvent(issue_id="i1", action="restart", comments=[], timestamp="t1")
+    new_state, effects = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
+
+    assert new_state.issues["i1"].state == "implementing"
+    assert new_state.issues["i1"].debug_pending is False
+    assert new_state.issues["i1"].worker_active is True
+    assert any(isinstance(e, DispatchWorkerEffect) and e.issue_id == "i1" for e in effects)
