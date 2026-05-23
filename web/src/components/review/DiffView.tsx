@@ -5,14 +5,7 @@ import type { ViewMode } from "./types"
 import { DiffRowView } from "./DiffRowView"
 import { rowStyles } from "./diff-viewer-styles"
 import { CommentThread } from "./CommentThread"
-
-// InlineComment: a comment the user places on a specific file+line during review.
-// This type will be promoted to a shared useDraftComments.ts in a later task.
-export interface InlineComment {
-  file: string
-  line: number | null
-  body: string
-}
+export type { InlineComment } from "./useDraftComments"
 
 type CommentSide = "old" | "new"
 
