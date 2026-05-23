@@ -6,6 +6,7 @@ import json
 from importlib.resources import files
 from importlib.resources.abc import Traversable
 from pathlib import Path
+from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
@@ -79,6 +80,7 @@ def create_mcp_server() -> FastMCP:
         workflow: str | None = None,
         branch: str | None = None,
         run_id: str | None = None,
+        debug: bool = False,
     ) -> str:
         """Start a new orca workflow run.
 
@@ -88,10 +90,11 @@ def create_mcp_server() -> FastMCP:
             workflow: Optional workflow name (defaults to 'default').
             branch: Optional git branch name (auto-detected if omitted).
             run_id: Optional custom run identifier (defaults to 'branch:workflow').
+            debug: If True, the run pauses after every worker completion for review.
 
         Returns JSON with run_id and status, or an error message.
         """
-        result = await _get_client(root).start_run(task_file, workflow, branch, run_id)
+        result = await _get_client(root).start_run(task_file, workflow, branch, run_id, debug=debug)
         return json.dumps(result)
 
     async def orca_list_runs(root: str) -> str:
@@ -249,6 +252,52 @@ def create_mcp_server() -> FastMCP:
         result = await _get_client(root).unblock_worker(run_id, issue_id, message)
         return json.dumps(result)
 
+    async def orca_get_debug_review(root: str, run_id: str, issue_id: str) -> str:
+        """Fetch the latest debug review snapshot for a paused issue.
+
+        Returns JSON with: rendered_prompt, worker_result, config_slice,
+        diff_files, base_commit. Returns {"error": "not_pending"} if the issue
+        is not currently paused for review.
+
+        Args:
+            root: Absolute path to the target project's repo root.
+            run_id: The run identifier (format: 'branch:workflow').
+            issue_id: The issue identifier.
+        """
+        result = await _get_client(root).get_debug_review(run_id, issue_id)
+        return json.dumps(result)
+
+    async def orca_submit_debug_decision(
+        root: str,
+        run_id: str,
+        issue_id: str,
+        action: str,
+        comments: list[dict[str, Any]] | None = None,
+    ) -> str:
+        """Submit a decision for a paused debug review.
+
+        Args:
+            root: Absolute path to the target project's repo root.
+            run_id: The run identifier.
+            issue_id: The issue identifier.
+            action: One of 'accept', 'restart', 'modify_restart', 'stop'.
+            comments: Optional list of {file, line, body} inline comments.
+        """
+        result = await _get_client(root).submit_debug_decision(run_id, issue_id, action, comments or [])
+        return json.dumps(result)
+
+    async def orca_restart_state(root: str, run_id: str, issue_id: str) -> str:
+        """Restart a state after a modify_restart rewrite. Validates the workflow
+        YAML, resets the worktree, and re-dispatches the worker.
+
+        Args:
+            root: Absolute path to the target project's repo root.
+            run_id: The run identifier.
+            issue_id: The issue identifier.
+        """
+        result = await _get_client(root).restart_state(run_id, issue_id)
+        return json.dumps(result)
+
     server.add_tool(orca_daemon_status, name="orca_daemon_status")
     server.add_tool(orca_start_run, name="orca_start_run")
     server.add_tool(orca_list_runs, name="orca_list_runs")
@@ -261,6 +310,9 @@ def create_mcp_server() -> FastMCP:
     server.add_tool(orca_drop_run, name="orca_drop_run")
     server.add_tool(orca_resume_run, name="orca_resume_run")
     server.add_tool(orca_unblock_worker, name="orca_unblock_worker")
+    server.add_tool(orca_get_debug_review, name="orca_get_debug_review")
+    server.add_tool(orca_submit_debug_decision, name="orca_submit_debug_decision")
+    server.add_tool(orca_restart_state, name="orca_restart_state")
     server.add_tool(orca_get_playbook, name="orca_get_playbook")
     server.add_tool(orca_list_playbooks, name="orca_list_playbooks")
 

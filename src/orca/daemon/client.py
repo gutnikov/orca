@@ -66,10 +66,17 @@ class DaemonClient:
         workflow: str | None = None,
         branch: str | None = None,
         run_id: str | None = None,
+        debug: bool = False,
     ) -> dict[str, Any]:
         return await self._post_json(
             "/api/runs/start",
-            {"task_file": task_file, "workflow": workflow, "branch": branch, "run_id": run_id},
+            {
+                "task_file": task_file,
+                "workflow": workflow,
+                "branch": branch,
+                "run_id": run_id,
+                "debug": debug,
+            },
         )
 
     async def stop_run(self, run_id: str) -> dict[str, Any]:
@@ -89,3 +96,21 @@ class DaemonClient:
             f"/api/runs/{run_id}/unblock/{issue_id}",
             {"message": message},
         )
+
+    async def get_debug_review(self, run_id: str, issue_id: str) -> dict[str, Any]:
+        return await self._get_json(f"/api/runs/{run_id}/issues/{issue_id}/debug")
+
+    async def submit_debug_decision(
+        self,
+        run_id: str,
+        issue_id: str,
+        action: str,
+        comments: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        return await self._post_json(
+            f"/api/runs/{run_id}/issues/{issue_id}/debug/decide",
+            {"action": action, "comments": comments},
+        )
+
+    async def restart_state(self, run_id: str, issue_id: str) -> dict[str, Any]:
+        return await self._post_json(f"/api/runs/{run_id}/issues/{issue_id}/debug/restart")

@@ -67,6 +67,7 @@ async def _start_run(request: Request) -> JSONResponse:
             max_hops=body.get("max_hops"),
             max_retries=body.get("max_retries"),
             insights=bool(body.get("insights", False)),
+            debug=bool(body.get("debug", False)),
         )
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
@@ -260,12 +261,64 @@ async def _hot_session(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
-def create_app(manager: RunManager) -> Starlette:
-    """Full daemon HTTP API — UDS-only privileged surface."""
-    routes = [
+async def _get_debug_review(request: Request) -> JSONResponse:
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    issue_id: str = request.path_params["issue_id"]
+    snapshot = manager.get_debug_review(run_id, issue_id)
+    if snapshot is None:
+        return JSONResponse({"error": "not_pending"}, status_code=404)
+    return JSONResponse(snapshot)
+
+
+async def _post_debug_decide(request: Request) -> JSONResponse:
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    issue_id: str = request.path_params["issue_id"]
+    try:
+        body: dict[str, Any] = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+    action = body.get("action")
+    comments = body.get("comments", [])
+    if action not in ("accept", "restart", "modify_restart", "stop"):
+        return JSONResponse({"error": f"invalid action: {action!r}"}, status_code=400)
+
+    try:
+        manager.submit_debug_decision(run_id, issue_id, action, comments)
+    except ValueError as exc:
+        msg = str(exc)
+        if "not found" in msg:
+            return JSONResponse({"error": msg}, status_code=404)
+        if "already_decided" in msg:
+            return JSONResponse({"error": msg}, status_code=409)
+        if "run_stopped" in msg:
+            return JSONResponse({"error": msg}, status_code=410)
+        return JSONResponse({"error": msg}, status_code=400)
+
+    return JSONResponse({"accepted": True})
+
+
+async def _post_restart_state(request: Request) -> JSONResponse:
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    issue_id: str = request.path_params["issue_id"]
+    try:
+        await manager.restart_state(run_id, issue_id)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    return JSONResponse({"status": "restarted"})
+
+
+def _api_routes() -> list[Route]:
+    return [
         Route("/api/status", _status, methods=["GET"]),
         Route("/api/runs", _list_runs, methods=["GET"]),
         Route("/api/runs/start", _start_run, methods=["POST"]),
+        Route("/api/runs/{run_id:path}/issues/{issue_id}/debug", _get_debug_review, methods=["GET"]),
+        Route("/api/runs/{run_id:path}/issues/{issue_id}/debug/decide", _post_debug_decide, methods=["POST"]),
+        Route("/api/runs/{run_id:path}/issues/{issue_id}/debug/restart", _post_restart_state, methods=["POST"]),
         Route("/api/runs/{run_id:path}/issues/{issue_id}", _get_issue, methods=["GET"]),
         Route("/api/runs/{run_id:path}/insights", _get_insights, methods=["GET"]),
         Route("/api/runs/{run_id:path}/logs/{issue_id}", _get_worker_log, methods=["GET"]),
@@ -279,13 +332,16 @@ def create_app(manager: RunManager) -> Starlette:
         Route("/api/runs/{run_id:path}", _get_run, methods=["GET"]),
     ]
 
-    app = Starlette(routes=routes)
+
+def create_app(manager: RunManager) -> Starlette:
+    """Full daemon HTTP API — UDS-only privileged surface."""
+    app = Starlette(routes=_api_routes())
     app.state.manager = manager
     app.state.start_time = time.monotonic()
     return app
 
 
-class _SPAStaticFiles(StaticFiles):  # type: ignore[misc]
+class _SPAStaticFiles(StaticFiles):  # type: ignore[misc,unused-ignore]
     """StaticFiles that falls back to index.html for SPA client-side routes."""
 
     async def get_response(self, path: str, scope: Scope) -> Response:
@@ -344,12 +400,9 @@ def _web_dist_dir() -> Path:
 
 
 def create_browser_app(manager: RunManager) -> Starlette:
-    """Browser-facing app: SPA static assets only.
-
-    The full privileged surface (start/stop/unblock/etc.) stays UDS-only.
-    Mounted on a localhost TCP listener.
-    """
+    """Browser-facing app: SPA static assets + API routes for same-origin fetches."""
     routes: list[Any] = [
+        *_api_routes(),
         Mount("/", app=_SPAStaticFiles(directory=str(_web_dist_dir()), html=True), name="web"),
     ]
 

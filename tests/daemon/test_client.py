@@ -97,7 +97,7 @@ async def test_start_run_posts_body(client: DaemonClient) -> None:
     assert result["run_id"] == "feat:default"
     mock_session.post.assert_called_once_with(
         "http://localhost/api/runs/start",
-        json={"task_file": "task.md", "workflow": "prd", "branch": None, "run_id": None},
+        json={"task_file": "task.md", "workflow": "prd", "branch": None, "run_id": None, "debug": False},
     )
 
 

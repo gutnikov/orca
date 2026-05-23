@@ -16,6 +16,9 @@ from orca.engine.dispatch import (
 from orca.engine.types import (
     AdvanceEvent,
     CreateEvent,
+    DebugDecisionEvent,
+    DebugModifyRequestEvent,
+    DebugReviewRequiredEvent,
     DispatchWorkerEffect,
     Effect,
     ErrorEffect,
@@ -38,6 +41,7 @@ def reduce(
     event: Event,
     generate_id: Callable[[], str],
     now: Callable[[], str],
+    run_debug: bool = False,
 ) -> tuple[State, list[Effect]]:
     """Dispatch event to the appropriate handler and return (new_state, effects)."""
     new_state = copy.deepcopy(state)
@@ -49,13 +53,19 @@ def reduce(
     elif isinstance(event, AdvanceEvent):
         _handle_advance(config, new_state, event, effects, ts)
     elif isinstance(event, WorkerResultEvent):
-        _handle_worker_result(config, new_state, event, effects, generate_id, ts)
+        _handle_worker_result(config, new_state, event, effects, generate_id, ts, run_debug)
     elif isinstance(event, WorkerFailedEvent):
         _handle_worker_failed(config, new_state, event, effects, ts)
     elif isinstance(event, WorkerWaitingEvent):
         _handle_worker_waiting(config, new_state, event, effects, ts)
     elif isinstance(event, WorkerResumedEvent):
         _handle_worker_resumed(config, new_state, event, effects, ts)
+    elif isinstance(event, DebugReviewRequiredEvent):
+        _handle_debug_review_required(config, new_state, event, effects, ts)
+    elif isinstance(event, DebugDecisionEvent):
+        _handle_debug_decision(config, new_state, event, effects, generate_id, ts)
+    elif isinstance(event, DebugModifyRequestEvent):
+        _handle_debug_modify_request(config, new_state, event, effects, ts)
 
     return new_state, effects
 
@@ -182,6 +192,7 @@ def _handle_worker_result(
     effects: list[Effect],
     generate_id: Callable[[], str],
     ts: str,
+    run_debug: bool = False,
 ) -> None:
     # --- Validation (before any mutation) ---
 
@@ -290,6 +301,17 @@ def _handle_worker_result(
         if not sub_issues:
             effects.append(ErrorEffect(issue_id=event.issue_id, message="Decompose requires non-empty sub_issues"))
             return
+
+    # If debug mode, append the worker_result log entry and pause for review.
+    # The orchestrator builds the snapshot and emits DebugReviewRequiredEvent
+    # next; the user's decision becomes a DebugDecisionEvent that re-enters
+    # the reducer to either apply or re-dispatch.
+    if run_debug:
+        issue.worker_active = False
+        issue.failure_count = 0
+        issue.debug_pending = True
+        append_log(issue, event.timestamp, "worker_result", event.result)
+        return
 
     # --- Mutation ---
 
@@ -670,3 +692,125 @@ def _cascading_unblock(
                 try_dispatch(config, state, iid, effects)
                 if len(effects) > prev_len:
                     append_log(iss, ts, "worker_dispatched", {"state": iss.state})
+
+
+def _handle_debug_review_required(
+    config: StateMachineConfig,
+    state: State,
+    event: DebugReviewRequiredEvent,
+    effects: list[Effect],
+    ts: str,
+) -> None:
+    if event.issue_id not in state.issues:
+        effects.append(ErrorEffect(issue_id=event.issue_id, message=f"Issue '{event.issue_id}' does not exist"))
+        return
+    issue = state.issues[event.issue_id]
+    append_log(issue, event.timestamp, "debug_review_required", {"snapshot": event.snapshot.to_dict()})
+
+
+def _handle_debug_decision(
+    config: StateMachineConfig,
+    state: State,
+    event: DebugDecisionEvent,
+    effects: list[Effect],
+    generate_id: Callable[[], str],
+    ts: str,
+) -> None:
+    if event.issue_id not in state.issues:
+        effects.append(ErrorEffect(issue_id=event.issue_id, message=f"Issue '{event.issue_id}' does not exist"))
+        return
+    issue = state.issues[event.issue_id]
+    if not issue.debug_pending:
+        effects.append(
+            ErrorEffect(
+                issue_id=event.issue_id,
+                message=f"Issue '{event.issue_id}' is not in debug_pending state",
+            )
+        )
+        return
+    append_log(
+        issue,
+        event.timestamp,
+        "debug_decision",
+        {"action": event.action, "comments": [c.to_dict() for c in event.comments]},
+    )
+    if event.action == "accept":
+        last_result = next(
+            (e.data for e in reversed(issue.event_log) if e.type == "worker_result"),
+            None,
+        )
+        if last_result is None:
+            effects.append(
+                ErrorEffect(
+                    issue_id=event.issue_id,
+                    message=f"Issue '{event.issue_id}': no worker_result to accept",
+                )
+            )
+            return
+        issue.debug_pending = False
+        result_event = WorkerResultEvent(
+            issue_id=event.issue_id,
+            result=last_result,
+            timestamp=event.timestamp,
+        )
+        issue.worker_active = True
+        _handle_worker_result(config, state, result_event, effects, generate_id, ts, run_debug=False)
+        return
+
+    if event.action == "restart":
+        issue.debug_pending = False
+        issue.worker_active = True
+        issue.failure_count = 0
+        effects.append(
+            DispatchWorkerEffect(
+                issue_id=event.issue_id,
+                issue_type=issue.type,
+                state=issue.state,
+                result_format=build_result_format(config, issue.type, issue.state),
+                issue=build_issue_context(state, event.issue_id),
+            )
+        )
+        append_log(issue, ts, "worker_dispatched", {"state": issue.state})
+        return
+
+    if event.action == "modify_restart":
+        issue.debug_pending = False
+        issue.modify_pending = True
+        append_log(
+            issue,
+            event.timestamp,
+            "debug_modify_request",
+            {"comments": [c.to_dict() for c in event.comments]},
+        )
+        return
+
+    if event.action == "stop":
+        issue.debug_pending = False
+        return
+
+    effects.append(
+        ErrorEffect(
+            issue_id=event.issue_id,
+            message=f"Unknown debug action: {event.action!r}",
+        )
+    )
+
+
+def _handle_debug_modify_request(
+    config: StateMachineConfig,
+    state: State,
+    event: DebugModifyRequestEvent,
+    effects: list[Effect],
+    ts: str,
+) -> None:
+    if event.issue_id not in state.issues:
+        effects.append(ErrorEffect(issue_id=event.issue_id, message=f"Issue '{event.issue_id}' does not exist"))
+        return
+    issue = state.issues[event.issue_id]
+    issue.modify_pending = True
+    append_log(
+        issue,
+        event.timestamp,
+        "debug_modify_request",
+        {"comments": [c.to_dict() for c in event.comments]},
+    )

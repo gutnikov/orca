@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import re
@@ -13,6 +14,7 @@ from orca.engine.types import DispatchWorkerEffect
 from orca.orchestrator.pty_session import PtySession
 from orca.orchestrator.session_sync import SessionManifest
 from orca.orchestrator.template import TemplateRenderError, render_prompt, render_prompt_string
+from orca.orchestrator.template_persist import persist_rendered_prompt
 from orca.orchestrator.validation import validate_result
 
 logger = logging.getLogger(__name__)
@@ -180,6 +182,16 @@ class CliAgentWorker:
                 prompt = ""
         except TemplateRenderError as exc:
             return WorkerFailure(error=str(exc))
+
+        # b2. Persist rendered prompt for debug review (best effort)
+        if session_id:
+            with contextlib.suppress(Exception):
+                persist_rendered_prompt(
+                    workdir=workdir,
+                    state_id=effect.state,
+                    session_id=session_id,
+                    rendered_prompt=prompt,
+                )
 
         # c. Build command
         cmd_parts: list[str] = [self._kind_config.bin]

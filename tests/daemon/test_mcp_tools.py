@@ -59,6 +59,9 @@ class TestMcpToolRegistration:
             "orca_drop_run",
             "orca_resume_run",
             "orca_unblock_worker",
+            "orca_get_debug_review",
+            "orca_submit_debug_decision",
+            "orca_restart_state",
             "orca_get_playbook",
             "orca_list_playbooks",
         }
