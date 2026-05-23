@@ -41,6 +41,7 @@ def run_command(args: Namespace) -> None:
             "insights": args.insights,
             "max_hops": args.max_hops,
             "max_retries": args.max_retries,
+            "debug": args.debug,
         }
         async with (
             aiohttp.ClientSession(connector=connector) as session,
