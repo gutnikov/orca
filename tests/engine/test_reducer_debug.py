@@ -126,3 +126,21 @@ def test_debug_decision_restart_emits_dispatch_effect() -> None:
     assert new_state.issues["i1"].debug_pending is False
     assert new_state.issues["i1"].worker_active is True
     assert any(isinstance(e, DispatchWorkerEffect) and e.issue_id == "i1" for e in effects)
+
+
+def test_debug_decision_modify_restart_marks_modify_pending_and_logs_request() -> None:
+    from orca.engine.types import DebugDecisionEvent, InlineComment
+
+    config = _make_config()
+    state = _make_state(worker_active=False)
+    state.issues["i1"].debug_pending = True
+
+    comments = [InlineComment(file="prompt.md", line=None, body="use Result type")]
+    event = DebugDecisionEvent(issue_id="i1", action="modify_restart", comments=comments, timestamp="t1")
+    new_state, _ = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
+
+    issue = new_state.issues["i1"]
+    assert issue.modify_pending is True
+    assert issue.debug_pending is False
+    assert issue.worker_active is False
+    assert any(e.type == "debug_modify_request" for e in issue.event_log)

@@ -773,6 +773,17 @@ def _handle_debug_decision(
         append_log(issue, ts, "worker_dispatched", {"state": issue.state})
         return
 
+    if event.action == "modify_restart":
+        issue.debug_pending = False
+        issue.modify_pending = True
+        append_log(
+            issue,
+            event.timestamp,
+            "debug_modify_request",
+            {"comments": [c.to_dict() for c in event.comments]},
+        )
+        return
+
 
 def _handle_debug_modify_request(
     config: StateMachineConfig,
