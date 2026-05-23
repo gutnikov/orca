@@ -311,9 +311,8 @@ async def _post_restart_state(request: Request) -> JSONResponse:
     return JSONResponse({"status": "restarted"})
 
 
-def create_app(manager: RunManager) -> Starlette:
-    """Full daemon HTTP API — UDS-only privileged surface."""
-    routes = [
+def _api_routes() -> list[Route]:
+    return [
         Route("/api/status", _status, methods=["GET"]),
         Route("/api/runs", _list_runs, methods=["GET"]),
         Route("/api/runs/start", _start_run, methods=["POST"]),
@@ -333,7 +332,10 @@ def create_app(manager: RunManager) -> Starlette:
         Route("/api/runs/{run_id:path}", _get_run, methods=["GET"]),
     ]
 
-    app = Starlette(routes=routes)
+
+def create_app(manager: RunManager) -> Starlette:
+    """Full daemon HTTP API — UDS-only privileged surface."""
+    app = Starlette(routes=_api_routes())
     app.state.manager = manager
     app.state.start_time = time.monotonic()
     return app
@@ -398,12 +400,9 @@ def _web_dist_dir() -> Path:
 
 
 def create_browser_app(manager: RunManager) -> Starlette:
-    """Browser-facing app: SPA static assets only.
-
-    The full privileged surface (start/stop/unblock/etc.) stays UDS-only.
-    Mounted on a localhost TCP listener.
-    """
+    """Browser-facing app: SPA static assets + API routes for same-origin fetches."""
     routes: list[Any] = [
+        *_api_routes(),
         Mount("/", app=_SPAStaticFiles(directory=str(_web_dist_dir()), html=True), name="web"),
     ]
 
