@@ -215,3 +215,50 @@ class TestOrcaHeaderActiveWorkersOverride:
         header.update_state(state, [], active_workers=5)
         text = header.render_text()
         assert "Workers 5" in text
+
+
+class TestOrcaHeaderDebugPaused:
+    def test_paused_issue_shows_paused_indicator_and_amber_dot(self) -> None:
+        config = _make_config()
+        header = OrcaHeader(branch_name="b", config=config)
+        issue = _make_issue(state="triage", worker_active=False, visit_counts={"triage": 1})
+        issue.debug_pending = True
+        state = _make_state({"root-1": issue})
+        header.update_state(state, [])
+        text = header.render_text()
+        assert "Workers 0" in text
+        assert "paused" in text and "1" in text
+        # Amber dot color used for paused (no failures)
+        assert "#d4a064" in text
+
+    def test_multiple_paused_pluralisation(self) -> None:
+        config = _make_config()
+        header = OrcaHeader(branch_name="b", config=config)
+        i1 = _make_issue(state="triage", worker_active=False, visit_counts={"triage": 1})
+        i1.debug_pending = True
+        i2 = _make_issue(state="implement", worker_active=False, visit_counts={"implement": 1})
+        i2.debug_pending = True
+        state = _make_state({"root-1": i1, "root-2": i2})
+        header.update_state(state, [])
+        text = header.render_text()
+        assert "2 paused" in text
+
+    def test_no_paused_keeps_green_dot(self) -> None:
+        config = _make_config()
+        header = OrcaHeader(branch_name="b", config=config)
+        state = _make_state({"root-1": _make_issue(state="triage", worker_active=True, visit_counts={"triage": 1})})
+        header.update_state(state, [])
+        text = header.render_text()
+        assert "paused" not in text
+        assert "[green]" in text
+
+    def test_failures_override_amber(self) -> None:
+        # A failure outranks a debug pause in the dot color (red beats amber)
+        config = _make_config()
+        header = OrcaHeader(branch_name="b", config=config)
+        issue = _make_issue(state="triage", worker_active=False, failure_count=2)
+        issue.debug_pending = True
+        state = _make_state({"root-1": issue})
+        header.update_state(state, [])
+        text = header.render_text()
+        assert "[red]" in text

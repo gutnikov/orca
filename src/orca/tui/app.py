@@ -159,12 +159,41 @@ class OrcaApp(App[None]):
             self._daemon_session = None
 
     def on_mount(self) -> None:
+        # Push run context (id + browser port) into the detail widget so the
+        # debug-review URL can be constructed when an issue is paused.
+        try:
+            detail = self.query_one(IssueDetail)
+        except Exception:
+            detail = None
+        if detail is not None:
+            run_id = getattr(self, "_daemon_run_id", "") or self._derive_run_id_from_run_dir()
+            detail.set_run_context(run_id, self._read_browser_port())
+
         if self._daemon_mode:
             self._setup_daemon_polling()
         else:
             self._poll_state()
             self.set_interval(1.5, self._poll_state)
         self.set_interval(0.15, self._tick_spinners)
+
+    def _read_browser_port(self) -> int | None:
+        """Best-effort read of the daemon's browser TCP port for URL surfacing."""
+        try:
+            from orca.daemon.lifecycle import read_browser_port
+
+            repo_root = self._run_dir.parent.parent.parent
+            return read_browser_port(repo_root)
+        except Exception:
+            return None
+
+    def _derive_run_id_from_run_dir(self) -> str:
+        """Disk-mode fallback for run_id. Layout: <repo>/.orca-state/runs/<branch>/<workflow>."""
+        try:
+            workflow = self._run_dir.name
+            branch = self._run_dir.parent.name
+            return f"{branch}:{workflow}"
+        except Exception:
+            return ""
 
     def _setup_daemon_polling(self) -> None:
         """Set up async polling via DaemonStateReader."""

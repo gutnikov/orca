@@ -50,6 +50,7 @@ class OrcaHeader(Static):
         self._state: State | None = None
         self._sessions: list[dict[str, Any]] = []
         self._active_workers: int = 0
+        self._paused_workers: int = 0
 
     def on_mount(self) -> None:
         self.update(self.render_text())
@@ -67,6 +68,10 @@ class OrcaHeader(Static):
             self._active_workers = active_workers
         else:
             self._active_workers = sum(1 for issue in state.issues.values() if issue.worker_active)
+        # Debug-mode pauses: worker completed and is waiting for human review
+        # before transitioning. Counted distinctly from active workers so the
+        # user sees "step finished, your move" rather than mistaking it for idle.
+        self._paused_workers = sum(1 for issue in state.issues.values() if getattr(issue, "debug_pending", False))
         self.update(self.render_text())
 
     def render_text(self) -> str:
@@ -81,13 +86,24 @@ class OrcaHeader(Static):
         if all_terminal:
             left = f"  \u2713 {self._branch_name} \u2502 completed"
         else:
-            # Status dot + branch name
-            dot = "[red]\u25cf[/red]" if has_failures else "[green]\u25cf[/green]"
+            # Status dot: red if failures, amber if paused for debug review,
+            # green otherwise. Paused is between healthy and broken \u2014 the run
+            # IS healthy, it just needs the user's attention.
+            if has_failures:
+                dot = "[red]\u25cf[/red]"
+            elif self._paused_workers > 0:
+                dot = "[#d4a064]\u25cf[/#d4a064]"
+            else:
+                dot = "[green]\u25cf[/green]"
 
             parts: list[str] = [f"  {dot} {self._branch_name}"]
 
-            # Workers N
-            parts.append(f"Workers {self._active_workers}")
+            # Workers N \u00b7 \u23f8 M paused (debug)
+            workers_text = f"Workers {self._active_workers}"
+            if self._paused_workers > 0:
+                paused_label = "paused" if self._paused_workers == 1 else "paused"
+                workers_text += f" \u00b7 [#d4a064]\u23f8 {self._paused_workers} {paused_label} (debug)[/#d4a064]"
+            parts.append(workers_text)
 
             # Failures (conditional)
             total_failures = sum(issue.failure_count for issue in self._state.issues.values())
