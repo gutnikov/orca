@@ -89,11 +89,40 @@ Extract `issue_id` from the run's `issues` dict.
 
 ### Routing within the watch loop
 
+#### ⭐ Check FIRST: `debug_reviews` is non-empty
+
+**This is the most common and most-often-missed pause.** On every single poll, BEFORE you assess worker health or narrate anything:
+
+1. Look at the compact run output. It has a top-level `debug_reviews` array.
+2. If `debug_reviews` is non-empty: a worker has finished a step and the run is paused for human review. Each entry has `{issue_id, state, url}`.
+3. Each issue in the `issues` dict also carries a `debug_review_url` when paused — same URL, anchored to that issue.
+
+**What to do — exactly:**
+
+- Output ONE message to the user, containing **the URL verbatim** and a one-line note. Example:
+
+  > Paused for review at state `<state-name>`:
+  >
+  > `http://localhost:<port>/debug/<run_id>/<issue_id>`
+  >
+  > Pick **Modify prompt + config & restart** / **Restart without changes** / **Accept & continue** / **Stop run** in the browser.
+
+- **Do not** narrate the result, the next state, the routing decision, or what would happen if they accepted. The UI shows all of that — prompt, result, config slice, diff — and lets the user comment inline. Summarising it in chat duplicates and weakens the UI's job, and the URL gets buried.
+
+- End your turn. Wait for the user.
+
+**When the next poll shows `debug_reviews` is now empty**, the user has chosen an action via the browser:
+- If the issue's `state` advanced or its `worker_active` flipped back to true → user picked **accept** or **restart**. Resume the normal watch loop.
+- If the issue's `state` is the same and `modify_pending: true` appears on the compact issue → user picked **modify_restart**. Delegate to the `orca-prompt-config-rewrite` skill (pass `run_id` and `issue_id`). The skill calls `orca_restart_state` when done.
+- If the run's `status` transitioned to `stopped` → user picked **stop**. Exit watch.
+
+#### Other paused states (check after debug_reviews)
+
 **Healthy** — `worker_active: true`, log shows new output since last poll, `failure_count < MAX_RETRIES`, `hop_count < HOP_ASK_THRESHOLD`: continue polling.
 
 **Run completed** — status becomes `completed`: exit the watch loop and proceed to Phase 3.
 
-**Worker `waiting` outcome** — the worker paused and is asking for human input. This is the normal handoff and can occur at any state in the workflow.
+**Worker `waiting` outcome** — the worker paused and is asking for human input. This is the workflow's own handoff (distinct from the debug-mode pause above; check `waiting_issues` in the run summary).
 
 Do not impose a fixed report structure — different workflows ask for different things (a review of generated work, a confirmation before a destructive step, a choice between alternatives, a clarification, etc.). Read the worker's output and surface what it actually produced.
 
@@ -104,28 +133,6 @@ Compose a clear summary for the user:
 - An explicit ask that matches what the worker requested
 
 End your turn. When the user replies, call `orca_unblock_worker(root, run_id, issue_id, message)` with their reply text and resume polling.
-
-**Debug-mode pause** — the run was started with `debug: true` and the worker has finished a state. The reducer pauses *before* applying the transition; the user reviews and decides via a browser UI.
-
-Detection: in the non-compact `orca_get_run` output, scan the issue's `event_log` from the tail for the most recent entry of `type == "debug_review_required"`. If there's no later `debug_decision` entry for the same issue, the pause is unresolved.
-
-Surface the review URL to the user — do NOT poll silently waiting for the worker. The URL pattern is:
-
-```
-http://localhost:<browser-port>/debug/<run_id>/<issue_id>
-```
-
-Get `<browser-port>` from `orca_daemon_status(root).browser_port` (or read `<root>/.orca-state/daemon/browser-port`). Tell the user:
-
-> Worker paused for debug review at state `<state-name>`.
-> Review: `http://localhost:<port>/debug/<run_id>/<issue_id>`
-> Pick one of: Modify prompt + config & restart / Restart without changes / Accept & continue / Stop run.
-
-Then wait for the user's action. After they submit, the next poll will show one of:
-
-- `debug_decision` with `action: accept` or `restart` → daemon handles dispatch; resume polling normally.
-- `debug_decision` with `action: stop` → run will transition to `stopped`; exit watch.
-- `debug_decision` with `action: modify_restart` followed by `debug_modify_request` → the user wants a prompt+config rewrite. Delegate to the `orca-prompt-config-rewrite` skill (pass `run_id` and `issue_id`). It reads the user's inline comments from the `debug_modify_request.data.comments`, edits the relevant files, and calls `orca_restart_state` — after which a new `worker_dispatched` log entry appears and polling resumes.
 
 **Worker not active, run still `running`** (worker crashed between retries):
 - If `failure_count` < `MAX_RETRIES`: orca will auto-retry. Note this in your session state and poll again.

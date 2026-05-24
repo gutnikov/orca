@@ -73,6 +73,40 @@ def _collect_waiting_issues(state: Any) -> list[dict[str, Any]]:
     return result
 
 
+def debug_review_url(browser_port: int | None, run_id: str, issue_id: str) -> str | None:
+    """Construct the per-issue debug-review URL. Returns None if browser port
+    is unavailable (daemon TCP listener not bound)."""
+    if browser_port is None:
+        return None
+    return f"http://localhost:{browser_port}/debug/{run_id}/{issue_id}"
+
+
+def _collect_debug_reviews(
+    state: Any,
+    run_id: str,
+    browser_port: int | None,
+) -> list[dict[str, Any]]:
+    """Return per-issue records for runs currently paused in debug review.
+
+    Each record: `{issue_id, state, url}`. Surfaced in `RunInfo.to_summary`
+    AND in compact-run output so any reasonable polling agent can't miss it.
+    This is the bullet-proof way to surface debug pauses — relying on agents
+    to scan the event_log for `debug_review_required` events has proven
+    fragile in practice (the SKILL describes how, but agents narrate the
+    result instead of surfacing the URL).
+    """
+    result: list[dict[str, Any]] = []
+    for issue_id, issue in state.issues.items():
+        if not getattr(issue, "debug_pending", False):
+            continue
+        record: dict[str, Any] = {"issue_id": issue_id, "state": issue.state}
+        url = debug_review_url(browser_port, run_id, issue_id)
+        if url is not None:
+            record["url"] = url
+        result.append(record)
+    return result
+
+
 @dataclass
 class RunInfo:
     run_id: str
@@ -87,13 +121,20 @@ class RunInfo:
     insights: bool = False
     debug: bool = False
 
-    def to_summary(self) -> dict[str, Any]:
-        """JSON-serializable summary."""
+    def to_summary(self, browser_port: int | None = None) -> dict[str, Any]:
+        """JSON-serializable summary.
+
+        `browser_port` — when provided, debug-review records will include the
+        full URL agents should surface to the user. Pass it from the manager
+        (which reads it via lifecycle.read_browser_port).
+        """
         terminal_count = 0
         waiting_issues: list[dict[str, Any]] = []
+        debug_reviews: list[dict[str, Any]] = []
         if self.orchestrator is not None:
             terminal_count = sum(1 for issue in self.orchestrator.state.issues.values() if issue.state == "done")
             waiting_issues = _collect_waiting_issues(self.orchestrator.state)
+            debug_reviews = _collect_debug_reviews(self.orchestrator.state, self.run_id, browser_port)
         # Update issue_count from live state if available
         issue_count = self.issue_count
         if self.orchestrator is not None:
@@ -107,6 +148,7 @@ class RunInfo:
             "terminal_count": terminal_count,
             "created_at": self.created_at,
             "waiting_issues": waiting_issues,
+            "debug_reviews": debug_reviews,
             "debug": self.debug,
         }
 
