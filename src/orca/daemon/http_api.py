@@ -15,7 +15,7 @@ from starlette.staticfiles import StaticFiles
 from starlette.types import Scope
 
 from orca.daemon.lifecycle import read_browser_port
-from orca.daemon.manager import RunManager, RunStatus
+from orca.daemon.manager import RunManager, RunStatus, debug_review_url
 
 
 async def _status(request: Request) -> JSONResponse:
@@ -37,7 +37,8 @@ async def _status(request: Request) -> JSONResponse:
 async def _list_runs(request: Request) -> JSONResponse:
     manager: RunManager = request.app.state.manager
     runs = manager.list_runs()
-    return JSONResponse([r.to_summary() for r in runs])
+    browser_port = read_browser_port(manager.repo_root)
+    return JSONResponse([r.to_summary(browser_port=browser_port) for r in runs])
 
 
 async def _start_run(request: Request) -> JSONResponse:
@@ -83,8 +84,9 @@ async def _get_run(request: Request) -> JSONResponse:
     if state is None:
         return JSONResponse({"error": f"run '{run_id}' not found"}, status_code=404)
     run_info = manager.get_run(run_id)
+    browser_port = read_browser_port(manager.repo_root)
     if compact:
-        result = _compact_run(run_id, state, run_info, manager.get_sessions(run_id))
+        result = _compact_run(run_id, state, run_info, manager.get_sessions(run_id), browser_port)
     else:
         sessions = manager.get_sessions(run_id)
         result = {"run_id": run_id, "state": state, "sessions": sessions}
@@ -98,11 +100,18 @@ def _compact_run(
     state: dict[str, Any],
     run_info: Any,
     sessions: list[dict[str, Any]],
+    browser_port: int | None,
 ) -> dict[str, Any]:
-    """Build a compact run summary, stripping event_log, fields, and completed sessions."""
+    """Build a compact run summary, stripping event_log, fields, and completed sessions.
+
+    For any issue currently in `debug_pending`, attaches `debug_review_url` so
+    polling agents can surface the URL to the user without having to scan the
+    event log themselves.
+    """
     compact_issues: dict[str, Any] = {}
+    debug_reviews: list[dict[str, Any]] = []
     for iid, issue in state.get("issues", {}).items():
-        compact_issues[iid] = {
+        compact_issue: dict[str, Any] = {
             "title": issue.get("fields", {}).get("title", ""),
             "state": issue["state"],
             "worker_active": issue["worker_active"],
@@ -110,6 +119,17 @@ def _compact_run(
             "hop_count": issue.get("hop_count", 0),
             "visit_counts": issue.get("visit_counts", {}),
         }
+        if issue.get("debug_pending"):
+            url = debug_review_url(browser_port, run_id, iid)
+            if url is not None:
+                compact_issue["debug_review_url"] = url
+                debug_reviews.append({"issue_id": iid, "state": issue["state"], "url": url})
+            else:
+                compact_issue["debug_review_url"] = None
+                debug_reviews.append({"issue_id": iid, "state": issue["state"]})
+        if issue.get("modify_pending"):
+            compact_issue["modify_pending"] = True
+        compact_issues[iid] = compact_issue
     # Keep only the latest active session per issue (or the most recent completed one)
     latest_sessions: dict[str, dict[str, Any]] = {}
     for s in sessions:
@@ -126,6 +146,7 @@ def _compact_run(
         "run_id": run_id,
         "issues": compact_issues,
         "sessions": latest_sessions,
+        "debug_reviews": debug_reviews,
     }
     if run_info is not None:
         result["status"] = run_info.status.value
