@@ -1,6 +1,6 @@
 ---
 name: orca-install
-description: Use when the user wants to install, set up, bootstrap, or add Orca to a project. Triggers on "set up orca", "install orca", "bootstrap orca", "add orca to this repo", or any first-time orca onboarding. Handles pipx install, daemon start, .gitignore, .orca scaffolding, and a smoke-test run.
+description: Use when the user wants to install, set up, bootstrap, update, upgrade, refresh, or add Orca to a project. Triggers on "set up orca", "install orca", "bootstrap orca", "update orca", "upgrade orca", "refresh orca", "add orca to this repo", or any first-time orca onboarding. Handles pipx install/update, plugin install/update (Claude Code + Codex), daemon start/restart, .gitignore, .orca scaffolding, and a smoke-test run. ALWAYS keeps CLI and plugin versions in lockstep — running this on an existing install pulls the latest version of BOTH.
 ---
 
 # Set up Orca in this project

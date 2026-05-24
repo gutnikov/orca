@@ -148,6 +148,22 @@ def _compact_run(
         "sessions": latest_sessions,
         "debug_reviews": debug_reviews,
     }
+    # If any issue is paused for debug review, populate the must_surface_to_user
+    # field with the verbatim text the agent should output. This is the strongest
+    # signal we can give a polling agent: a top-level field name that is
+    # impossible to read past, with the exact words the user should see.
+    if debug_reviews:
+        lines = ["⏸ Paused for debug review:"]
+        for r in debug_reviews:
+            url = r.get("url") or "(daemon browser port unavailable)"
+            lines.append(f"  state `{r.get('state', '?')}` → {url}")
+        lines.append("")
+        lines.append(
+            "Output the above to the user verbatim and end your turn. Do NOT narrate "
+            "the worker's result, the routing decision, or what would happen next — "
+            "the browser UI shows all of that. Wait for the user's next message."
+        )
+        result["must_surface_to_user"] = "\n".join(lines)
     if run_info is not None:
         result["status"] = run_info.status.value
     return result

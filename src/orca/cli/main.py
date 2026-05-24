@@ -114,6 +114,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Only show runs with at least one issue currently waiting on HITL input",
     )
 
+    # orca debug — list active debug-mode pauses with their review URLs
+    sub.add_parser(
+        "debug",
+        help="List active debug-mode pauses with their review URLs",
+    )
+
     # orca logs <run_id> [issue_id] [--tail N]
     logs_parser = sub.add_parser("logs", help="Print worker logs")
     logs_parser.add_argument("run_id", type=str)
@@ -202,6 +208,11 @@ def main() -> None:
         from orca.cli.list_cmd import runs_command
 
         runs_command(root=args.root, waiting_only=args.waiting)
+
+    elif args.subcommand == "debug":
+        from orca.cli.debug_cmd import debug_command
+
+        debug_command(root=args.root)
 
     elif args.subcommand == "logs":
         from orca.cli.list_cmd import logs_command

@@ -89,27 +89,41 @@ Extract `issue_id` from the run's `issues` dict.
 
 ### Routing within the watch loop
 
-#### ⭐ Check FIRST: `debug_reviews` is non-empty
+#### ⭐ Rule #0 — `must_surface_to_user` overrides everything
 
-**This is the most common and most-often-missed pause.** On every single poll, BEFORE you assess worker health or narrate anything:
+On every poll, **before** assessing worker health, narrating anything, or reading any other field of the compact run response:
 
-1. Look at the compact run output. It has a top-level `debug_reviews` array.
-2. If `debug_reviews` is non-empty: a worker has finished a step and the run is paused for human review. Each entry has `{issue_id, state, url}`.
-3. Each issue in the `issues` dict also carries a `debug_review_url` when paused — same URL, anchored to that issue.
+```
+if response.get("must_surface_to_user"):
+    print(response["must_surface_to_user"])  # verbatim
+    end_turn()
+    return
+```
 
-**What to do — exactly:**
+That field is the daemon's pre-built message to the user. It already contains the review URL and the available actions. Output it verbatim as your next message — nothing before it, nothing after — and end your turn.
 
-- Output ONE message to the user, containing **the URL verbatim** and a one-line note. Example:
+**Do not:**
+- Wrap it in your own commentary or summary
+- Re-format it as a table, menu, or "options" list
+- Narrate the worker's result, the routing decision, affected areas, classification, or next state
+- Offer "show URL" as one of several menu choices the user has to pick from
 
-  > Paused for review at state `<state-name>`:
-  >
-  > `http://localhost:<port>/debug/<run_id>/<issue_id>`
-  >
-  > Pick **Modify prompt + config & restart** / **Restart without changes** / **Accept & continue** / **Stop run** in the browser.
+The browser UI rendered at the URL shows all of that — prompt, result, config slice, diff, inline-comment composer. Duplicating it in chat buries the URL and weakens the UI's job.
 
-- **Do not** narrate the result, the next state, the routing decision, or what would happen if they accepted. The UI shows all of that — prompt, result, config slice, diff — and lets the user comment inline. Summarising it in chat duplicates and weakens the UI's job, and the URL gets buried.
+#### Backup signal — `debug_reviews` array
 
-- End your turn. Wait for the user.
+Older daemons (pre-0.5.5) don't populate `must_surface_to_user`. If that field is absent or empty, check the top-level `debug_reviews` array:
+
+- If non-empty: each entry has `{issue_id, state, url}`. Construct the message yourself in the format below and follow the same rule (print verbatim, end turn).
+
+```
+⏸ Paused for debug review:
+  state `<state>` → <url>
+
+(Then end your turn — no narration.)
+```
+
+Per-issue `debug_review_url` on entries in the `issues` dict carries the same URL anchored to that issue.
 
 **When the next poll shows `debug_reviews` is now empty**, the user has chosen an action via the browser:
 - If the issue's `state` advanced or its `worker_active` flipped back to true → user picked **accept** or **restart**. Resume the normal watch loop.

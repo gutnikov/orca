@@ -39,13 +39,34 @@ If both succeed, the CLI is installed. Ask the user whether they want to update 
 
 ### Install
 
+**Step 1: Install the CLI**
+
 ```bash
 pipx install "git+ssh://git@github.com/gutnikov/orca.git"
 ```
 
+**Step 2: Install the agent plugin**
+
+For Claude Code:
+```bash
+claude marketplace add gutnikov/orca
+claude plugin install orca@orca
+```
+
+For Codex:
+```bash
+codex marketplace add gutnikov/orca
+codex plugin install orca@orca
+```
+
+Run BOTH if both agents are present on the machine. The plugin provides the orca SKILLs (`orca-install`, `orca-workflow-create`, `orca-workflow-run`, etc.) and the MCP tool wrappers — without it, you can still run orca from the CLI but the agent has no way to invoke it.
+
+After plugin install, **restart the agent** (close and reopen Claude Code / Codex) so the new SKILLs are loaded into the agent's context.
+
 Notes:
 - The `git+ssh://` form requires the SSH prereq above. If the user lacks SSH access, do not silently fall back to HTTPS — ask whether they're authorized to clone over HTTPS instead.
 - pipx isolates orca in its own venv, so it won't collide with project Pythons.
+- Always install CLI + plugin in lockstep. Drift between them causes hard-to-diagnose UX bugs (new fields not surfaced, missing tools, stale SKILL).
 
 ### Verify
 
@@ -93,7 +114,26 @@ Report to the user:
 
 ## Update
 
-Upgrade the `orca` CLI to the latest commit on `main` of the upstream repo.
+Upgrade BOTH the `orca` CLI (pipx) AND the orca agent plugins (Claude Code / Codex) to the latest commit on `main`.
+
+**Why both:** orca ships in three loosely-coupled pieces — the pipx CLI/daemon, the Claude Code plugin (SKILLs + MCP tool wrappers), and the Codex plugin equivalent. The pipx CLI updates independently from the plugins; updating only one creates **version skew** that silently degrades behavior (paused-run URLs not surfaced, missing MCP tools, stale SKILL instructions). Always update them together.
+
+### Version-skew check (run this FIRST, every time)
+
+Before doing anything else, check whether CLI and plugins agree:
+
+```bash
+# CLI version
+orca -v
+
+# Claude Code plugin version (if Claude Code is the active agent)
+claude plugin list 2>/dev/null | grep -i orca
+
+# Codex plugin version (if Codex is the active agent)
+codex plugin list 2>/dev/null | grep -i orca
+```
+
+If versions disagree (e.g. CLI 0.5.4, plugin 0.5.0), report the skew to the user and proceed with the FULL update flow below — even if they only asked to update "orca". A patched CLI without the matching SKILL/MCP plugin will appear to ignore newer fields (`debug_reviews`, `must_surface_to_user`, etc.) and the user will think the feature is broken.
 
 ### Pre-flight checks
 
@@ -127,7 +167,9 @@ orca daemon stop
 
 The daemon is per-project (one per `.orca/` root) — there's no global daemon to stop.
 
-### Update
+### Update — three steps, in order
+
+**Step 1: Update the CLI / daemon (pipx)**
 
 ```bash
 pipx install --force "git+ssh://git@github.com/gutnikov/orca.git"
@@ -135,22 +177,47 @@ pipx install --force "git+ssh://git@github.com/gutnikov/orca.git"
 
 `--force` re-installs into the same venv, picking up the latest commit on `main`. There's no `pipx upgrade` form for git URLs that re-pulls — `--force` is the correct mechanism.
 
-### Verify
+**Step 2: Update the agent plugin (Claude Code AND/OR Codex)**
 
+For Claude Code users:
 ```bash
-orca -v
-orca --help     # confirm subcommand set didn't regress
+claude plugin update orca@orca
 ```
 
-Compare the new version hash to the one captured in pre-flight.
+For Codex users:
+```bash
+codex plugin update orca@orca
+```
 
-### Restart daemons and resume interrupted runs
+Run BOTH commands if both agents are installed on the machine — they each have their own plugin cache. Either command is a no-op if the corresponding agent isn't installed; safe to run unconditionally.
 
-For each project that had a running daemon:
+> ⚠️ **Claude Code restart required.** The plugin update lands in the cache, but the running Claude Code process holds the old SKILL content in memory. The user must **restart Claude Code** (close and reopen) before the new SKILL is loaded — otherwise the agent will keep using the old SKILL instructions and the update will appear to do nothing. Tell the user this explicitly. Same applies to Codex.
+
+**Step 3: Restart the daemon**
+
+The pipx update replaced the orca binary on disk, but the running daemon is the *old* Python process. To pick up backend changes (new MCP tools, new HTTP fields like `must_surface_to_user`, new playbooks), restart it:
 
 ```bash
 cd <project>
-orca daemon start
+orca daemon stop && orca daemon start
+```
+
+For each project with an active daemon, repeat. Persisted run state is reloaded automatically on restart — paused runs stay paused.
+
+### Verify
+
+```bash
+orca -v                                # CLI
+claude plugin list | grep -i orca      # Claude plugin version
+codex plugin list | grep -i orca       # Codex plugin version (if applicable)
+orca daemon status                     # daemon picked up the new binary
+```
+
+All three (or four) version strings should match. Compare to the values captured in the version-skew check above.
+
+### Resume interrupted runs (if any)
+
+```bash
 orca runs
 ```
 
@@ -160,16 +227,12 @@ For any run shown as `interrupted`, ask the user before resuming:
 orca resume <run_id>
 ```
 
-### Reload MCP (if the user is in Claude Code / Cursor / etc.)
-
-If orca is registered as an MCP server in any active editor session, the editor is still holding a handle to the old binary. Tell the user to:
-- In Claude Code: `/mcp` → restart the orca server, or reopen the editor.
-- In other MCP clients: reload the server connection.
-
 ### Done
 
-Report:
-- old version → new version
-- which projects had their daemons restarted
-- any runs that were interrupted/resumed
+Report to the user:
+- CLI: old version → new version
+- Plugin(s): old version → new version
+- Whether Claude Code / Codex needs a restart (yes, if you updated the plugin)
+- Which projects had their daemons restarted
+- Any runs that were interrupted/resumed
 - reminder to reload MCP in the editor if applicable
