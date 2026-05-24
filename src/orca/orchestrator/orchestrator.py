@@ -647,13 +647,31 @@ class Orchestrator:
         await decision_event.wait()
 
     async def _reset_worktree_for_issue(self, issue_id: str) -> None:
-        """Reset the worktree branch back to its state_base_commit."""
+        """Reset the worktree branch back to its state_base_commit.
+
+        Root issues that reuse the repo's working tree directly (no isolated
+        worktree under .orca-state/worktrees/) don't get reset — we don't
+        touch the user's repo. For read-only workers like a preflight that
+        ran a classification step, this is a clean no-op. For workers that
+        DID commit, the next run sees those commits in the repo and the
+        rewrite skill's new prompt decides how to proceed.
+        """
         issue = self._state.issues.get(issue_id)
         if issue is None or issue.state_base_commit is None:
             logger.warning("Cannot reset worktree for issue %s: no state_base_commit", issue_id)
             return
         branch = self.branches.get(issue_id)
         if branch is None:
+            return
+        worktree_path = self.worktree_mgr.resolve(branch)
+        if not worktree_path.exists():
+            logger.info(
+                "No isolated worktree for issue %s (branch=%s) — skipping reset; "
+                "root issue uses the repo working tree directly",
+                issue_id,
+                branch,
+                extra={"event": "worktree_reset_skipped_root", "issue_id": issue_id, "branch": branch},
+            )
             return
         try:
             await self.worktree_mgr.reset_to(branch, issue.state_base_commit)

@@ -146,6 +146,43 @@ def test_debug_decision_modify_restart_marks_modify_pending_and_logs_request() -
     assert any(e.type == "debug_modify_request" for e in issue.event_log)
 
 
+def test_modify_restart_preserves_overall_feedback_and_line_comments() -> None:
+    """Regression for the route handler dropping the __overall__ payload.
+
+    The web UI bundles the overall-feedback textarea into the comments array
+    as a single entry with file='__overall__' and line=None. The orca-prompt-
+    config-rewrite SKILL relies on this entry surviving the round-trip into
+    the debug_modify_request event log so the meta-agent can use general
+    direction alongside line-anchored comments.
+    """
+    from orca.engine.types import DebugDecisionEvent, InlineComment
+
+    config = _make_config()
+    state = _make_state(worker_active=False)
+    state.issues["i1"].debug_pending = True
+
+    comments = [
+        InlineComment(file="prompt.md", line=12, body="use Result type"),
+        InlineComment(file="result.json", line=3, body="this enum should also include 'partial'"),
+        InlineComment(file="__overall__", line=None, body="prefer concise prompts; trim the recap block"),
+    ]
+    event = DebugDecisionEvent(issue_id="i1", action="modify_restart", comments=comments, timestamp="t1")
+    new_state, _ = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
+
+    issue = new_state.issues["i1"]
+    request_entries = [e for e in issue.event_log if e.type == "debug_modify_request"]
+    assert len(request_entries) == 1
+    logged_comments = request_entries[0].data["comments"]
+    assert len(logged_comments) == 3
+    overall = next((c for c in logged_comments if c["file"] == "__overall__"), None)
+    assert overall is not None, "overall feedback was not logged"
+    assert overall["line"] is None
+    assert overall["body"] == "prefer concise prompts; trim the recap block"
+    # Line comments are also intact, with their file/line/body preserved
+    line_files = {c["file"] for c in logged_comments if c["line"] is not None}
+    assert line_files == {"prompt.md", "result.json"}
+
+
 def test_debug_decision_stop_clears_pending_and_emits_no_effects() -> None:
     from orca.engine.types import DebugDecisionEvent, DispatchWorkerEffect
 

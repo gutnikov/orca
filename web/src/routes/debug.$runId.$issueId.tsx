@@ -48,10 +48,15 @@ function DebugReviewPage() {
     })();
   }, [runId, issueId]);
 
-  const handleSubmit = async (action: DebugAction) => {
+  const handleSubmit = async (
+    action: DebugAction,
+    comments: Array<{ file: string; line: number | null; body: string }>,
+  ) => {
     const decoded = decodeURIComponent(runId);
-    const draftRaw = localStorage.getItem(`orca:debug:draft:${decoded}:${issueId}`);
-    const comments = draftRaw ? JSON.parse(draftRaw) : [];
+    // Use the comments passed in from DebugReviewLayout — it has already merged
+    // line drafts + the "Overall feedback" textarea (file == "__overall__").
+    // Reading localStorage directly here drops the overall feedback because it
+    // lives under a separate key (orca:debug:overall:<run>:<issue>).
     const res = await fetch(`/api/runs/${decoded}/issues/${issueId}/debug/decide`, {
       method: "POST",
       headers: { "content-type": "application/json" },
