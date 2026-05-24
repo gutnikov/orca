@@ -644,7 +644,52 @@ class Orchestrator:
             issue.state,
             extra={"event": "debug_review_pause", "issue_id": issue_id, "state": issue.state},
         )
+
+        # Auto-open the review URL in the user's default browser. Opt out by
+        # setting ORCA_NO_AUTO_OPEN=1 in the daemon's environment. The user
+        # already chose --debug so we assume they want the UI.
+        self._auto_open_review_url(issue_id)
+
         await decision_event.wait()
+
+    def _auto_open_review_url(self, issue_id: str) -> None:
+        """Best-effort: open the debug-review URL in the user's default browser.
+
+        Runs in a detached thread so a slow `open` / `xdg-open` doesn't block
+        the orchestrator. Silently no-ops in headless environments, when the
+        daemon's browser TCP listener isn't bound, when the user opted out via
+        ORCA_NO_AUTO_OPEN=1, or when webbrowser.open raises (rare on macOS,
+        more common on remote Linux without DISPLAY).
+        """
+        import os
+        import threading
+        import webbrowser
+
+        if os.environ.get("ORCA_NO_AUTO_OPEN"):
+            return
+        if self.repo_root is None:
+            return
+        from orca.daemon.lifecycle import read_browser_port
+
+        port = read_browser_port(self.repo_root)
+        if port is None:
+            return
+
+        # Derive run_id from the persistence layout: state_path is
+        # <repo>/.orca-state/runs/<branch>/<workflow>/state.json
+        run_dir = self.persistence.state_path.parent
+        workflow = run_dir.name
+        branch = run_dir.parent.name
+        run_id = f"{branch}:{workflow}"
+        url = f"http://localhost:{port}/debug/{run_id}/{issue_id}"
+
+        def _open() -> None:
+            try:
+                webbrowser.open(url, new=2)  # new=2 → new tab if possible
+            except Exception:
+                return
+
+        threading.Thread(target=_open, daemon=True).start()
 
     async def _reset_worktree_for_issue(self, issue_id: str) -> None:
         """Reset the worktree branch back to its state_base_commit.
