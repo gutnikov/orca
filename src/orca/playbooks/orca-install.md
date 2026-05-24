@@ -204,6 +204,8 @@ orca daemon stop && orca daemon start
 
 For each project with an active daemon, repeat. Persisted run state is reloaded automatically on restart — paused runs stay paused.
 
+> **Auto-update on daemon start (v0.5.6+)**: `orca daemon start` automatically runs `claude plugin update orca@orca` and `codex plugin update orca@orca` in the background if those CLIs are on PATH. So in practice Step 2 collapses into Step 3 — restart the daemon and the plugins refresh themselves. The user still has to **restart their editor** (Claude Code / Codex) to load the new SKILL into the agent context. Set `ORCA_NO_AUTO_UPDATE=1` in the environment to opt out.
+
 ### Verify
 
 ```bash
