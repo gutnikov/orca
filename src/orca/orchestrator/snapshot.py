@@ -44,7 +44,12 @@ _HUNK_HEADER = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 
 def parse_unified_diff(diff_text: str) -> list[DiffFile]:
-    """Parse unified diff text into a list of DiffFile."""
+    """Parse unified diff text into a list of DiffFile.
+
+    Each DiffFile also carries the original raw diff-text slice for its own
+    `diff --git` block (so the web UI's DiffView can re-parse exactly what
+    the daemon saw) plus additions/deletions counters for summary chips.
+    """
     if not diff_text.strip():
         return []
 
@@ -56,6 +61,7 @@ def parse_unified_diff(diff_text: str) -> list[DiffFile]:
         if not line.startswith("diff --git "):
             i += 1
             continue
+        block_start = i  # remember where this file's diff block begins
         parts = line.split(" ", 3)
         path = "?"
         if len(parts) >= 4:
@@ -69,6 +75,8 @@ def parse_unified_diff(diff_text: str) -> list[DiffFile]:
                 path = after
         status = "modified"
         hunks: list[Hunk] = []
+        additions = 0
+        deletions = 0
         i += 1
         while i < len(lines) and not lines[i].startswith("@@") and not lines[i].startswith("diff --git "):
             if lines[i].startswith("new file mode"):
@@ -92,6 +100,10 @@ def parse_unified_diff(diff_text: str) -> list[DiffFile]:
             while i < len(lines) and not lines[i].startswith("@@") and not lines[i].startswith("diff --git "):
                 if lines[i].startswith((" ", "+", "-", "\\")):
                     hunk_lines.append(lines[i])
+                    if lines[i].startswith("+") and not lines[i].startswith("+++"):
+                        additions += 1
+                    elif lines[i].startswith("-") and not lines[i].startswith("---"):
+                        deletions += 1
                 i += 1
             hunks.append(
                 Hunk(
@@ -102,7 +114,18 @@ def parse_unified_diff(diff_text: str) -> list[DiffFile]:
                     lines=hunk_lines,
                 )
             )
-        files.append(DiffFile(path=path, status=status, hunks=hunks))
+        block_end = i  # exclusive — points at the next 'diff --git' or end-of-text
+        raw_diff = "\n".join(lines[block_start:block_end])
+        files.append(
+            DiffFile(
+                path=path,
+                status=status,
+                hunks=hunks,
+                raw_diff=raw_diff,
+                additions=additions,
+                deletions=deletions,
+            )
+        )
     return files
 
 

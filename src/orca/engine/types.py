@@ -343,12 +343,22 @@ class DiffFile:
     path: str
     status: str  # "added" | "modified" | "deleted" | "renamed"
     hunks: list[Hunk]
+    # Raw unified-diff text for this file (the `diff --git ...` block including
+    # `+++/---` headers and `@@` hunks). The web review UI's DiffView re-parses
+    # this string to render the side-by-side / inline view; pre-parsed `hunks`
+    # are kept for any consumer that wants a typed structure without re-parsing.
+    raw_diff: str = ""
+    additions: int = 0
+    deletions: int = 0
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "path": self.path,
             "status": self.status,
             "hunks": [h.to_dict() for h in self.hunks],
+            "diff": self.raw_diff,
+            "additions": self.additions,
+            "deletions": self.deletions,
         }
 
     @classmethod
@@ -357,6 +367,9 @@ class DiffFile:
             path=data["path"],
             status=data["status"],
             hunks=[Hunk.from_dict(h) for h in data["hunks"]],
+            raw_diff=data.get("diff", ""),
+            additions=data.get("additions", 0),
+            deletions=data.get("deletions", 0),
         )
 
 

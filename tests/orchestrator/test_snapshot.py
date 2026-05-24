@@ -158,3 +158,67 @@ def test_build_snapshot_missing_rendered_prompt_returns_empty_string(tmp_path: P
         )
     )
     assert snapshot.rendered_prompt == ""
+
+
+def test_parse_unified_diff_captures_raw_text_and_counters() -> None:
+    """Each DiffFile gets its own raw diff-text slice + addition/deletion counters.
+
+    Without these the web UI's DiffView re-parses an empty string and shows
+    'diff not available' — exactly the bug the user hit on a newly-added file.
+    """
+    diff = """diff --git a/new.md b/new.md
+new file mode 100644
+index 0000000..abc
+--- /dev/null
++++ b/new.md
+@@ -0,0 +1,3 @@
++# Title
++
++Body
+diff --git a/edited.py b/edited.py
+index aaa..bbb 100644
+--- a/edited.py
++++ b/edited.py
+@@ -1,3 +1,3 @@
+ line1
+-old line
++new line
+ line3
+"""
+    files = parse_unified_diff(diff)
+    assert len(files) == 2
+
+    added = files[0]
+    assert added.path == "new.md"
+    assert added.status == "added"
+    assert added.additions == 3
+    assert added.deletions == 0
+    assert "diff --git a/new.md b/new.md" in added.raw_diff
+    assert "+# Title" in added.raw_diff
+    assert "edited.py" not in added.raw_diff
+
+    edited = files[1]
+    assert edited.path == "edited.py"
+    assert edited.status == "modified"
+    assert edited.additions == 1
+    assert edited.deletions == 1
+    assert "diff --git a/edited.py b/edited.py" in edited.raw_diff
+    assert "new.md" not in edited.raw_diff
+
+
+def test_diff_file_round_trip_preserves_raw_diff() -> None:
+    """to_dict / from_dict carry the raw diff text and counters."""
+    from orca.engine.types import DiffFile, Hunk
+
+    f = DiffFile(
+        path="x.py",
+        status="modified",
+        hunks=[Hunk(1, 1, 1, 1, [" a", "-b", "+c"])],
+        raw_diff="diff --git a/x.py b/x.py\n--- a/x.py\n+++ b/x.py\n@@ -1,1 +1,1 @@\n-b\n+c\n",
+        additions=1,
+        deletions=1,
+    )
+    f2 = DiffFile.from_dict(f.to_dict())
+    assert f2.raw_diff == f.raw_diff
+    assert f2.additions == 1
+    assert f2.deletions == 1
