@@ -28,6 +28,13 @@
      full file.
    - Comments anchored to `result.json` or to changeset files → context only.
      Do NOT modify result.json or worker-produced code.
+   - Comments with `file == "__overall__"` and `line == null` → **free-form
+     overall feedback** left in the web UI's "Overall feedback" textarea.
+     Treat as general direction/intent that applies to the rewrite as a
+     whole: decide which file(s) it implies edits to and fold it into the
+     same edit pass as the line-anchored comments. Surface this to the user
+     in the CLI before composing edits so they can sanity-check your reading
+     of it.
 
 4. **Compose targeted edits.**
    - Prompt comments: rewrite the relevant sections of

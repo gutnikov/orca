@@ -67,12 +67,12 @@ export function FileTreeSidebar({
             "w-full h-8 pl-8 pr-2 text-[13px]",
             "bg-background border border-border rounded-md",
             "placeholder:text-muted-foreground/70",
-            "focus:outline-none focus:ring-1 focus:ring-ring focus:border-ring",
+            "outline-none focus:border-primary/50 focus-visible:ring-0 transition-colors",
           )}
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto -mr-2 pr-2 space-y-3">
+      <div className="flex-1 overflow-y-auto pr-1 space-y-3">
         {/* Virtual review surfaces */}
         {filteredVirtual.length > 0 ? (
           <div>
