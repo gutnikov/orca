@@ -63,6 +63,51 @@ def _start_background(repo: Path) -> None:
     raise SystemExit(1)
 
 
+def _auto_update_agent_plugins() -> None:
+    """Best-effort background update of orca plugins for Claude Code and Codex.
+
+    Runs `claude plugin update orca@orca` and `codex plugin update orca@orca`
+    in detached threads if those CLIs are on PATH. Failures are silent — this
+    is a convenience to prevent CLI/plugin version drift, not a hard
+    requirement of starting the daemon.
+
+    Opt out by setting ORCA_NO_AUTO_UPDATE=1 in the environment.
+    """
+    import os
+    import shutil
+    import subprocess
+    import threading
+
+    if os.environ.get("ORCA_NO_AUTO_UPDATE"):
+        return
+
+    def _update(cli_name: str) -> None:
+        if not shutil.which(cli_name):
+            return
+        try:
+            result = subprocess.run(
+                [cli_name, "plugin", "update", "orca@orca"],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+            if result.returncode == 0:
+                # Print at most one line so users can see what happened without
+                # cluttering the daemon start output. Restart hint included
+                # because the running editor still holds the old SKILL.
+                print(
+                    f"orca: refreshed {cli_name} plugin (restart {cli_name} to load the new SKILL)",
+                    file=sys.stderr,
+                )
+        except Exception:
+            # Air-gapped, network down, locked cache — silently skip. The
+            # user can run the update manually if they care.
+            return
+
+    for cli in ("claude", "codex"):
+        threading.Thread(target=_update, args=(cli,), daemon=True).start()
+
+
 def daemon_command(action: str, root: Path | None = None, *, foreground: bool = False) -> None:
     """Dispatch daemon start/stop/status."""
     from orca.daemon.lifecycle import check_daemon_running, pidfile_path, read_pidfile, send_stop_signal
@@ -74,6 +119,11 @@ def daemon_command(action: str, root: Path | None = None, *, foreground: bool = 
             pid = read_pidfile(pidfile_path(repo))
             print(f"Daemon already running (PID: {pid}).", file=sys.stderr)
             raise SystemExit(1)
+
+        # Kick off plugin auto-update in the background BEFORE starting the
+        # daemon. This way the CLI flow doesn't wait on it, and any "restart
+        # claude" hint lands before the user starts interacting with the run.
+        _auto_update_agent_plugins()
 
         if foreground:
             from orca.daemon.server import serve
