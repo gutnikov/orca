@@ -1,43 +1,49 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react"
+import { Check, ChevronDown } from "lucide-react"
 
-export type DebugAction = "modify_restart" | "restart" | "accept" | "stop";
+import { cn } from "@/lib/utils"
 
-const ACTIONS: Record<
-  DebugAction,
-  { label: string; hint: string; tone: "primary" | "warning" | "danger" }
-> = {
+export type DebugAction = "modify_restart" | "restart" | "accept" | "stop"
+
+interface ActionMeta {
+  label: string
+  hint: string
+  tone: "primary" | "warning" | "danger"
+}
+
+const ACTIONS: Record<DebugAction, ActionMeta> = {
   modify_restart: {
     label: "Modify prompt + config & restart",
-    hint: "Worker's changes will be reset; meta-agent rewrites prompt/config from comments before restart.",
+    hint: "Use my comments to update the prompt and config, then re-run this step from a clean state.",
     tone: "primary",
   },
   restart: {
     label: "Restart without changes",
-    hint: "Worker's changes will be reset; state re-dispatches with the same prompt.",
+    hint: "Re-run this step from a clean state with the same prompt — no edits.",
     tone: "warning",
   },
   accept: {
     label: "Accept & continue",
-    hint: "Worker's output is accepted; run continues to the next state.",
+    hint: "Keep this output and move on to the next step in the workflow.",
     tone: "primary",
   },
   stop: {
     label: "Stop run",
-    hint: "Run is stopped. Changes are left in the worktree for inspection.",
+    hint: "Stop the run here. The worker's changes are kept on disk so you can inspect them.",
     tone: "danger",
   },
-};
+}
 
-const toneClasses: Record<"primary" | "warning" | "danger", string> = {
-  primary: "bg-blue-600 hover:bg-blue-700 text-white",
-  warning: "bg-amber-600 hover:bg-amber-700 text-white",
-  danger: "bg-red-600 hover:bg-red-700 text-white",
-};
+const toneClasses: Record<ActionMeta["tone"], string> = {
+  primary: "bg-primary text-primary-foreground hover:bg-primary/90 border-primary",
+  warning: "bg-amber-600 text-white hover:bg-amber-600/90 border-amber-600",
+  danger: "bg-destructive text-destructive-foreground hover:bg-destructive/90 border-destructive",
+}
 
 interface ActionButtonProps {
-  defaultAction?: DebugAction;
-  onSubmit: (action: DebugAction) => void;
-  disabled?: boolean;
+  defaultAction?: DebugAction
+  onSubmit: (action: DebugAction) => void
+  disabled?: boolean
 }
 
 export function ActionButton({
@@ -45,18 +51,42 @@ export function ActionButton({
   onSubmit,
   disabled,
 }: ActionButtonProps) {
-  const [selected, setSelected] = useState<DebugAction>(defaultAction);
-  const [open, setOpen] = useState(false);
-  const meta = ACTIONS[selected];
+  const [selected, setSelected] = useState<DebugAction>(defaultAction)
+  const [open, setOpen] = useState(false)
+  const meta = ACTIONS[selected]
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  // Close dropdown when clicking outside
+  useEffect(() => {
+    if (!open) return
+    const onClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false)
+    }
+    document.addEventListener("mousedown", onClick)
+    document.addEventListener("keydown", onKey)
+    return () => {
+      document.removeEventListener("mousedown", onClick)
+      document.removeEventListener("keydown", onKey)
+    }
+  }, [open])
 
   return (
-    <div className="flex flex-col items-end gap-1 relative">
-      <div className="flex">
+    <div ref={containerRef} className="flex flex-col items-end gap-1.5 relative">
+      <div className="inline-flex shadow-sm">
         <button
           type="button"
           onClick={() => onSubmit(selected)}
           disabled={disabled}
-          className={`px-4 py-2 rounded-l text-sm font-medium ${toneClasses[meta.tone]} disabled:opacity-50`}
+          className={cn(
+            "px-4 h-9 text-[13px] font-semibold tracking-tight rounded-l-md border",
+            "transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed",
+            toneClasses[meta.tone],
+          )}
         >
           {meta.label}
         </button>
@@ -64,32 +94,65 @@ export function ActionButton({
           type="button"
           onClick={() => setOpen((o) => !o)}
           disabled={disabled}
-          className={`px-2 py-2 rounded-r border-l border-white/20 text-sm ${toneClasses[meta.tone]}`}
-          aria-label="More actions"
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-label="Pick another action"
+          className={cn(
+            "px-2 h-9 rounded-r-md border border-l-0",
+            "transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed",
+            "border-l-white/20",
+            toneClasses[meta.tone],
+          )}
         >
-          ▾
+          <ChevronDown
+            size={14}
+            strokeWidth={2.5}
+            className={cn("transition-transform", open && "rotate-180")}
+          />
         </button>
       </div>
-      {open && (
-        <div className="absolute top-full mt-1 right-0 bg-white dark:bg-zinc-900 border rounded shadow-lg z-10 min-w-[280px]">
-          {(Object.keys(ACTIONS) as DebugAction[]).map((a) => (
-            <button
-              type="button"
-              key={a}
-              onClick={() => {
-                setSelected(a);
-                setOpen(false);
-              }}
-              className={`block w-full text-left px-4 py-2 text-sm hover:bg-gray-50 dark:hover:bg-zinc-800 ${
-                a === selected ? "font-semibold" : ""
-              }`}
-            >
-              {ACTIONS[a].label}
-            </button>
-          ))}
+      {open ? (
+        <div
+          role="menu"
+          className={cn(
+            "absolute top-full mt-1.5 right-0 z-20 min-w-[300px]",
+            "bg-popover text-popover-foreground border border-border rounded-md shadow-lg",
+            "py-1 overflow-hidden",
+          )}
+        >
+          {(Object.keys(ACTIONS) as DebugAction[]).map((a) => {
+            const isSelected = a === selected
+            const itemMeta = ACTIONS[a]
+            return (
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={isSelected}
+                key={a}
+                onClick={() => {
+                  setSelected(a)
+                  setOpen(false)
+                }}
+                className={cn(
+                  "w-full text-left px-3 py-2 text-[13px] flex items-start gap-2.5 cursor-pointer",
+                  "hover:bg-accent hover:text-accent-foreground transition-colors",
+                  isSelected && "bg-accent/50",
+                )}
+              >
+                <span className="w-3.5 shrink-0 mt-0.5 text-primary">
+                  {isSelected ? <Check size={14} strokeWidth={2.5} /> : null}
+                </span>
+                <span className="flex-1 min-w-0">
+                  <span className="block font-semibold">{itemMeta.label}</span>
+                  <span className="block text-[11.5px] text-muted-foreground mt-0.5 leading-snug">
+                    {itemMeta.hint}
+                  </span>
+                </span>
+              </button>
+            )
+          })}
         </div>
-      )}
-      <span className="text-xs opacity-60 text-right max-w-[420px]">{meta.hint}</span>
+      ) : null}
     </div>
-  );
+  )
 }
