@@ -162,6 +162,7 @@ class IssueTree(Tree[str]):
 
     def _issue_label(self, issue: Issue, failed_states: set[str] | None = None) -> Text:
         title = str(issue.fields.get("title", "untitled"))
+        debug_paused = getattr(issue, "debug_pending", False)
         label = Text()
         if issue.failure_count > 0 and not issue.worker_active:
             label.append("• ", style="bold red")
@@ -169,6 +170,13 @@ class IssueTree(Tree[str]):
         elif issue.state == "done":
             label.append("• ", style="bold green")
             label.append(title)
+        elif debug_paused:
+            # Distinct amber pause indicator + state tag so user sees the step
+            # finished and is awaiting their review (not idle).
+            label.append("⏸ ", style=f"bold {_COLOR_ACTIVE}")
+            label.append(title)
+            label.append(f" [{issue.state}]", style=_COLOR_ACTIVE)
+            label.append(" paused for review", style=f"italic {_COLOR_ACTIVE}")
         else:
             label.append("• ", style="dim")
             label.append(title)
