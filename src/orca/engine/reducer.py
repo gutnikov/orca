@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Callable
+from typing import Any
 
 from orca.engine.dispatch import (
     append_log,
@@ -723,6 +724,32 @@ def _handle_debug_review_required(
     append_log(issue, event.timestamp, "debug_review_required", {"snapshot": event.snapshot.to_dict()})
 
 
+def _build_decision_comments_payload(issue: Issue) -> list[dict[str, Any]]:
+    """Snapshot persisted inline comments + their thread histories for the
+    debug_modify_request event-log payload.
+
+    The orchestrator no longer reads comments from the HTTP request body —
+    they were persisted on the daemon as the user authored them (Task 7).
+    orca-prompt-config-rewrite then reads the full user↔agent dialogue from
+    this snapshot when rewriting prompts/configs.
+    """
+    thread_by_comment = {t.comment_id: t for t in issue.comment_threads}
+    return [
+        {
+            "id": c.id,
+            "file": c.file,
+            "line": c.line,
+            "body": c.body,
+            "thread_messages": (
+                [{"role": m.role, "body": m.body} for m in thread_by_comment[c.id].messages]
+                if c.id in thread_by_comment
+                else []
+            ),
+        }
+        for c in issue.inline_comments
+    ]
+
+
 def _handle_debug_decision(
     config: StateMachineConfig,
     state: State,
@@ -743,11 +770,16 @@ def _handle_debug_decision(
             )
         )
         return
+    # Source-of-truth comments + threads come from the persisted issue, not
+    # from event.comments — the orchestrator no longer carries comments in
+    # the event (they were persisted on save). Build the payload BEFORE we
+    # clear inline_comments/comment_threads below.
+    persisted_comments_payload = _build_decision_comments_payload(issue)
     append_log(
         issue,
         event.timestamp,
         "debug_decision",
-        {"action": event.action, "comments": [c.to_dict() for c in event.comments]},
+        {"action": event.action, "comments": persisted_comments_payload},
     )
     # Inline comments and their threads are ephemeral aids for the current
     # debug pause — drop them on every decision so a new pause starts clean.
@@ -799,7 +831,7 @@ def _handle_debug_decision(
             issue,
             event.timestamp,
             "debug_modify_request",
-            {"comments": [c.to_dict() for c in event.comments]},
+            {"comments": persisted_comments_payload},
         )
         return
 
@@ -828,7 +860,7 @@ def _handle_debug_decision(
             issue,
             event.timestamp,
             "debug_modify_request",
-            {"comments": [c.to_dict() for c in event.comments]},
+            {"comments": persisted_comments_payload},
         )
         result_event = WorkerResultEvent(
             issue_id=event.issue_id,
@@ -867,7 +899,7 @@ def _handle_debug_modify_request(
         issue,
         event.timestamp,
         "debug_modify_request",
-        {"comments": [c.to_dict() for c in event.comments]},
+        {"comments": _build_decision_comments_payload(issue)},
     )
 
 

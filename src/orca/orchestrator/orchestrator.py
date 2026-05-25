@@ -210,15 +210,20 @@ class Orchestrator:
         self,
         issue_id: str,
         action: str,
-        comments: list[dict[str, Any]],
     ) -> bool:
-        """Submit a debug decision for a paused issue. Returns False if no debug pause is active."""
+        """Submit a debug decision for a paused issue. Returns False if no debug pause is active.
+
+        Comments are no longer carried on the decision payload — they were
+        persisted on the daemon as the user authored them (Task 7) and the
+        reducer reads them from `Issue.inline_comments` + `Issue.comment_threads`
+        when bundling the `debug_modify_request` event payload.
+        """
         entry = self._debug_decision_events.get(issue_id)
         if entry is None:
             return False
         event, box = entry
         box.clear()
-        box.append({"action": action, "comments": comments})
+        box.append({"action": action})
         event.set()
         return True
 
@@ -1100,12 +1105,12 @@ class Orchestrator:
                     await self._pause_for_debug_review(issue_id)
                     decision = self._debug_decision_events[issue_id][1][0]
                     self._debug_decision_events.pop(issue_id, None)
-                    from orca.engine.types import DebugDecisionEvent, InlineComment
+                    from orca.engine.types import DebugDecisionEvent
 
                     decision_event = DebugDecisionEvent(
                         issue_id=issue_id,
                         action=decision["action"],
-                        comments=[InlineComment.from_dict(c) for c in decision["comments"]],
+                        comments=[],
                         timestamp=self.now(),
                     )
                     if decision["action"] == "restart":

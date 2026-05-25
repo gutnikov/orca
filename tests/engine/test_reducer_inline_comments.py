@@ -215,6 +215,76 @@ def test_thread_reviewed_bumps_agent_last_reviewed_at() -> None:
     assert threads[0].agent_last_reviewed_at == review_ts
 
 
+def test_debug_decision_bundles_persisted_comments_and_threads() -> None:
+    """When a debug decision is processed, the debug_modify_request event-log
+    entry includes each persisted inline comment AND its full thread history
+    (if any), regardless of whether the DebugDecisionEvent has explicit
+    comments. The persisted state on the issue is the source of truth.
+    """
+    state = _make_state()
+    # Save 2 inline comments
+    state, _ = reduce(
+        _config(),
+        state,
+        InlineCommentSavedEvent(issue_id="i1", comment_id="c1", file="f.ts", line=1, body="comment 1", timestamp=_ts()),
+        _gen_id,
+        _now,
+    )
+    state, _ = reduce(
+        _config(),
+        state,
+        InlineCommentSavedEvent(issue_id="i1", comment_id="c2", file="f.ts", line=2, body="comment 2", timestamp=_ts()),
+        _gen_id,
+        _now,
+    )
+    # Add a thread to the second comment (agent reply + user reply)
+    state, _ = reduce(
+        _config(),
+        state,
+        CommentThreadMessageAddedEvent(
+            issue_id="i1", comment_id="c2", role="agent", message_id="m1", body="agent answers", timestamp=_ts()
+        ),
+        _gen_id,
+        _now,
+    )
+    state, _ = reduce(
+        _config(),
+        state,
+        CommentThreadMessageAddedEvent(
+            issue_id="i1", comment_id="c2", role="user", message_id="m2", body="user clarifies", timestamp=_ts()
+        ),
+        _gen_id,
+        _now,
+    )
+    issue = state.issues["i1"]
+    issue.debug_pending = True
+    # Need a worker_result for modify_continue to find one, but modify_restart
+    # doesn't require one — use modify_restart so we don't need to fabricate.
+    state, _ = reduce(
+        _config(),
+        state,
+        DebugDecisionEvent(issue_id="i1", action="modify_restart", comments=[], timestamp=_ts()),
+        _gen_id,
+        _now,
+    )
+
+    # Find the debug_modify_request event-log entry
+    entries = [e for e in state.issues["i1"].event_log if e.type == "debug_modify_request"]
+    assert len(entries) == 1
+    bundled = entries[0].data["comments"]
+    assert len(bundled) == 2
+    # First comment: no thread, thread_messages == []
+    c1 = next(c for c in bundled if c["id"] == "c1")
+    assert c1["thread_messages"] == []
+    # Second comment: has thread
+    c2 = next(c for c in bundled if c["id"] == "c2")
+    assert len(c2["thread_messages"]) == 2
+    assert c2["thread_messages"][0]["role"] == "agent"
+    assert c2["thread_messages"][0]["body"] == "agent answers"
+    assert c2["thread_messages"][1]["role"] == "user"
+    assert c2["thread_messages"][1]["body"] == "user clarifies"
+
+
 def test_inline_comment_and_threads_cleared_on_decision() -> None:
     state = _make_state()
     state, _ = reduce(

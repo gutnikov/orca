@@ -685,10 +685,15 @@ class RunManager:
         run_id: str,
         issue_id: str,
         action: str,
-        comments: list[dict[str, Any]],
     ) -> None:
         """Submit a debug decision. Raises ValueError with categorized messages
-        that the HTTP layer maps to 400/404/409/410."""
+        that the HTTP layer maps to 400/404/409/410.
+
+        Comments are no longer accepted here — they were persisted on the
+        daemon as the user authored them (Task 7) and the reducer reads them
+        from `Issue.inline_comments` + `Issue.comment_threads` when bundling
+        the `debug_modify_request` event payload.
+        """
         run_info = self._runs.get(run_id)
         if run_info is None:
             raise ValueError(f"Run {run_id!r} not found")
@@ -708,7 +713,7 @@ class RunManager:
                         f"Issue {issue_id!r}: already_decided (prior action: {last_decision.data.get('action')})"
                     )
             raise ValueError(f"Issue {issue_id!r}: not_pending")
-        run_info.orchestrator.submit_debug_decision(issue_id, action, comments)
+        run_info.orchestrator.submit_debug_decision(issue_id, action)
 
     async def restart_state(self, run_id: str, issue_id: str) -> None:
         """Restart a state after a modify_restart rewrite."""

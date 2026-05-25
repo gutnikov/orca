@@ -279,18 +279,22 @@ def create_mcp_server() -> FastMCP:
         run_id: str,
         issue_id: str,
         action: str,
-        comments: list[dict[str, Any]] | None = None,
     ) -> str:
         """Submit a decision for a paused debug review.
+
+        Inline comments are persisted on the daemon as the user authors them
+        via the web UI (or via orca_save_inline_comment), so they are NOT
+        passed here — the reducer reads them from the issue's own state when
+        bundling the debug_modify_request event-log payload.
 
         Args:
             root: Absolute path to the target project's repo root.
             run_id: The run identifier.
             issue_id: The issue identifier.
-            action: One of 'accept', 'restart', 'modify_restart', 'stop'.
-            comments: Optional list of {file, line, body} inline comments.
+            action: One of 'accept', 'restart', 'modify_restart',
+                'modify_continue', or 'stop'.
         """
-        result = await _get_client(root).submit_debug_decision(run_id, issue_id, action, comments or [])
+        result = await _get_client(root).submit_debug_decision(run_id, issue_id, action)
         return json.dumps(result)
 
     async def orca_restart_state(root: str, run_id: str, issue_id: str) -> str:

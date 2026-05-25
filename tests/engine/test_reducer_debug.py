@@ -144,7 +144,8 @@ def test_debug_decision_modify_continue_advances_state_and_marks_modify_pending(
     issue.debug_pending = True
     issue.event_log.append(EventLogEntry(timestamp="t0", type="worker_result", data={"outcome": "done"}))
 
-    comments = [
+    # Comments live on the issue (persisted on save) — not on the event.
+    issue.inline_comments = [
         InlineComment(
             id="c1",
             file="prompt.md",
@@ -154,7 +155,7 @@ def test_debug_decision_modify_continue_advances_state_and_marks_modify_pending(
             updated_at="t1",
         )
     ]
-    event = DebugDecisionEvent(issue_id="i1", action="modify_continue", comments=comments, timestamp="t1")
+    event = DebugDecisionEvent(issue_id="i1", action="modify_continue", comments=[], timestamp="t1")
     new_state, _ = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
 
     new_issue = new_state.issues["i1"]
@@ -190,7 +191,7 @@ def test_debug_decision_modify_restart_marks_modify_pending_and_logs_request() -
     state = _make_state(worker_active=False)
     state.issues["i1"].debug_pending = True
 
-    comments = [
+    state.issues["i1"].inline_comments = [
         InlineComment(
             id="c1",
             file="prompt.md",
@@ -200,7 +201,7 @@ def test_debug_decision_modify_restart_marks_modify_pending_and_logs_request() -
             updated_at="t1",
         )
     ]
-    event = DebugDecisionEvent(issue_id="i1", action="modify_restart", comments=comments, timestamp="t1")
+    event = DebugDecisionEvent(issue_id="i1", action="modify_restart", comments=[], timestamp="t1")
     new_state, _ = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
 
     issue = new_state.issues["i1"]
@@ -225,7 +226,7 @@ def test_modify_restart_preserves_overall_feedback_and_line_comments() -> None:
     state = _make_state(worker_active=False)
     state.issues["i1"].debug_pending = True
 
-    comments = [
+    state.issues["i1"].inline_comments = [
         InlineComment(
             id="c1",
             file="prompt.md",
@@ -251,7 +252,7 @@ def test_modify_restart_preserves_overall_feedback_and_line_comments() -> None:
             updated_at="t1",
         ),
     ]
-    event = DebugDecisionEvent(issue_id="i1", action="modify_restart", comments=comments, timestamp="t1")
+    event = DebugDecisionEvent(issue_id="i1", action="modify_restart", comments=[], timestamp="t1")
     new_state, _ = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
 
     issue = new_state.issues["i1"]

@@ -117,11 +117,13 @@ class DaemonClient:
         run_id: str,
         issue_id: str,
         action: str,
-        comments: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        # Comments are no longer sent on the wire — the daemon persists them
+        # as the user authors them (Task 7) and the reducer bundles them
+        # into the decision payload from the persisted state.
         return await self._post_json(
             f"/api/runs/{run_id}/issues/{issue_id}/debug/decide",
-            {"action": action, "comments": comments},
+            {"action": action},
         )
 
     async def restart_state(self, run_id: str, issue_id: str) -> dict[str, Any]:

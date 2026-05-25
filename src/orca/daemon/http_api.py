@@ -325,12 +325,14 @@ async def _post_debug_decide(request: Request) -> JSONResponse:
         return JSONResponse({"error": "invalid JSON body"}, status_code=400)
 
     action = body.get("action")
-    comments = body.get("comments", [])
+    # Note: `comments` is no longer read from the request body — the daemon
+    # persists comments as the user authors them (Task 7) and the reducer
+    # bundles them into the decision payload from `Issue.inline_comments`.
     if action not in ("accept", "restart", "modify_restart", "modify_continue", "stop"):
         return JSONResponse({"error": f"invalid action: {action!r}"}, status_code=400)
 
     try:
-        manager.submit_debug_decision(run_id, issue_id, action, comments)
+        manager.submit_debug_decision(run_id, issue_id, action)
     except ValueError as exc:
         msg = str(exc)
         if "not found" in msg:

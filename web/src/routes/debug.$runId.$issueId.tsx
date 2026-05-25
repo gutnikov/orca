@@ -48,19 +48,15 @@ function DebugReviewPage() {
     })();
   }, [runId, issueId]);
 
-  const handleSubmit = async (
-    action: DebugAction,
-    comments: Array<{ file: string; line: number | null; body: string }>,
-  ) => {
+  const handleSubmit = async (action: DebugAction) => {
     const decoded = decodeURIComponent(runId);
-    // Use the comments passed in from DebugReviewLayout — it has already merged
-    // line drafts + the "Overall feedback" textarea (file == "__overall__").
-    // Reading localStorage directly here drops the overall feedback because it
-    // lives under a separate key (orca:debug:overall:<run>:<issue>).
+    // Comments are NOT sent on the wire — the daemon persists them as the
+    // user authors them (Task 7) and the reducer bundles them into the
+    // debug_modify_request payload from the persisted state at decision time.
     const res = await fetch(`/api/runs/${decoded}/issues/${issueId}/debug/decide`, {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action, comments }),
+      body: JSON.stringify({ action }),
     });
     if (res.ok || res.status === 409) {
       setSubmittedAction(action);

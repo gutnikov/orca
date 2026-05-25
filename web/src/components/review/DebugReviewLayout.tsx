@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ChevronsDownUp, ChevronsUpDown, MessageSquare } from "lucide-react";
+import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 
@@ -49,7 +50,13 @@ interface DebugReviewLayoutProps {
   issueId: string;
   state: string;
   snapshot: DebugReviewSnapshot;
-  onSubmit: (action: DebugAction, comments: InlineComment[]) => Promise<void>;
+  /**
+   * Submits the debug decision. Comments are no longer passed on the wire —
+   * the daemon persists each comment via PUT as the user authors it, and the
+   * reducer bundles them from `Issue.inline_comments` at decision time.
+   * Any free-form "Overall feedback" is persisted just before this is called.
+   */
+  onSubmit: (action: DebugAction) => Promise<void>;
 }
 
 /** Convert a raw snapshot diff_file entry to the ChangesetFile the DiffView expects. */
@@ -311,24 +318,43 @@ export function DebugReviewLayout({
   const handleSubmit = async (action: DebugAction) => {
     setSubmitting(true);
     try {
+      // Line-anchored comments are already persisted on the daemon by
+      // useDraftComments (PUT on each `add`). The "Overall feedback"
+      // textarea is composed at submit time and is NOT yet persisted —
+      // PUT it now (awaited) before submitting the decision so the reducer
+      // sees it in Issue.inline_comments when building the event payload.
       const trimmedOverall = overallFeedback.trim();
-      const allComments: InlineComment[] = trimmedOverall
-        ? [
-            ...comments,
-            {
-              id: typeof crypto !== "undefined" && "randomUUID" in crypto
-                ? crypto.randomUUID()
-                : `overall-${Date.now()}`,
+      if (trimmedOverall) {
+        const id =
+          typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `overall-${Date.now()}`;
+        const res = await fetch(
+          `/api/runs/${runId}/issues/${issueId}/comments/${id}`,
+          {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
               file: OVERALL_FEEDBACK_FILE,
               line: null,
               body: trimmedOverall,
-            },
-          ]
-        : comments;
-      await onSubmit(action, allComments);
+            }),
+          },
+        );
+        if (!res.ok) {
+          throw new Error(
+            `Failed to persist overall feedback: HTTP ${res.status}`,
+          );
+        }
+      }
+      await onSubmit(action);
       clear();
       setOverallFeedback("");
       localStorage.removeItem(overallFeedbackKey(runId, issueId));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error("[DebugReviewLayout] submit failed:", err);
+      toast.error(message);
     } finally {
       setSubmitting(false);
     }

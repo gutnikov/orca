@@ -201,7 +201,7 @@ async def test_debug_accept_completes_run(tmp_path: Path) -> None:
         assert orch.is_debug_pending("issue-1"), "Orchestrator never paused for debug review"
 
         # Submit accept — no inline comments
-        orch.submit_debug_decision("issue-1", "accept", [])
+        orch.submit_debug_decision("issue-1", "accept")
 
         # Run should finish promptly after the decision
         await asyncio.wait_for(run_task, timeout=15)
@@ -282,7 +282,7 @@ async def test_debug_modify_restart_does_not_deadlock(tmp_path: Path) -> None:
 
         assert orch.is_debug_pending("issue-1"), "Orchestrator never paused for debug review"
 
-        orch.submit_debug_decision("issue-1", "modify_restart", [])
+        orch.submit_debug_decision("issue-1", "modify_restart")
 
         # The run loop should NOT crash after the modify_restart decision —
         # it should sit idle waiting for orca_restart_state. Give it 2s to
