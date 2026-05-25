@@ -128,6 +128,52 @@ def test_debug_decision_restart_emits_dispatch_effect() -> None:
     assert any(isinstance(e, DispatchWorkerEffect) and e.issue_id == "i1" for e in effects)
 
 
+def test_debug_decision_modify_continue_advances_state_and_marks_modify_pending() -> None:
+    """modify_continue = accept (advance state) + modify_pending=True.
+
+    The user's intent: keep this output, but update the prompt/config from my
+    comments for future runs. So the state transitions like accept, but the
+    issue ends with modify_pending=True so the host skill picks up the
+    rewrite work.
+    """
+    from orca.engine.types import DebugDecisionEvent, EventLogEntry, InlineComment
+
+    config = _make_config()
+    state = _make_state(worker_active=False)
+    issue = state.issues["i1"]
+    issue.debug_pending = True
+    issue.event_log.append(EventLogEntry(timestamp="t0", type="worker_result", data={"outcome": "done"}))
+
+    comments = [InlineComment(file="prompt.md", line=None, body="add a step about retries")]
+    event = DebugDecisionEvent(issue_id="i1", action="modify_continue", comments=comments, timestamp="t1")
+    new_state, _ = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
+
+    new_issue = new_state.issues["i1"]
+    # State advanced (per accept logic)
+    assert new_issue.state == "done"
+    # ...but the modify_pending flag is set so the skill knows to rewrite
+    assert new_issue.modify_pending is True
+    assert new_issue.debug_pending is False
+    # The comments were captured in a debug_modify_request event the way
+    # orca-prompt-config-rewrite expects to find them.
+    modify_events = [e for e in new_issue.event_log if e.type == "debug_modify_request"]
+    assert len(modify_events) == 1
+    assert modify_events[0].data["comments"][0]["body"] == "add a step about retries"
+
+
+def test_debug_decision_modify_continue_without_worker_result_errors() -> None:
+    """No accept means no worker_result — surface an ErrorEffect."""
+    from orca.engine.types import DebugDecisionEvent, ErrorEffect
+
+    config = _make_config()
+    state = _make_state(worker_active=False)
+    state.issues["i1"].debug_pending = True  # no worker_result in log
+
+    event = DebugDecisionEvent(issue_id="i1", action="modify_continue", comments=[], timestamp="t1")
+    _, effects = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
+    assert any(isinstance(e, ErrorEffect) for e in effects)
+
+
 def test_debug_decision_modify_restart_marks_modify_pending_and_logs_request() -> None:
     from orca.engine.types import DebugDecisionEvent, InlineComment
 

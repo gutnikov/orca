@@ -794,6 +794,42 @@ def _handle_debug_decision(
         )
         return
 
+    if event.action == "modify_continue":
+        # Accept the worker's output (advance state) AND request a prompt/config
+        # rewrite as a side effect. The agent reads the most recent
+        # debug_decision event in event_log to discover the action and routes
+        # to orca-prompt-config-rewrite. After the rewrite, the agent calls
+        # orca_clear_modify_pending instead of orca_restart_state — the state
+        # has already advanced, no worker re-dispatch needed.
+        last_result = next(
+            (e.data for e in reversed(issue.event_log) if e.type == "worker_result"),
+            None,
+        )
+        if last_result is None:
+            effects.append(
+                ErrorEffect(
+                    issue_id=event.issue_id,
+                    message=f"Issue '{event.issue_id}': no worker_result to accept",
+                )
+            )
+            return
+        issue.debug_pending = False
+        issue.modify_pending = True
+        append_log(
+            issue,
+            event.timestamp,
+            "debug_modify_request",
+            {"comments": [c.to_dict() for c in event.comments]},
+        )
+        result_event = WorkerResultEvent(
+            issue_id=event.issue_id,
+            result=last_result,
+            timestamp=event.timestamp,
+        )
+        issue.worker_active = True
+        _handle_worker_result(config, state, result_event, effects, generate_id, ts, run_debug=False)
+        return
+
     if event.action == "stop":
         issue.debug_pending = False
         return

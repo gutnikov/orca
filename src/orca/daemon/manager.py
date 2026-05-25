@@ -736,6 +736,12 @@ class RunManager:
             raise ValueError(f"Run {run_id!r} not found")
         return run_info.orchestrator.list_debug_questions(issue_id)
 
+    def clear_modify_pending(self, run_id: str, issue_id: str) -> None:
+        run_info = self._runs.get(run_id)
+        if run_info is None or run_info.orchestrator is None:
+            raise ValueError(f"Run {run_id!r} not found")
+        run_info.orchestrator.clear_modify_pending(issue_id)
+
     def get_debug_review(self, run_id: str, issue_id: str) -> dict[str, Any] | None:
         """Return the latest DebugReviewSnapshot as a dict, or None if not pending."""
         run_info = self._runs.get(run_id)

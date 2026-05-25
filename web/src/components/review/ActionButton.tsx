@@ -3,7 +3,12 @@ import { Check, ChevronDown } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
-export type DebugAction = "modify_restart" | "restart" | "accept" | "stop"
+export type DebugAction =
+  | "modify_restart"
+  | "modify_continue"
+  | "restart"
+  | "accept"
+  | "stop"
 
 interface ActionMeta {
   label: string
@@ -13,8 +18,13 @@ interface ActionMeta {
 
 const ACTIONS: Record<DebugAction, ActionMeta> = {
   modify_restart: {
-    label: "Modify prompt + config & restart",
+    label: "Modify prompts & configs → restart step",
     hint: "Use my comments to update the prompt and config, then re-run this step from a clean state.",
+    tone: "primary",
+  },
+  modify_continue: {
+    label: "Modify prompts & configs → continue",
+    hint: "Accept this output AND update the prompt/config from my comments — improvements land for future runs without redoing this step.",
     tone: "primary",
   },
   restart: {

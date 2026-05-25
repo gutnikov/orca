@@ -319,7 +319,7 @@ async def _post_debug_decide(request: Request) -> JSONResponse:
 
     action = body.get("action")
     comments = body.get("comments", [])
-    if action not in ("accept", "restart", "modify_restart", "stop"):
+    if action not in ("accept", "restart", "modify_restart", "modify_continue", "stop"):
         return JSONResponse({"error": f"invalid action: {action!r}"}, status_code=400)
 
     try:
@@ -346,6 +346,18 @@ async def _post_restart_state(request: Request) -> JSONResponse:
     except ValueError as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)
     return JSONResponse({"status": "restarted"})
+
+
+async def _post_clear_modify_pending(request: Request) -> JSONResponse:
+    """Clear modify_pending after a modify_continue rewrite is done."""
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    issue_id: str = request.path_params["issue_id"]
+    try:
+        manager.clear_modify_pending(run_id, issue_id)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=404)
+    return JSONResponse({"status": "ok"})
 
 
 async def _post_debug_question(request: Request) -> JSONResponse:
@@ -421,6 +433,11 @@ def _api_routes() -> list[Route]:
         Route("/api/runs/{run_id:path}/issues/{issue_id}/debug", _get_debug_review, methods=["GET"]),
         Route("/api/runs/{run_id:path}/issues/{issue_id}/debug/decide", _post_debug_decide, methods=["POST"]),
         Route("/api/runs/{run_id:path}/issues/{issue_id}/debug/restart", _post_restart_state, methods=["POST"]),
+        Route(
+            "/api/runs/{run_id:path}/issues/{issue_id}/debug/clear-modify-pending",
+            _post_clear_modify_pending,
+            methods=["POST"],
+        ),
         Route("/api/runs/{run_id:path}/issues/{issue_id}/debug/questions", _post_debug_question, methods=["POST"]),
         Route("/api/runs/{run_id:path}/issues/{issue_id}/debug/questions", _get_debug_questions, methods=["GET"]),
         Route(

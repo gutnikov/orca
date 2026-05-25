@@ -128,7 +128,9 @@ Per-issue `debug_review_url` on entries in the `issues` dict carries the same UR
 
 **When the next poll shows `debug_reviews` is now empty**, the user has chosen an action via the browser:
 - If the issue's `state` advanced or its `worker_active` flipped back to true → user picked **accept** or **restart**. Resume the normal watch loop.
-- If the issue's `state` is the same and `modify_pending: true` appears on the compact issue → user picked **modify_restart**. Delegate to the `orca-prompt-config-rewrite` skill (pass `run_id` and `issue_id`). The skill calls `orca_restart_state` when done.
+- If `modify_pending: true` appears on the compact issue → user picked one of the two **modify** actions. Delegate to the `orca-prompt-config-rewrite` skill (pass `run_id` and `issue_id`). The skill reads the most recent `debug_decision` event from the issue's log to discover the variant and finishes with the right call:
+  - `action == "modify_restart"` (state did NOT advance) → skill rewrites + calls `orca_restart_state`.
+  - `action == "modify_continue"` (state DID advance — accept was applied alongside the modify request) → skill rewrites + calls `orca_clear_modify_pending`. The next state's worker is already running.
 - If the run's `status` transitioned to `stopped` → user picked **stop**. Exit watch.
 
 #### Answering review questions during the pause

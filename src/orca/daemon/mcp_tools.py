@@ -290,12 +290,31 @@ def create_mcp_server() -> FastMCP:
         """Restart a state after a modify_restart rewrite. Validates the workflow
         YAML, resets the worktree, and re-dispatches the worker.
 
+        Use this when the most recent debug_decision action was `modify_restart`
+        (user clicked "Modify prompts & configs → restart step").
+
         Args:
             root: Absolute path to the target project's repo root.
             run_id: The run identifier.
             issue_id: The issue identifier.
         """
         result = await _get_client(root).restart_state(run_id, issue_id)
+        return json.dumps(result)
+
+    async def orca_clear_modify_pending(root: str, run_id: str, issue_id: str) -> str:
+        """Clear modify_pending after a modify_continue rewrite is done.
+
+        Use this when the most recent debug_decision action was `modify_continue`
+        (user clicked "Modify prompts & configs → continue") — the state has
+        already advanced (worker_result was accepted), no re-dispatch needed.
+        Calling this drops the flag so the polling loop stops seeing pending work.
+
+        Args:
+            root: Absolute path to the target project's repo root.
+            run_id: The run identifier.
+            issue_id: The issue identifier.
+        """
+        result = await _get_client(root).clear_modify_pending(run_id, issue_id)
         return json.dumps(result)
 
     async def orca_list_unanswered_questions(root: str, run_id: str, issue_id: str) -> str:
@@ -354,6 +373,7 @@ def create_mcp_server() -> FastMCP:
     server.add_tool(orca_get_debug_review, name="orca_get_debug_review")
     server.add_tool(orca_submit_debug_decision, name="orca_submit_debug_decision")
     server.add_tool(orca_restart_state, name="orca_restart_state")
+    server.add_tool(orca_clear_modify_pending, name="orca_clear_modify_pending")
     server.add_tool(orca_list_unanswered_questions, name="orca_list_unanswered_questions")
     server.add_tool(orca_answer_review_question, name="orca_answer_review_question")
     server.add_tool(orca_get_playbook, name="orca_get_playbook")
