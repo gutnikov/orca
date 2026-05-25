@@ -350,6 +350,13 @@ class DiffFile:
     raw_diff: str = ""
     additions: int = 0
     deletions: int = 0
+    # Optional full file contents at the base commit and at HEAD. Populated by
+    # the orchestrator's snapshot builder so the web UI's "Full file" view mode
+    # can render the entire file with added-line highlights — same UX as
+    # GitHub's "Display the source diff" toggle. Empty string when the side
+    # doesn't exist (e.g. old_content == "" for newly-added files).
+    old_content: str = ""
+    new_content: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -359,6 +366,8 @@ class DiffFile:
             "diff": self.raw_diff,
             "additions": self.additions,
             "deletions": self.deletions,
+            "old_content": self.old_content,
+            "new_content": self.new_content,
         }
 
     @classmethod
@@ -370,6 +379,8 @@ class DiffFile:
             raw_diff=data.get("diff", ""),
             additions=data.get("additions", 0),
             deletions=data.get("deletions", 0),
+            old_content=data.get("old_content", ""),
+            new_content=data.get("new_content", ""),
         )
 
 

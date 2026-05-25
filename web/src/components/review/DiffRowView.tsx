@@ -89,9 +89,12 @@ export function DiffRowView({
 
   return (
     <div className={cn(rowStyles.base, styleBucket)}>
-      <span className={rowStyles.gutterNumber}>{row.oldLine ?? ""}</span>
-      <span className={rowStyles.gutterNumber}>{row.newLine ?? ""}</span>
-      <span className={cn(rowStyles.gutterSign, "relative")}>
+      {/* Sticky-left columns — explicit left offsets match the grid track
+          widths above (3rem, 3rem, 2rem). Together they pin the gutter while
+          long lines scroll horizontally inside the wrapper. */}
+      <span className={cn(rowStyles.gutterNumber, "left-0")}>{row.oldLine ?? ""}</span>
+      <span className={cn(rowStyles.gutterNumber, "left-[3rem]")}>{row.newLine ?? ""}</span>
+      <span className={cn(rowStyles.gutterSign, "relative left-[6rem]")}>
         {showGutterButton ? (
           <button
             type="button"

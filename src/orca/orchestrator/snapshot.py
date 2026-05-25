@@ -12,6 +12,7 @@ from typing import Any
 import yaml
 
 from orca.engine.types import DebugReviewSnapshot, DiffFile, Hunk
+from orca.orchestrator._git_show import git_show_file as _git_show
 
 
 def extract_config_slice(config_yaml: str, issue_type: str, state_id: str) -> str:
@@ -156,6 +157,16 @@ async def build_snapshot(
     stdout, _ = await proc.communicate()
     diff_text = stdout.decode("utf-8", errors="replace")
     diff_files = parse_unified_diff(diff_text)
+
+    # Populate full file contents so the web UI's "Full file" view mode can
+    # render the entire file (GitHub-style "Display the source diff" toggle).
+    # We tolerate failures — if git show fails (binary file, missing path,
+    # etc.) the field stays empty and the frontend falls back to a stub.
+    for df in diff_files:
+        if df.status != "added":
+            df.old_content = await _git_show(worktree_path, base_commit, df.path)
+        if df.status != "deleted":
+            df.new_content = await _git_show(worktree_path, "HEAD", df.path)
 
     config_yaml = config_path.read_text() if config_path.exists() else ""
     config_slice = extract_config_slice(config_yaml, issue_type, state_id)
