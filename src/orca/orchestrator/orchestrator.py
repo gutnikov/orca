@@ -242,6 +242,124 @@ class Orchestrator:
         issue.modify_pending = False
         self.persistence.save(self._state)
 
+    # ------------------------------------------------------------------ #
+    # Inline comments + comment threads                                  #
+    # ------------------------------------------------------------------ #
+
+    def save_inline_comment(
+        self,
+        issue_id: str,
+        comment_id: str,
+        file: str,
+        line: int | None,
+        body: str,
+    ) -> None:
+        """Create-or-update an inline review comment. Idempotent on comment_id."""
+        from orca.engine.types import InlineCommentSavedEvent
+
+        if issue_id not in self._state.issues:
+            raise ValueError(f"Issue {issue_id!r} not found")
+        event = InlineCommentSavedEvent(
+            issue_id=issue_id,
+            comment_id=comment_id,
+            file=file,
+            line=line,
+            body=body,
+            timestamp=self.now(),
+        )
+        self._state, _ = reduce(self._config, self._state, event, self.generate_id, self.now)
+        self.persistence.save(self._state)
+
+    def delete_inline_comment(self, issue_id: str, comment_id: str) -> None:
+        """Delete an inline comment and cascade-delete its thread."""
+        from orca.engine.types import InlineCommentDeletedEvent
+
+        if issue_id not in self._state.issues:
+            raise ValueError(f"Issue {issue_id!r} not found")
+        event = InlineCommentDeletedEvent(
+            issue_id=issue_id,
+            comment_id=comment_id,
+            timestamp=self.now(),
+        )
+        self._state, _ = reduce(self._config, self._state, event, self.generate_id, self.now)
+        self.persistence.save(self._state)
+
+    def add_thread_message(
+        self,
+        issue_id: str,
+        comment_id: str,
+        role: str,
+        body: str,
+    ) -> str:
+        """Append a message to a comment's thread. Returns the new message_id.
+
+        Lazily creates the thread on the first message. Agent messages bump
+        ``agent_last_reviewed_at``; user messages do not.
+        """
+        from orca.engine.types import CommentThreadMessageAddedEvent
+
+        issue = self._state.issues.get(issue_id)
+        if issue is None:
+            raise ValueError(f"Issue {issue_id!r} not found")
+        if not any(c.id == comment_id for c in issue.inline_comments):
+            raise ValueError(f"Comment {comment_id!r} not found on issue {issue_id!r}")
+        if role not in ("user", "agent"):
+            raise ValueError(f"Invalid role {role!r}")
+        message_id = self.generate_id()
+        event = CommentThreadMessageAddedEvent(
+            issue_id=issue_id,
+            comment_id=comment_id,
+            role=role,
+            message_id=message_id,
+            body=body,
+            timestamp=self.now(),
+        )
+        self._state, _ = reduce(self._config, self._state, event, self.generate_id, self.now)
+        self.persistence.save(self._state)
+        return message_id
+
+    def skip_comment(self, issue_id: str, comment_id: str, reason: str) -> None:
+        """Mark a comment reviewed without appending a message.
+
+        Lazily creates an empty thread if none exists and bumps
+        ``agent_last_reviewed_at`` so the agent's polling loop stops
+        re-evaluating this comment.
+        """
+        from orca.engine.types import CommentThreadReviewedEvent
+
+        issue = self._state.issues.get(issue_id)
+        if issue is None:
+            raise ValueError(f"Issue {issue_id!r} not found")
+        if not any(c.id == comment_id for c in issue.inline_comments):
+            raise ValueError(f"Comment {comment_id!r} not found on issue {issue_id!r}")
+        event = CommentThreadReviewedEvent(
+            issue_id=issue_id,
+            comment_id=comment_id,
+            timestamp=self.now(),
+            reason=reason,
+        )
+        self._state, _ = reduce(self._config, self._state, event, self.generate_id, self.now)
+        self.persistence.save(self._state)
+
+    def list_inline_comments_with_threads(self, issue_id: str) -> list[dict[str, Any]]:
+        """Return all inline comments on the issue, each with its thread (or None)."""
+        issue = self._state.issues.get(issue_id)
+        if issue is None:
+            raise ValueError(f"Issue {issue_id!r} not found")
+        thread_by_comment = {t.comment_id: t for t in issue.comment_threads}
+        return [
+            {
+                "id": c.id,
+                "file": c.file,
+                "line": c.line,
+                "body": c.body,
+                "created_at": c.created_at,
+                "updated_at": c.updated_at,
+                "thread": thread_by_comment[c.id].to_dict() if c.id in thread_by_comment else None,
+            }
+            for c in issue.inline_comments
+        ]
+
     def _is_terminal(self, issue_id: str) -> bool:
         """Return True if the issue's current state is terminal in config."""
         issue = self._state.issues.get(issue_id)

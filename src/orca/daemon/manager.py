@@ -725,6 +725,55 @@ class RunManager:
             raise ValueError(f"Run {run_id!r} not found")
         run_info.orchestrator.clear_modify_pending(issue_id)
 
+    # ------------------------------------------------------------------ #
+    # Inline comments + comment threads                                  #
+    # ------------------------------------------------------------------ #
+
+    def save_inline_comment(
+        self,
+        run_id: str,
+        issue_id: str,
+        comment_id: str,
+        file: str,
+        line: int | None,
+        body: str,
+    ) -> None:
+        run_info = self._runs.get(run_id)
+        if run_info is None or run_info.orchestrator is None:
+            raise ValueError(f"Run {run_id!r} not found")
+        run_info.orchestrator.save_inline_comment(issue_id, comment_id, file, line, body)
+
+    def delete_inline_comment(self, run_id: str, issue_id: str, comment_id: str) -> None:
+        run_info = self._runs.get(run_id)
+        if run_info is None or run_info.orchestrator is None:
+            raise ValueError(f"Run {run_id!r} not found")
+        run_info.orchestrator.delete_inline_comment(issue_id, comment_id)
+
+    def add_thread_message(
+        self,
+        run_id: str,
+        issue_id: str,
+        comment_id: str,
+        role: str,
+        body: str,
+    ) -> str:
+        run_info = self._runs.get(run_id)
+        if run_info is None or run_info.orchestrator is None:
+            raise ValueError(f"Run {run_id!r} not found")
+        return run_info.orchestrator.add_thread_message(issue_id, comment_id, role, body)
+
+    def skip_comment(self, run_id: str, issue_id: str, comment_id: str, reason: str) -> None:
+        run_info = self._runs.get(run_id)
+        if run_info is None or run_info.orchestrator is None:
+            raise ValueError(f"Run {run_id!r} not found")
+        run_info.orchestrator.skip_comment(issue_id, comment_id, reason)
+
+    def list_inline_comments_with_threads(self, run_id: str, issue_id: str) -> list[dict[str, Any]]:
+        run_info = self._runs.get(run_id)
+        if run_info is None or run_info.orchestrator is None:
+            raise ValueError(f"Run {run_id!r} not found")
+        return run_info.orchestrator.list_inline_comments_with_threads(issue_id)
+
     def get_debug_review(self, run_id: str, issue_id: str) -> dict[str, Any] | None:
         """Return the latest DebugReviewSnapshot as a dict, or None if not pending."""
         run_info = self._runs.get(run_id)
