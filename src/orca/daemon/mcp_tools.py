@@ -335,47 +335,6 @@ def create_mcp_server() -> FastMCP:
         result = await _get_client(root).clear_modify_pending(run_id, issue_id)
         return json.dumps(result)
 
-    async def orca_list_unanswered_questions(root: str, run_id: str, issue_id: str) -> str:
-        """During a debug pause, return the list of user-flagged review comments
-        that have no agent answer yet. Empty list = nothing to do.
-
-        Each item has: question_id, client_comment_id, file, line, body.
-
-        Call this in your debug-pause polling loop (alongside the decision check).
-        For each returned item, formulate an answer using the rendered prompt,
-        worker result, and the diff context around (file, line), then post it back
-        via orca_answer_review_question.
-
-        Args:
-            root: Absolute path to the target project's repo root.
-            run_id: The run identifier.
-            issue_id: The issue identifier.
-        """
-        payload = await _get_client(root).list_debug_questions(run_id, issue_id)
-        questions = payload.get("questions", [])
-        unanswered = [q for q in questions if q.get("answer") is None]
-        return json.dumps({"questions": unanswered})
-
-    async def orca_answer_review_question(
-        root: str,
-        run_id: str,
-        issue_id: str,
-        question_id: str,
-        answer: str,
-    ) -> str:
-        """Post an answer to a user-flagged review question. The answer appears
-        threaded under the comment in the browser debug-review UI.
-
-        Args:
-            root: Absolute path to the target project's repo root.
-            run_id: The run identifier.
-            issue_id: The issue identifier.
-            question_id: The question id returned by orca_list_unanswered_questions.
-            answer: The agent's answer (markdown allowed).
-        """
-        result = await _get_client(root).answer_debug_question(run_id, issue_id, question_id, answer)
-        return json.dumps(result)
-
     server.add_tool(orca_daemon_status, name="orca_daemon_status")
     server.add_tool(orca_start_run, name="orca_start_run")
     server.add_tool(orca_list_runs, name="orca_list_runs")
@@ -392,8 +351,6 @@ def create_mcp_server() -> FastMCP:
     server.add_tool(orca_submit_debug_decision, name="orca_submit_debug_decision")
     server.add_tool(orca_restart_state, name="orca_restart_state")
     server.add_tool(orca_clear_modify_pending, name="orca_clear_modify_pending")
-    server.add_tool(orca_list_unanswered_questions, name="orca_list_unanswered_questions")
-    server.add_tool(orca_answer_review_question, name="orca_answer_review_question")
     server.add_tool(orca_get_playbook, name="orca_get_playbook")
     server.add_tool(orca_list_playbooks, name="orca_list_playbooks")
 

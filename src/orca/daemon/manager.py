@@ -734,33 +734,6 @@ class RunManager:
             raise ValueError(f"Run {run_id!r}: no orchestrator")
         await run_info.orchestrator.restart_state(issue_id)
 
-    def ask_debug_question(
-        self,
-        run_id: str,
-        issue_id: str,
-        client_comment_id: str,
-        file: str,
-        line: int | None,
-        body: str,
-    ) -> str:
-        """Record a user-flagged review question. Returns the new question_id."""
-        run_info = self._runs.get(run_id)
-        if run_info is None or run_info.orchestrator is None:
-            raise ValueError(f"Run {run_id!r} not found")
-        return run_info.orchestrator.ask_debug_question(issue_id, client_comment_id, file, line, body)
-
-    def answer_debug_question(self, run_id: str, issue_id: str, question_id: str, answer: str) -> None:
-        run_info = self._runs.get(run_id)
-        if run_info is None or run_info.orchestrator is None:
-            raise ValueError(f"Run {run_id!r} not found")
-        run_info.orchestrator.answer_debug_question(issue_id, question_id, answer)
-
-    def list_debug_questions(self, run_id: str, issue_id: str) -> list[dict[str, Any]]:
-        run_info = self._runs.get(run_id)
-        if run_info is None or run_info.orchestrator is None:
-            raise ValueError(f"Run {run_id!r} not found")
-        return run_info.orchestrator.list_debug_questions(issue_id)
-
     def clear_modify_pending(self, run_id: str, issue_id: str) -> None:
         run_info = self._runs.get(run_id)
         if run_info is None or run_info.orchestrator is None:
