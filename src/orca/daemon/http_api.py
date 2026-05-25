@@ -58,6 +58,20 @@ async def _start_run(request: Request) -> JSONResponse:
     if not task_file.is_absolute():
         task_file = manager.repo_root / task_file
 
+    raw_overrides = body.get("worker_overrides")
+    worker_overrides: dict[str, dict[str, str]] | None = None
+    if raw_overrides is not None:
+        if not isinstance(raw_overrides, dict):
+            return JSONResponse({"error": "worker_overrides must be an object"}, status_code=400)
+        worker_overrides = {}
+        for state_name, fields in raw_overrides.items():
+            if not isinstance(fields, dict):
+                return JSONResponse(
+                    {"error": f"worker_overrides[{state_name!r}] must be an object"},
+                    status_code=400,
+                )
+            worker_overrides[str(state_name)] = {str(k): str(v) for k, v in fields.items()}
+
     try:
         run_id = await manager.start_run(
             task_file=task_file,
@@ -69,6 +83,7 @@ async def _start_run(request: Request) -> JSONResponse:
             max_retries=body.get("max_retries"),
             insights=bool(body.get("insights", False)),
             debug=bool(body.get("debug", False)),
+            worker_overrides=worker_overrides,
         )
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)

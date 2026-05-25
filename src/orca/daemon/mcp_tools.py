@@ -81,6 +81,7 @@ def create_mcp_server() -> FastMCP:
         branch: str | None = None,
         run_id: str | None = None,
         debug: bool = False,
+        worker_overrides: dict[str, dict[str, str]] | None = None,
     ) -> str:
         """Start a new orca workflow run.
 
@@ -91,10 +92,27 @@ def create_mcp_server() -> FastMCP:
             branch: Optional git branch name (auto-detected if omitted).
             run_id: Optional custom run identifier (defaults to 'branch:workflow').
             debug: If True, the run pauses after every worker completion for review.
+            worker_overrides: Optional per-state, per-field worker overrides
+                applied at dispatch time. Keys are state names (e.g. "preflight");
+                values are objects with any of `kind`, `model`, `effort`.
+                Example:
+                    {"preflight": {"kind": "codex", "model": "gpt-5.5",
+                                    "effort": "high"}}
+                The state must exist in the workflow; `kind` must be a
+                registered agent kind (claude-code / codex / opencode);
+                `effort` is silently dropped for kinds that don't expose a
+                reasoning-effort flag (currently only codex does).
 
         Returns JSON with run_id and status, or an error message.
         """
-        result = await _get_client(root).start_run(task_file, workflow, branch, run_id, debug=debug)
+        result = await _get_client(root).start_run(
+            task_file,
+            workflow,
+            branch,
+            run_id,
+            debug=debug,
+            worker_overrides=worker_overrides,
+        )
         return json.dumps(result)
 
     async def orca_list_runs(root: str) -> str:

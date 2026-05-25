@@ -69,6 +69,7 @@ class Orchestrator:
         hot_sessions: set[str] | None = None,
         session_log_paths: dict[str, str] | None = None,
         insights_state: dict[str, str] | None = None,
+        worker_overrides: dict[str, dict[str, str]] | None = None,
     ) -> None:
         self._config = config
         self._state = state
@@ -109,6 +110,10 @@ class Orchestrator:
         self._used_slugs: set[str] = set()
         for branch in self.branches.values():
             self._used_slugs.add(branch)
+        # Per-state, per-field worker overrides applied at dispatch time. Keyed
+        # by state name; each entry may carry `kind` / `model` / `effort`.
+        # State names not present here keep their workflow-config defaults.
+        self._worker_overrides: dict[str, dict[str, str]] = worker_overrides or {}
 
     async def stop(self) -> None:
         """Cancel in-flight workers and kill all tmux sessions."""
@@ -392,7 +397,14 @@ class Orchestrator:
             )
             return
 
-        worker_kind = state_def.worker.kind
+        # Resolve effective worker config = workflow YAML defaults overlaid
+        # with any run-time overrides registered for this state. Overrides
+        # let the user retarget kind/model/effort per state when invoking the
+        # run, without editing the workflow.
+        override = self._worker_overrides.get(effect.state, {})
+        worker_kind = override.get("kind") or state_def.worker.kind
+        effective_model = override.get("model") or state_def.worker.model
+        effective_effort = override.get("effort") or state_def.worker.effort
         worker = self.workers.get(worker_kind)
         if worker is None:
             logger.warning(
@@ -434,9 +446,10 @@ class Orchestrator:
                 state_def.worker.prompt,
                 backoff,
                 tracking_id,
-                model=state_def.worker.model,
+                model=effective_model,
                 extra_args=state_def.worker.args,
                 prompt_inline=state_def.worker.prompt_inline,
+                effort=effective_effort,
             )
         )
         self._in_flight[task] = (effect.issue_id, tracking_id)
@@ -471,6 +484,7 @@ class Orchestrator:
         model: str | None = None,
         extra_args: tuple[str, ...] | None = None,
         prompt_inline: bool = False,
+        effort: str | None = None,
     ) -> WorkerOutcome:
         """Wait for backoff delay, then run the worker."""
         if backoff > 0:
@@ -489,6 +503,7 @@ class Orchestrator:
             model=model,
             extra_args=extra_args,
             prompt_inline=prompt_inline,
+            effort=effort,
         )
 
     async def _run_worker(
@@ -500,6 +515,7 @@ class Orchestrator:
         model: str | None = None,
         extra_args: tuple[str, ...] | None = None,
         prompt_inline: bool = False,
+        effort: str | None = None,
     ) -> WorkerOutcome:
         """Create worktree if needed, then execute the worker."""
         workdir = await self._ensure_worktree(effect.issue_id)
@@ -633,6 +649,7 @@ class Orchestrator:
                 on_blocked=_on_blocked,
                 on_unblocked=_on_unblocked,
                 prompt_text=prompt_text,
+                effort=effort,
             )
         finally:
             self._waiting_workers.pop(effect.issue_id, None)

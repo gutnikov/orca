@@ -940,3 +940,49 @@ initial: todo
         rule = cfg.types["default"].states["todo"].on["fail"]
         assert isinstance(rule, OnTransition)
         assert rule.target == "failed"
+
+
+class TestParseEffort:
+    def test_effort_field_round_trips(self) -> None:
+        yaml_str = """\
+issue:
+  fields:
+    title: { type: string, description: t }
+states:
+  preflight:
+    worker:
+      kind: codex
+      prompt: p.md
+      model: gpt-5.5
+      effort: high
+      result_format:
+        outcome: { type: enum, values: [done], description: o }
+    on:
+      done: done
+initial: preflight
+"""
+        cfg = parse_config(yaml_str)
+        worker = cfg.types["default"].states["preflight"].worker
+        assert worker is not None
+        assert worker.effort == "high"
+
+    def test_effort_absent_defaults_to_none(self) -> None:
+        yaml_str = """\
+issue:
+  fields:
+    title: { type: string, description: t }
+states:
+  preflight:
+    worker:
+      kind: claude-code
+      prompt: p.md
+      result_format:
+        outcome: { type: enum, values: [done], description: o }
+    on:
+      done: done
+initial: preflight
+"""
+        cfg = parse_config(yaml_str)
+        worker = cfg.types["default"].states["preflight"].worker
+        assert worker is not None
+        assert worker.effort is None

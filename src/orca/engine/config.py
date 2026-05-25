@@ -142,6 +142,8 @@ def _parse_state(name: str, raw_data: dict[str, Any] | None) -> StateDef:
         raw_args = worker_data.get("args")
         args: tuple[str, ...] | None = tuple(str(a) for a in raw_args) if raw_args is not None else None
         progress: bool = bool(worker_data.get("progress", False))
+        effort_raw = worker_data.get("effort")
+        effort: str | None = str(effort_raw) if effort_raw is not None else None
         worker = WorkerDef(
             kind=kind,
             prompt=prompt,
@@ -152,6 +154,7 @@ def _parse_state(name: str, raw_data: dict[str, Any] | None) -> StateDef:
             args=args,
             progress=progress,
             prompt_inline=prompt_inline,
+            effort=effort,
         )
 
     on: dict[str, OnRule] = {}

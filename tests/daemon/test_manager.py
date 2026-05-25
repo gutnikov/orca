@@ -70,6 +70,7 @@ class MockWorker:
         on_blocked: Any = None,
         on_unblocked: Any = None,
         prompt_text: str | None = None,
+        effort: str | None = None,
     ) -> WorkerOutcome:
         self.calls.append((effect.issue_id, effect.state))
         return self.outcomes.get(effect.state, WorkerSuccess(result={"outcome": "start"}))
