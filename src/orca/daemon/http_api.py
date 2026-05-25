@@ -367,6 +367,91 @@ async def _post_clear_modify_pending(request: Request) -> JSONResponse:
     return JSONResponse({"status": "ok"})
 
 
+async def _get_inline_comments(request: Request) -> JSONResponse:
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    issue_id: str = request.path_params["issue_id"]
+    try:
+        comments = manager.list_inline_comments_with_threads(run_id, issue_id)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=404)
+    return JSONResponse({"comments": comments})
+
+
+async def _put_inline_comment(request: Request) -> JSONResponse:
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    issue_id: str = request.path_params["issue_id"]
+    comment_id: str = request.path_params["comment_id"]
+    try:
+        body: dict[str, Any] = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+    file = body.get("file")
+    line = body.get("line")
+    comment_body = body.get("body")
+    if not isinstance(file, str) or not isinstance(comment_body, str):
+        return JSONResponse({"error": "file and body required"}, status_code=400)
+    line_val: int | None = line if isinstance(line, int) and not isinstance(line, bool) else None
+    try:
+        manager.save_inline_comment(run_id, issue_id, comment_id, file, line_val, comment_body)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=404)
+    return JSONResponse({"ok": True})
+
+
+async def _delete_inline_comment(request: Request) -> JSONResponse:
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    issue_id: str = request.path_params["issue_id"]
+    comment_id: str = request.path_params["comment_id"]
+    try:
+        manager.delete_inline_comment(run_id, issue_id, comment_id)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=404)
+    return JSONResponse({"ok": True})
+
+
+async def _post_thread_message(request: Request) -> JSONResponse:
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    issue_id: str = request.path_params["issue_id"]
+    comment_id: str = request.path_params["comment_id"]
+    try:
+        body: dict[str, Any] = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+    role = body.get("role")
+    msg_body = body.get("body")
+    if role not in ("user", "agent"):
+        return JSONResponse({"error": "role must be 'user' or 'agent'"}, status_code=400)
+    if not isinstance(msg_body, str) or not msg_body.strip():
+        return JSONResponse({"error": "body required (non-empty string)"}, status_code=400)
+    try:
+        message_id = manager.add_thread_message(run_id, issue_id, comment_id, role, msg_body)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=404)
+    return JSONResponse({"message_id": message_id})
+
+
+async def _post_thread_skip(request: Request) -> JSONResponse:
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    issue_id: str = request.path_params["issue_id"]
+    comment_id: str = request.path_params["comment_id"]
+    try:
+        body: dict[str, Any] = await request.json()
+    except Exception:
+        body = {}
+    raw_reason = body.get("reason", "") if isinstance(body, dict) else ""
+    reason = raw_reason if isinstance(raw_reason, str) else ""
+    try:
+        manager.skip_comment(run_id, issue_id, comment_id, reason)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=404)
+    return JSONResponse({"ok": True})
+
+
 def _api_routes() -> list[Route]:
     return [
         Route("/api/status", _status, methods=["GET"]),
@@ -378,6 +463,31 @@ def _api_routes() -> list[Route]:
         Route(
             "/api/runs/{run_id:path}/issues/{issue_id}/debug/clear-modify-pending",
             _post_clear_modify_pending,
+            methods=["POST"],
+        ),
+        Route(
+            "/api/runs/{run_id:path}/issues/{issue_id}/comments",
+            _get_inline_comments,
+            methods=["GET"],
+        ),
+        Route(
+            "/api/runs/{run_id:path}/issues/{issue_id}/comments/{comment_id}",
+            _put_inline_comment,
+            methods=["PUT"],
+        ),
+        Route(
+            "/api/runs/{run_id:path}/issues/{issue_id}/comments/{comment_id}",
+            _delete_inline_comment,
+            methods=["DELETE"],
+        ),
+        Route(
+            "/api/runs/{run_id:path}/issues/{issue_id}/comments/{comment_id}/messages",
+            _post_thread_message,
+            methods=["POST"],
+        ),
+        Route(
+            "/api/runs/{run_id:path}/issues/{issue_id}/comments/{comment_id}/skip",
+            _post_thread_skip,
             methods=["POST"],
         ),
         Route("/api/runs/{run_id:path}/issues/{issue_id}", _get_issue, methods=["GET"]),
