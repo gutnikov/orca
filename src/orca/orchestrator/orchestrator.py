@@ -927,6 +927,15 @@ class Orchestrator:
                 retried = self._process_retry_signals(pending)
                 if retried:
                     continue
+                # modify_restart in debug mode leaves the issue with
+                # modify_pending=true and no in-flight worker. The host (CC
+                # via MCP) is expected to rewrite the prompt and call
+                # orca_restart_state, which spawns a fresh worker directly
+                # into _in_flight. Until that happens, sit idle — this is
+                # not a deadlock, it's an external-unblock wait.
+                if any(i.modify_pending for i in self._state.issues.values()):
+                    await asyncio.sleep(0.5)
+                    continue
                 logger.warning(
                     "Deadlock detected: no tasks in flight and no pending effects. Stopping.",
                     extra={"event": "deadlock_detected"},
