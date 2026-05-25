@@ -39,6 +39,20 @@ class DaemonClient:
         ):
             return await resp.json()  # type: ignore[no-any-return]
 
+    async def _put_json(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        async with (
+            aiohttp.ClientSession(connector=self._connector()) as session,
+            session.put(f"http://localhost{path}", json=body) as resp,
+        ):
+            return await resp.json()  # type: ignore[no-any-return]
+
+    async def _delete_json(self, path: str) -> dict[str, Any]:
+        async with (
+            aiohttp.ClientSession(connector=self._connector()) as session,
+            session.delete(f"http://localhost{path}") as resp,
+        ):
+            return await resp.json()  # type: ignore[no-any-return]
+
     async def status(self) -> dict[str, Any]:
         return await self._get_json("/api/status")
 
@@ -53,9 +67,6 @@ class DaemonClient:
 
     async def get_issue(self, run_id: str, issue_id: str) -> dict[str, Any]:
         return await self._get_json(f"/api/runs/{run_id}/issues/{issue_id}")
-
-    async def get_insights(self, run_id: str) -> str:
-        return await self._get_text(f"/api/runs/{run_id}/insights")
 
     async def get_worker_log(self, run_id: str, issue_id: str, tail: int = 100) -> str:
         return await self._get_text(f"/api/runs/{run_id}/logs/{issue_id}?tail={tail}")
@@ -106,11 +117,13 @@ class DaemonClient:
         run_id: str,
         issue_id: str,
         action: str,
-        comments: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        # Comments are no longer sent on the wire — the daemon persists them
+        # as the user authors them (Task 7) and the reducer bundles them
+        # into the decision payload from the persisted state.
         return await self._post_json(
             f"/api/runs/{run_id}/issues/{issue_id}/debug/decide",
-            {"action": action, "comments": comments},
+            {"action": action},
         )
 
     async def restart_state(self, run_id: str, issue_id: str) -> dict[str, Any]:
@@ -119,17 +132,45 @@ class DaemonClient:
     async def clear_modify_pending(self, run_id: str, issue_id: str) -> dict[str, Any]:
         return await self._post_json(f"/api/runs/{run_id}/issues/{issue_id}/debug/clear-modify-pending")
 
-    async def list_debug_questions(self, run_id: str, issue_id: str) -> dict[str, Any]:
-        return await self._get_json(f"/api/runs/{run_id}/issues/{issue_id}/debug/questions")
+    # ------------------------------------------------------------------ #
+    # Inline comments + comment threads                                  #
+    # ------------------------------------------------------------------ #
 
-    async def answer_debug_question(
+    async def list_inline_comments(self, run_id: str, issue_id: str) -> dict[str, Any]:
+        return await self._get_json(f"/api/runs/{run_id}/issues/{issue_id}/comments")
+
+    async def save_inline_comment(
         self,
         run_id: str,
         issue_id: str,
-        question_id: str,
-        answer: str,
+        comment_id: str,
+        file: str,
+        line: int | None,
+        body: str,
+    ) -> dict[str, Any]:
+        return await self._put_json(
+            f"/api/runs/{run_id}/issues/{issue_id}/comments/{comment_id}",
+            {"file": file, "line": line, "body": body},
+        )
+
+    async def delete_inline_comment(self, run_id: str, issue_id: str, comment_id: str) -> dict[str, Any]:
+        return await self._delete_json(f"/api/runs/{run_id}/issues/{issue_id}/comments/{comment_id}")
+
+    async def add_thread_message(
+        self,
+        run_id: str,
+        issue_id: str,
+        comment_id: str,
+        role: str,
+        body: str,
     ) -> dict[str, Any]:
         return await self._post_json(
-            f"/api/runs/{run_id}/issues/{issue_id}/debug/questions/{question_id}/answer",
-            {"answer": answer},
+            f"/api/runs/{run_id}/issues/{issue_id}/comments/{comment_id}/messages",
+            {"role": role, "body": body},
+        )
+
+    async def skip_comment(self, run_id: str, issue_id: str, comment_id: str, reason: str) -> dict[str, Any]:
+        return await self._post_json(
+            f"/api/runs/{run_id}/issues/{issue_id}/comments/{comment_id}/skip",
+            {"reason": reason},
         )

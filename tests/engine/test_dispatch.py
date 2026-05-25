@@ -498,27 +498,6 @@ class TestBuildRunContext:
         assert ctx["sessions_dir"] == str(sessions_dir)
         assert ctx["branch"] == "my-branch"
         assert ctx["workflow"] == "prd"
-        assert ctx["insights"] is None
-
-    def test_insights_path_when_present(self, tmp_path: _Path) -> None:
-        run_dir = tmp_path / "run"
-        run_dir.mkdir()
-        (run_dir / "insights.json").touch()
-        sessions_dir = tmp_path / "sessions"
-        sessions_dir.mkdir()
-
-        state = State(issues={}, worker_queues={})
-
-        ctx = build_run_context(
-            state=state,
-            run_dir=run_dir,
-            sessions_dir=sessions_dir,
-            sessions=[],
-            branch="b",
-            workflow="w",
-        )
-
-        assert ctx["insights"] == str(run_dir / "insights.json")
 
     def test_sessions_list(self, tmp_path: _Path) -> None:
         run_dir = tmp_path / "run"
@@ -625,7 +604,6 @@ class TestBuildRunContext:
         )
 
         assert "log" in ctx["formats"]
-        assert "insights" in ctx["formats"]
         assert "state" in ctx["formats"]
         assert "sessions" in ctx["formats"]
 

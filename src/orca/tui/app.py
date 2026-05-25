@@ -12,8 +12,6 @@ from textual.widgets import Footer
 
 from orca.engine.types import State, StateMachineConfig
 from orca.tui.messages import (
-    InsightEntrySelected,
-    InsightsSelected,
     IssueSelected,
     PhaseSelected,
     StateUpdated,
@@ -21,7 +19,6 @@ from orca.tui.messages import (
 )
 from orca.tui.state_reader import DaemonStateReader, StateReader
 from orca.tui.widgets.header import OrcaHeader
-from orca.tui.widgets.insights_modal import InsightsModal
 from orca.tui.widgets.issue_detail import IssueDetail
 from orca.tui.widgets.issue_tree import IssueTree
 from orca.tui.widgets.phases_panel import PhasesPanel
@@ -65,8 +62,6 @@ class OrcaApp(App[None]):
         Binding("j", "scroll_detail_down", "Scroll ↓", show=False),
         Binding("k", "scroll_detail_up", "Scroll ↑", show=False),
         Binding("t", "toggle_tab", "Toggle Tab", show=False),
-        Binding("i", "toggle_insights", "Insights", show=False),
-        Binding("escape", "close_modal", "Close", show=False),
     ]
 
     def __init__(
@@ -74,10 +69,8 @@ class OrcaApp(App[None]):
         run_dir: Path,
         branch_name: str,
         config: StateMachineConfig | None = None,
-        insights_enabled: bool = False,
         hot_sessions: set[str] | None = None,
         session_log_paths: dict[str, str] | None = None,
-        insights_state: dict[str, str] | None = None,
     ) -> None:
         super().__init__()
         self._reader: StateReader | None = StateReader(run_dir)
@@ -90,12 +83,10 @@ class OrcaApp(App[None]):
         self._run_dir = run_dir
         self._branch_name = branch_name
         self._config = config
-        self._insights_enabled = insights_enabled
         self._state: State | None = None
         # Shared with orchestrator thread
         self._hot_sessions: set[str] = hot_sessions if hot_sessions is not None else set()
         self._session_log_paths: dict[str, str] = session_log_paths if session_log_paths is not None else {}
-        self._insights_state: dict[str, str] = insights_state if insights_state is not None else {}
         self._selected_session_id: str | None = None
         self._sessions: list[dict[str, object]] = []
 
@@ -138,19 +129,14 @@ class OrcaApp(App[None]):
         app._reader = None  # Don't use file-based reader
         return app
 
-    @property
-    def _insights_tracking_id(self) -> str:
-        return self._insights_state.get("tracking_id", "")
-
     def compose(self) -> ComposeResult:
         yield OrcaHeader(branch_name=self._branch_name, config=self._config)
         with Horizontal(id="main-panels"):
             with Vertical(id="left-column"):
-                yield IssueTree(config=self._config, insights_enabled=self._insights_enabled)
+                yield IssueTree(config=self._config)
                 yield PhasesPanel()
             yield IssueDetail()
             yield TerminalView()
-        yield InsightsModal()
         yield Footer()
 
     async def on_unmount(self) -> None:
@@ -361,39 +347,6 @@ class OrcaApp(App[None]):
         else:
             terminal.show_placeholder()
 
-    def on_insights_selected(self, message: InsightsSelected) -> None:
-        """Handle insights node selection — show insights session log."""
-        tracking_id = self._insights_tracking_id
-        if not tracking_id:
-            return
-        detail = self.query_one(IssueDetail)
-        terminal = self.query_one(TerminalView)
-        self._deselect_session()
-        self._selected_session_id = tracking_id
-        self._hot_sessions.add(tracking_id)
-        log_path_str = self._session_log_paths.get(tracking_id)
-        log_path = Path(log_path_str) if log_path_str else None
-        detail.styles.display = "none"
-        terminal.styles.display = "block"
-        if log_path is not None:
-            terminal.show_log_file(log_path, active=True, state_name="insights")
-        else:
-            terminal.show_placeholder()
-
-    def on_insight_entry_selected(self, message: InsightEntrySelected) -> None:
-        self._deselect_session()
-        terminal = self.query_one(TerminalView)
-        terminal.styles.display = "none"
-        detail = self.query_one(IssueDetail)
-        detail.styles.display = "block"
-        icon = {"error": "●", "warning": "⚠", "info": "ℹ", "summary": "◆"}.get(message.severity, "ℹ")
-        content = f"# {icon} {message.title}\n\n"
-        if message.detail:
-            content += f"{message.detail}\n\n"
-        if message.remediation:
-            content += f"## Remediation\n\n{message.remediation}\n"
-        detail.show_issue_text(message.title, content)
-
     def _deselect_session(self) -> None:
         """Remove the previous session from hot set."""
         if self._selected_session_id is not None:
@@ -506,33 +459,6 @@ class OrcaApp(App[None]):
             terminal.scroll_up()
         else:
             self.query_one(IssueDetail).scroll_up()
-
-    def action_toggle_insights(self) -> None:
-        """Toggle the insights modal."""
-        modal = self.query_one(InsightsModal)
-        if modal.is_open:
-            modal.close()
-        else:
-            insights = self._read_insights()
-            modal.open(insights)
-
-    def _read_insights(self) -> list[dict[str, object]]:
-        import json
-
-        p = self._run_dir / "insights.json"
-        if not p.exists():
-            return []
-        try:
-            data: list[dict[str, object]] = json.loads(p.read_text())
-            return data
-        except (json.JSONDecodeError, OSError):
-            return []
-
-    def action_close_modal(self) -> None:
-        """Close the insights modal if open."""
-        modal = self.query_one(InsightsModal)
-        if modal.is_open:
-            modal.close()
 
     def _find_root_issue(self) -> str | None:
         if self._state is None:

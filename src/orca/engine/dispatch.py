@@ -215,13 +215,11 @@ def build_run_context(
     workflow: str,
 ) -> dict[str, Any]:
     """Build the run context dict for Jinja2 templates."""
-    insights_path = run_dir / "insights.json"
     repo_root = sessions_dir.parent.parent if sessions_dir.parent.name == ".orca-state" else sessions_dir.parent
     ctx: dict[str, Any] = {
         "repo_root": str(repo_root),
         "run_dir": str(run_dir),
         "log": str(run_dir / "orca.log.jsonl"),
-        "insights": str(insights_path) if insights_path.exists() else None,
         "state": str(run_dir / "state.json"),
         "sessions_dir": str(sessions_dir),
         "branch": branch,
@@ -276,7 +274,6 @@ def build_run_context(
 
     ctx["formats"] = {
         "log": "JSONL, one event per line: {timestamp, level, logger, message, event, ...}",
-        "insights": "JSON array of {timestamp, severity, title, detail, remediation}",
         "state": "JSON snapshot of all issues: {issues: {id: {type, fields, state, event_log, ...}}}",
         "sessions": "Plain text terminal scrollback from each worker session",
     }

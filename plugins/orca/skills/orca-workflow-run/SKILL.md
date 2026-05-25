@@ -25,8 +25,6 @@ You are not expected to understand what each state in the workflow means. Trust 
 | `POLL_INTERVAL_SECONDS` | 45 | Seconds to wait between health-check polls during the watch loop |
 | `DEBUG_PAUSE_POLL_INTERVAL_SECONDS` | 10 | Faster poll interval while waiting for a debug-review decision — once the URL is surfaced, the user is actively reviewing and the round-trip should feel responsive |
 
-**Insights:** `--insights` and the matching `orca_get_insights` MCP tool are a CLI-side opt-in for a separate insights agent — not surfaced by this supervisor SKILL. If a user mentions insights, point them at the CLI (`orca run … --insights`) and at the `orca_get_insights` tool to read the resulting log.
-
 ### Run-derived thresholds
 
 `max_worker_retries` and `max_hops` are launch-time flags on `orca run` (`--max-retries` / `--max-hops`), **not** workflow YAML fields — the parser ignores top-level YAML keys with those names. The CLI applies defaults of **3** retries and **10** hops unless the user overrode them; MCP-started runs may not expose the effective values back to the supervisor. If you cannot read them from the caller context, fall back to those CLI defaults and note the assumption.
@@ -133,20 +131,24 @@ Per-issue `debug_review_url` on entries in the `issues` dict carries the same UR
   - `action == "modify_continue"` (state DID advance — accept was applied alongside the modify request) → skill rewrites + calls `orca_clear_modify_pending`. The next state's worker is already running.
 - If the run's `status` transitioned to `stopped` → user picked **stop**. Exit watch.
 
-#### Answering review questions during the pause
+#### Engaging with inline comments during the pause
 
-While the debug pause is still unresolved (`debug_reviews` non-empty), users can flag individual review comments with the *Ask agent* button. After **each** debug-review poll, before sleeping again:
+While the debug pause is still unresolved (`debug_reviews` non-empty), the supervising agent autonomously reviews each saved inline comment and decides per-comment whether to engage. After **each** debug-review poll, before sleeping again:
 
-1. Call `orca_list_unanswered_questions(root, run_id, issue_id)`.
-2. For each `{question_id, file, line, body}` returned:
-   - Read the rendered prompt, the worker's result, and the diff hunk around `(file, line)` from the snapshot you already fetched. If you need the snapshot again, call `orca_get_debug_review(root, run_id, issue_id)`.
-   - Formulate a concise answer (2-5 sentences, markdown ok). Answer based on what the diff and prompt actually say, not what you wish were true. If the comment is *not* a question (e.g. instructions, observations), answer anyway with a one-line acknowledgement — the user explicitly flagged it.
-   - Call `orca_answer_review_question(root, run_id, issue_id, question_id, body)` with the answer.
-3. Then continue to the next debug-review poll.
+1. Call `orca_list_pending_comments(root, run_id, issue_id)`. A comment is pending iff it has no thread yet OR the last thread message is from the user and newer than the agent's last review.
+2. For each pending comment:
+   - Read the comment body, the full thread history (`thread_messages` — may be empty), and the surrounding `(file, line)`. The latest user input is `thread_messages[-1]` if present, else the comment body itself. If you need the snapshot again, call `orca_get_debug_review(root, run_id, issue_id)`.
+   - Classify the latest input and act:
+     - **Question** ("why X?", "how does Y work?") → answer via `orca_reply_to_comment(root, run_id, issue_id, comment_id, body)`. Tight reply, 1-3 sentences usually.
+     - **Ambiguous observation** ("this looks off") → ask a concrete clarifying question via `orca_reply_to_comment`.
+     - **Substantive feedback you can usefully add to** → reply via `orca_reply_to_comment`. Don't pile on if nothing useful to say.
+     - **Clear directive** ("fix this") → `orca_skip_comment(root, run_id, issue_id, comment_id, reason="directive — worker reads on submit")`. The worker sees the comment verbatim when the user submits a decision; no need to acknowledge.
+     - **No substantive feedback to add** → `orca_skip_comment(..., reason="nothing useful to add")`.
+3. Each reply or skip bumps `agent_last_reviewed_at` so the same comment won't surface again unless the user adds new content. The user can edit a comment body mid-thread — the next poll surfaces the new body; re-read before replying.
 
-This loop is independent of the decision wait — the user can flag a question and keep reviewing without ever submitting Accept/Modify+restart. Once they do submit, all questions are dropped server-side and the next pause starts clean.
+This loop is independent of the decision wait — the user can keep editing/adding comments without ever submitting Accept/Modify. Once they do submit, the thread state is bundled into the worker's next prompt and the next pause starts clean.
 
-Do NOT print the answers in your CLI output. They render threaded under the user's comment in the browser; duplicating in chat is noise.
+Do NOT print the replies in your CLI output. They render threaded under the user's comment in the browser; duplicating in chat is noise.
 
 #### Other paused states (check after debug_reviews)
 

@@ -118,7 +118,6 @@ class RunInfo:
     config: StateMachineConfig | None = None
     orchestrator: Orchestrator | None = None
     task: asyncio.Task[None] | None = field(default=None, repr=False)
-    insights: bool = False
     debug: bool = False
 
     def to_summary(self, browser_port: int | None = None) -> dict[str, Any]:
@@ -178,7 +177,6 @@ class RunManager:
         max_hops: int | None = None,
         max_retries: int | None = None,
         *,
-        insights: bool = False,
         debug: bool = False,
         worker_overrides: dict[str, dict[str, str]] | None = None,
     ) -> str:
@@ -316,7 +314,6 @@ class RunManager:
             repo_root=self.repo_root,
             flow_root=flow_root,
             session_sync=session_sync,
-            insights_enabled=insights,
             worker_overrides=worker_overrides,
         )
         orchestrator.debug = debug
@@ -332,7 +329,6 @@ class RunManager:
             created_at=now_str,
             config=config,
             orchestrator=orchestrator,
-            insights=insights,
             debug=debug,
         )
 
@@ -553,7 +549,6 @@ class RunManager:
             repo_root=self.repo_root,
             flow_root=flow_root,
             session_sync=session_sync,
-            insights_enabled=run_info.insights,
         )
         run_info.orchestrator = orchestrator
         run_info.issue_count = len(state.issues)
@@ -672,16 +667,6 @@ class RunManager:
                 parts.append(f"{header}\n(no log)")
         return "\n\n".join(parts)
 
-    def get_insights(self, run_id: str) -> str:
-        """Get insights log content for the given run."""
-        run_info = self._runs.get(run_id)
-        if run_info is None or run_info.orchestrator is None:
-            return ""
-        tid = run_info.orchestrator.insights_tracking_id
-        if not tid:
-            return ""
-        return run_info.orchestrator.get_session_log(tid)
-
     def unblock_worker(self, run_id: str, issue_id: str, message: str) -> None:
         """Unblock a blocked worker in a run."""
         run_info = self._runs.get(run_id)
@@ -700,10 +685,15 @@ class RunManager:
         run_id: str,
         issue_id: str,
         action: str,
-        comments: list[dict[str, Any]],
     ) -> None:
         """Submit a debug decision. Raises ValueError with categorized messages
-        that the HTTP layer maps to 400/404/409/410."""
+        that the HTTP layer maps to 400/404/409/410.
+
+        Comments are no longer accepted here — they were persisted on the
+        daemon as the user authored them (Task 7) and the reducer reads them
+        from `Issue.inline_comments` + `Issue.comment_threads` when bundling
+        the `debug_modify_request` event payload.
+        """
         run_info = self._runs.get(run_id)
         if run_info is None:
             raise ValueError(f"Run {run_id!r} not found")
@@ -723,7 +713,7 @@ class RunManager:
                         f"Issue {issue_id!r}: already_decided (prior action: {last_decision.data.get('action')})"
                     )
             raise ValueError(f"Issue {issue_id!r}: not_pending")
-        run_info.orchestrator.submit_debug_decision(issue_id, action, comments)
+        run_info.orchestrator.submit_debug_decision(issue_id, action)
 
     async def restart_state(self, run_id: str, issue_id: str) -> None:
         """Restart a state after a modify_restart rewrite."""
@@ -734,38 +724,60 @@ class RunManager:
             raise ValueError(f"Run {run_id!r}: no orchestrator")
         await run_info.orchestrator.restart_state(issue_id)
 
-    def ask_debug_question(
-        self,
-        run_id: str,
-        issue_id: str,
-        client_comment_id: str,
-        file: str,
-        line: int | None,
-        body: str,
-    ) -> str:
-        """Record a user-flagged review question. Returns the new question_id."""
-        run_info = self._runs.get(run_id)
-        if run_info is None or run_info.orchestrator is None:
-            raise ValueError(f"Run {run_id!r} not found")
-        return run_info.orchestrator.ask_debug_question(issue_id, client_comment_id, file, line, body)
-
-    def answer_debug_question(self, run_id: str, issue_id: str, question_id: str, answer: str) -> None:
-        run_info = self._runs.get(run_id)
-        if run_info is None or run_info.orchestrator is None:
-            raise ValueError(f"Run {run_id!r} not found")
-        run_info.orchestrator.answer_debug_question(issue_id, question_id, answer)
-
-    def list_debug_questions(self, run_id: str, issue_id: str) -> list[dict[str, Any]]:
-        run_info = self._runs.get(run_id)
-        if run_info is None or run_info.orchestrator is None:
-            raise ValueError(f"Run {run_id!r} not found")
-        return run_info.orchestrator.list_debug_questions(issue_id)
-
     def clear_modify_pending(self, run_id: str, issue_id: str) -> None:
         run_info = self._runs.get(run_id)
         if run_info is None or run_info.orchestrator is None:
             raise ValueError(f"Run {run_id!r} not found")
         run_info.orchestrator.clear_modify_pending(issue_id)
+
+    # ------------------------------------------------------------------ #
+    # Inline comments + comment threads                                  #
+    # ------------------------------------------------------------------ #
+
+    def save_inline_comment(
+        self,
+        run_id: str,
+        issue_id: str,
+        comment_id: str,
+        file: str,
+        line: int | None,
+        body: str,
+    ) -> None:
+        run_info = self._runs.get(run_id)
+        if run_info is None or run_info.orchestrator is None:
+            raise ValueError(f"Run {run_id!r} not found")
+        run_info.orchestrator.save_inline_comment(issue_id, comment_id, file, line, body)
+
+    def delete_inline_comment(self, run_id: str, issue_id: str, comment_id: str) -> None:
+        run_info = self._runs.get(run_id)
+        if run_info is None or run_info.orchestrator is None:
+            raise ValueError(f"Run {run_id!r} not found")
+        run_info.orchestrator.delete_inline_comment(issue_id, comment_id)
+
+    def add_thread_message(
+        self,
+        run_id: str,
+        issue_id: str,
+        comment_id: str,
+        role: str,
+        body: str,
+    ) -> str:
+        run_info = self._runs.get(run_id)
+        if run_info is None or run_info.orchestrator is None:
+            raise ValueError(f"Run {run_id!r} not found")
+        return run_info.orchestrator.add_thread_message(issue_id, comment_id, role, body)
+
+    def skip_comment(self, run_id: str, issue_id: str, comment_id: str, reason: str) -> None:
+        run_info = self._runs.get(run_id)
+        if run_info is None or run_info.orchestrator is None:
+            raise ValueError(f"Run {run_id!r} not found")
+        run_info.orchestrator.skip_comment(issue_id, comment_id, reason)
+
+    def list_inline_comments_with_threads(self, run_id: str, issue_id: str) -> list[dict[str, Any]]:
+        run_info = self._runs.get(run_id)
+        if run_info is None or run_info.orchestrator is None:
+            raise ValueError(f"Run {run_id!r} not found")
+        return run_info.orchestrator.list_inline_comments_with_threads(issue_id)
 
     def get_debug_review(self, run_id: str, issue_id: str) -> dict[str, Any] | None:
         """Return the latest DebugReviewSnapshot as a dict, or None if not pending."""

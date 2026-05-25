@@ -72,7 +72,6 @@ def run_command(args: Namespace) -> None:
             "base": args.base,
             "run_id": args.run_id,
             "headless": args.headless,
-            "insights": args.insights,
             "max_hops": args.max_hops,
             "max_retries": args.max_retries,
             "debug": args.debug,

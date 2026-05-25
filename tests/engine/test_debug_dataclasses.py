@@ -7,14 +7,35 @@ from orca.engine.types import (
 
 
 def test_inline_comment_round_trip() -> None:
-    comment = InlineComment(file="src/auth.ts", line=42, body="use Result type")
+    comment = InlineComment(
+        id="c1",
+        file="src/auth.ts",
+        line=42,
+        body="use Result type",
+        created_at="2026-05-25T10:00:00+00:00",
+        updated_at="2026-05-25T10:00:00+00:00",
+    )
     d = comment.to_dict()
-    assert d == {"file": "src/auth.ts", "line": 42, "body": "use Result type"}
+    assert d == {
+        "id": "c1",
+        "file": "src/auth.ts",
+        "line": 42,
+        "body": "use Result type",
+        "created_at": "2026-05-25T10:00:00+00:00",
+        "updated_at": "2026-05-25T10:00:00+00:00",
+    }
     assert InlineComment.from_dict(d) == comment
 
 
 def test_inline_comment_allows_file_level_anchor() -> None:
-    comment = InlineComment(file="prompt.md", line=None, body="general feedback")
+    comment = InlineComment(
+        id="c2",
+        file="prompt.md",
+        line=None,
+        body="general feedback",
+        created_at="2026-05-25T10:00:00+00:00",
+        updated_at="2026-05-25T10:00:00+00:00",
+    )
     d = comment.to_dict()
     assert d["line"] is None
     assert InlineComment.from_dict(d) == comment

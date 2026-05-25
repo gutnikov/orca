@@ -144,8 +144,18 @@ def test_debug_decision_modify_continue_advances_state_and_marks_modify_pending(
     issue.debug_pending = True
     issue.event_log.append(EventLogEntry(timestamp="t0", type="worker_result", data={"outcome": "done"}))
 
-    comments = [InlineComment(file="prompt.md", line=None, body="add a step about retries")]
-    event = DebugDecisionEvent(issue_id="i1", action="modify_continue", comments=comments, timestamp="t1")
+    # Comments live on the issue (persisted on save) — not on the event.
+    issue.inline_comments = [
+        InlineComment(
+            id="c1",
+            file="prompt.md",
+            line=None,
+            body="add a step about retries",
+            created_at="t1",
+            updated_at="t1",
+        )
+    ]
+    event = DebugDecisionEvent(issue_id="i1", action="modify_continue", comments=[], timestamp="t1")
     new_state, _ = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
 
     new_issue = new_state.issues["i1"]
@@ -181,8 +191,17 @@ def test_debug_decision_modify_restart_marks_modify_pending_and_logs_request() -
     state = _make_state(worker_active=False)
     state.issues["i1"].debug_pending = True
 
-    comments = [InlineComment(file="prompt.md", line=None, body="use Result type")]
-    event = DebugDecisionEvent(issue_id="i1", action="modify_restart", comments=comments, timestamp="t1")
+    state.issues["i1"].inline_comments = [
+        InlineComment(
+            id="c1",
+            file="prompt.md",
+            line=None,
+            body="use Result type",
+            created_at="t1",
+            updated_at="t1",
+        )
+    ]
+    event = DebugDecisionEvent(issue_id="i1", action="modify_restart", comments=[], timestamp="t1")
     new_state, _ = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
 
     issue = new_state.issues["i1"]
@@ -207,12 +226,33 @@ def test_modify_restart_preserves_overall_feedback_and_line_comments() -> None:
     state = _make_state(worker_active=False)
     state.issues["i1"].debug_pending = True
 
-    comments = [
-        InlineComment(file="prompt.md", line=12, body="use Result type"),
-        InlineComment(file="result.json", line=3, body="this enum should also include 'partial'"),
-        InlineComment(file="__overall__", line=None, body="prefer concise prompts; trim the recap block"),
+    state.issues["i1"].inline_comments = [
+        InlineComment(
+            id="c1",
+            file="prompt.md",
+            line=12,
+            body="use Result type",
+            created_at="t1",
+            updated_at="t1",
+        ),
+        InlineComment(
+            id="c2",
+            file="result.json",
+            line=3,
+            body="this enum should also include 'partial'",
+            created_at="t1",
+            updated_at="t1",
+        ),
+        InlineComment(
+            id="c3",
+            file="__overall__",
+            line=None,
+            body="prefer concise prompts; trim the recap block",
+            created_at="t1",
+            updated_at="t1",
+        ),
     ]
-    event = DebugDecisionEvent(issue_id="i1", action="modify_restart", comments=comments, timestamp="t1")
+    event = DebugDecisionEvent(issue_id="i1", action="modify_restart", comments=[], timestamp="t1")
     new_state, _ = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
 
     issue = new_state.issues["i1"]
@@ -254,137 +294,3 @@ def test_debug_decision_rejects_unknown_action_with_error_effect() -> None:
     _, effects = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
 
     assert any(isinstance(e, ErrorEffect) for e in effects)
-
-
-def test_debug_question_asked_appends_to_issue_and_logs_event() -> None:
-    from orca.engine.types import DebugQuestionAskedEvent
-
-    config = _make_config()
-    state = _make_state(worker_active=False)
-    state.issues["i1"].debug_pending = True
-
-    event = DebugQuestionAskedEvent(
-        issue_id="i1",
-        question_id="q1",
-        client_comment_id="c-abc",
-        file="tests/foo.spec.ts",
-        line=42,
-        body="why broken?",
-        timestamp="t1",
-    )
-    new_state, _ = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
-
-    questions = new_state.issues["i1"].debug_questions
-    assert len(questions) == 1
-    assert questions[0].id == "q1"
-    assert questions[0].client_comment_id == "c-abc"
-    assert questions[0].file == "tests/foo.spec.ts"
-    assert questions[0].line == 42
-    assert questions[0].body == "why broken?"
-    assert questions[0].answer is None
-    assert new_state.issues["i1"].event_log[-1].type == "debug_question_asked"
-
-
-def test_debug_question_asked_is_idempotent_on_question_id() -> None:
-    from orca.engine.types import DebugQuestionAskedEvent
-
-    config = _make_config()
-    state = _make_state(worker_active=False)
-    state.issues["i1"].debug_pending = True
-
-    event = DebugQuestionAskedEvent(
-        issue_id="i1",
-        question_id="q1",
-        client_comment_id="c-abc",
-        file="f.ts",
-        line=1,
-        body="?",
-        timestamp="t1",
-    )
-    state, _ = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
-    state, _ = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
-    assert len(state.issues["i1"].debug_questions) == 1
-
-
-def test_debug_question_answered_attaches_answer_and_logs() -> None:
-    from orca.engine.types import DebugQuestionAnsweredEvent, DebugQuestionAskedEvent
-
-    config = _make_config()
-    state = _make_state(worker_active=False)
-    state.issues["i1"].debug_pending = True
-
-    ask = DebugQuestionAskedEvent(
-        issue_id="i1",
-        question_id="q1",
-        client_comment_id="c-abc",
-        file="f.ts",
-        line=1,
-        body="why?",
-        timestamp="t1",
-    )
-    state, _ = reduce(config, state, ask, generate_id=lambda: "id", now=lambda: "now")
-
-    answer = DebugQuestionAnsweredEvent(
-        issue_id="i1",
-        question_id="q1",
-        answer="Because the spec hasn't been written yet.",
-        timestamp="t2",
-    )
-    new_state, _ = reduce(config, state, answer, generate_id=lambda: "id", now=lambda: "now")
-
-    questions = new_state.issues["i1"].debug_questions
-    assert questions[0].answer == "Because the spec hasn't been written yet."
-    assert new_state.issues["i1"].event_log[-1].type == "debug_question_answered"
-
-
-def test_debug_question_answered_with_unknown_id_emits_error_effect() -> None:
-    from orca.engine.types import DebugQuestionAnsweredEvent, ErrorEffect
-
-    config = _make_config()
-    state = _make_state(worker_active=False)
-    state.issues["i1"].debug_pending = True
-
-    answer = DebugQuestionAnsweredEvent(
-        issue_id="i1",
-        question_id="does-not-exist",
-        answer="ok",
-        timestamp="t1",
-    )
-    _, effects = reduce(config, state, answer, generate_id=lambda: "id", now=lambda: "now")
-    assert any(isinstance(e, ErrorEffect) for e in effects)
-
-
-def test_debug_decision_clears_questions() -> None:
-    """Questions are ephemeral aids for the current pause — drop on decision."""
-    from orca.engine.types import DebugDecisionEvent, DebugQuestionAskedEvent
-
-    config = _make_config()
-    state = _make_state(worker_active=False)
-    state.issues["i1"].debug_pending = True
-
-    state, _ = reduce(
-        config,
-        state,
-        DebugQuestionAskedEvent(
-            issue_id="i1",
-            question_id="q1",
-            client_comment_id="c1",
-            file="f.ts",
-            line=1,
-            body="?",
-            timestamp="t1",
-        ),
-        generate_id=lambda: "id",
-        now=lambda: "now",
-    )
-    assert len(state.issues["i1"].debug_questions) == 1
-
-    # modify_restart leaves the issue paused but should still clear questions.
-    state, _ = reduce(
-        config,
-        state,
-        DebugDecisionEvent(issue_id="i1", action="modify_restart", comments=[], timestamp="t2"),
-        generate_id=lambda: "id",
-        now=lambda: "now",
-    )
-    assert state.issues["i1"].debug_questions == []

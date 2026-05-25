@@ -65,10 +65,8 @@ class Orchestrator:
         repo_root: Path | None = None,
         flow_root: Path | None = None,
         session_sync: SessionSync | None = None,
-        insights_enabled: bool = False,
         hot_sessions: set[str] | None = None,
         session_log_paths: dict[str, str] | None = None,
-        insights_state: dict[str, str] | None = None,
         worker_overrides: dict[str, dict[str, str]] | None = None,
     ) -> None:
         self._config = config
@@ -83,9 +81,6 @@ class Orchestrator:
         self.repo_root = repo_root
         self.flow_root = flow_root or repo_root
         self._session_sync = session_sync
-        self._insights_enabled = insights_enabled
-        self._insights_state = insights_state
-        self._insights_tracking_id: str = ""
         # Shared with TUI: which sessions should be captured frequently
         self._hot_sessions: set[str] = hot_sessions if hot_sessions is not None else set()
         # Shared with TUI: maps tracking_id -> log file path
@@ -146,10 +141,6 @@ class Orchestrator:
     def session_log_paths(self) -> dict[str, str]:
         """Map of tracking_id -> log file path (shared with TUI)."""
         return self._session_log_paths
-
-    @property
-    def insights_tracking_id(self) -> str:
-        return self._insights_tracking_id
 
     def get_session_log(self, tracking_id: str, tail: int = 100) -> str:
         """Read session log content for a tracking ID.
@@ -219,86 +210,26 @@ class Orchestrator:
         self,
         issue_id: str,
         action: str,
-        comments: list[dict[str, Any]],
     ) -> bool:
-        """Submit a debug decision for a paused issue. Returns False if no debug pause is active."""
+        """Submit a debug decision for a paused issue. Returns False if no debug pause is active.
+
+        Comments are no longer carried on the decision payload — they were
+        persisted on the daemon as the user authored them (Task 7) and the
+        reducer reads them from `Issue.inline_comments` + `Issue.comment_threads`
+        when bundling the `debug_modify_request` event payload.
+        """
         entry = self._debug_decision_events.get(issue_id)
         if entry is None:
             return False
         event, box = entry
         box.clear()
-        box.append({"action": action, "comments": comments})
+        box.append({"action": action})
         event.set()
         return True
 
     def is_debug_pending(self, issue_id: str) -> bool:
         """True if an issue is currently paused awaiting a debug decision."""
         return issue_id in self._debug_decision_events
-
-    def ask_debug_question(
-        self,
-        issue_id: str,
-        client_comment_id: str,
-        file: str,
-        line: int | None,
-        body: str,
-    ) -> str:
-        """Record a user-flagged review question. Returns the new question_id.
-
-        Idempotent on (issue_id, client_comment_id): a second call with the
-        same client_comment_id reuses the existing question_id.
-        """
-        from orca.engine import reduce
-        from orca.engine.types import DebugQuestionAskedEvent
-
-        issue = self._state.issues.get(issue_id)
-        if issue is None:
-            raise ValueError(f"Issue {issue_id!r} not found")
-        existing = next(
-            (q for q in issue.debug_questions if q.client_comment_id == client_comment_id),
-            None,
-        )
-        if existing is not None:
-            return existing.id
-        question_id = self.generate_id()
-        event = DebugQuestionAskedEvent(
-            issue_id=issue_id,
-            question_id=question_id,
-            client_comment_id=client_comment_id,
-            file=file,
-            line=line,
-            body=body,
-            timestamp=self.now(),
-        )
-        self._state, _ = reduce(self._config, self._state, event, self.generate_id, self.now)
-        self.persistence.save(self._state)
-        return question_id
-
-    def answer_debug_question(self, issue_id: str, question_id: str, answer: str) -> None:
-        """Attach the agent's answer to a previously-asked question."""
-        from orca.engine import reduce
-        from orca.engine.types import DebugQuestionAnsweredEvent
-
-        issue = self._state.issues.get(issue_id)
-        if issue is None:
-            raise ValueError(f"Issue {issue_id!r} not found")
-        if not any(q.id == question_id for q in issue.debug_questions):
-            raise ValueError(f"Question {question_id!r} not found on issue {issue_id!r}")
-        event = DebugQuestionAnsweredEvent(
-            issue_id=issue_id,
-            question_id=question_id,
-            answer=answer,
-            timestamp=self.now(),
-        )
-        self._state, _ = reduce(self._config, self._state, event, self.generate_id, self.now)
-        self.persistence.save(self._state)
-
-    def list_debug_questions(self, issue_id: str) -> list[dict[str, Any]]:
-        """Return all questions (answered + unanswered) for the current debug pause."""
-        issue = self._state.issues.get(issue_id)
-        if issue is None:
-            raise ValueError(f"Issue {issue_id!r} not found")
-        return [q.to_dict() for q in issue.debug_questions]
 
     def clear_modify_pending(self, issue_id: str) -> None:
         """Clear modify_pending after a modify_continue rewrite is done.
@@ -315,6 +246,124 @@ class Orchestrator:
             return
         issue.modify_pending = False
         self.persistence.save(self._state)
+
+    # ------------------------------------------------------------------ #
+    # Inline comments + comment threads                                  #
+    # ------------------------------------------------------------------ #
+
+    def save_inline_comment(
+        self,
+        issue_id: str,
+        comment_id: str,
+        file: str,
+        line: int | None,
+        body: str,
+    ) -> None:
+        """Create-or-update an inline review comment. Idempotent on comment_id."""
+        from orca.engine.types import InlineCommentSavedEvent
+
+        if issue_id not in self._state.issues:
+            raise ValueError(f"Issue {issue_id!r} not found")
+        event = InlineCommentSavedEvent(
+            issue_id=issue_id,
+            comment_id=comment_id,
+            file=file,
+            line=line,
+            body=body,
+            timestamp=self.now(),
+        )
+        self._state, _ = reduce(self._config, self._state, event, self.generate_id, self.now)
+        self.persistence.save(self._state)
+
+    def delete_inline_comment(self, issue_id: str, comment_id: str) -> None:
+        """Delete an inline comment and cascade-delete its thread."""
+        from orca.engine.types import InlineCommentDeletedEvent
+
+        if issue_id not in self._state.issues:
+            raise ValueError(f"Issue {issue_id!r} not found")
+        event = InlineCommentDeletedEvent(
+            issue_id=issue_id,
+            comment_id=comment_id,
+            timestamp=self.now(),
+        )
+        self._state, _ = reduce(self._config, self._state, event, self.generate_id, self.now)
+        self.persistence.save(self._state)
+
+    def add_thread_message(
+        self,
+        issue_id: str,
+        comment_id: str,
+        role: str,
+        body: str,
+    ) -> str:
+        """Append a message to a comment's thread. Returns the new message_id.
+
+        Lazily creates the thread on the first message. Agent messages bump
+        ``agent_last_reviewed_at``; user messages do not.
+        """
+        from orca.engine.types import CommentThreadMessageAddedEvent
+
+        issue = self._state.issues.get(issue_id)
+        if issue is None:
+            raise ValueError(f"Issue {issue_id!r} not found")
+        if not any(c.id == comment_id for c in issue.inline_comments):
+            raise ValueError(f"Comment {comment_id!r} not found on issue {issue_id!r}")
+        if role not in ("user", "agent"):
+            raise ValueError(f"Invalid role {role!r}")
+        message_id = self.generate_id()
+        event = CommentThreadMessageAddedEvent(
+            issue_id=issue_id,
+            comment_id=comment_id,
+            role=role,
+            message_id=message_id,
+            body=body,
+            timestamp=self.now(),
+        )
+        self._state, _ = reduce(self._config, self._state, event, self.generate_id, self.now)
+        self.persistence.save(self._state)
+        return message_id
+
+    def skip_comment(self, issue_id: str, comment_id: str, reason: str) -> None:
+        """Mark a comment reviewed without appending a message.
+
+        Lazily creates an empty thread if none exists and bumps
+        ``agent_last_reviewed_at`` so the agent's polling loop stops
+        re-evaluating this comment.
+        """
+        from orca.engine.types import CommentThreadReviewedEvent
+
+        issue = self._state.issues.get(issue_id)
+        if issue is None:
+            raise ValueError(f"Issue {issue_id!r} not found")
+        if not any(c.id == comment_id for c in issue.inline_comments):
+            raise ValueError(f"Comment {comment_id!r} not found on issue {issue_id!r}")
+        event = CommentThreadReviewedEvent(
+            issue_id=issue_id,
+            comment_id=comment_id,
+            timestamp=self.now(),
+            reason=reason,
+        )
+        self._state, _ = reduce(self._config, self._state, event, self.generate_id, self.now)
+        self.persistence.save(self._state)
+
+    def list_inline_comments_with_threads(self, issue_id: str) -> list[dict[str, Any]]:
+        """Return all inline comments on the issue, each with its thread (or None)."""
+        issue = self._state.issues.get(issue_id)
+        if issue is None:
+            raise ValueError(f"Issue {issue_id!r} not found")
+        thread_by_comment = {t.comment_id: t for t in issue.comment_threads}
+        return [
+            {
+                "id": c.id,
+                "file": c.file,
+                "line": c.line,
+                "body": c.body,
+                "created_at": c.created_at,
+                "updated_at": c.updated_at,
+                "thread": thread_by_comment[c.id].to_dict() if c.id in thread_by_comment else None,
+            }
+            for c in issue.inline_comments
+        ]
 
     def _is_terminal(self, issue_id: str) -> bool:
         """Return True if the issue's current state is terminal in config."""
@@ -927,28 +976,6 @@ class Orchestrator:
                     extra={"event": "error_effect", "issue_id": effect.issue_id, "error": effect.message},
                 )
 
-    def _build_insights_prompt(self) -> str:
-        prompt_path = Path(__file__).parent / "prompts" / "insights.md"
-        template = prompt_path.read_text()
-        run_dir = self.persistence.state_path.parent
-        config_path = ""
-        if self.repo_root:
-            orca_dir = self.repo_root / ".orca"
-            if orca_dir.is_dir():
-                for candidate in sorted(orca_dir.glob("*.yml")):
-                    config_path = str(candidate)
-                    break
-            if not config_path:
-                for candidate in sorted(self.repo_root.glob("orca*.yml")):
-                    config_path = str(candidate)
-                    break
-        return template.format(
-            run_dir=str(run_dir),
-            branch_name=self.root_branch,
-            config_path=config_path,
-            repo_root=str(self.repo_root or "."),
-        )
-
     async def _session_capture_loop(self) -> None:
         """Periodically capture tmux scrollback to log files.
 
@@ -989,30 +1016,6 @@ class Orchestrator:
 
         pending: list[DispatchWorkerEffect] = []
         self._route_effects(initial_effects, pending)
-
-        # Spawn insights tmux session if enabled
-        insights_session: PtySession | None = None
-        if self._insights_enabled and self.repo_root is not None:
-            from orca.orchestrator.pty_session import TmuxSession
-
-            insights_id = f"insights-{uuid4()}"
-            self._insights_tracking_id = insights_id
-            insights_session = TmuxSession(session_name=insights_id, cols=120, rows=40)
-            prompt = self._build_insights_prompt()
-            log_dir = self.repo_root / ".orca-state" / "sessions"
-            log_dir.mkdir(parents=True, exist_ok=True)
-            ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
-            insights_log = log_dir / f"insights-{ts}.log"
-            await insights_session.spawn(
-                "claude",
-                ["--dangerously-skip-permissions", "--max-turns", "200"],
-                cwd=self.repo_root,
-                stdin_data=prompt.encode(),
-            )
-            self._tmux_sessions[insights_id] = insights_session
-            self._session_log_paths[insights_id] = str(insights_log)
-            if self._insights_state is not None:
-                self._insights_state["tracking_id"] = insights_id
 
         while not self._is_terminal(root_issue_id):
             # Spawn all pending dispatch effects
@@ -1102,12 +1105,12 @@ class Orchestrator:
                     await self._pause_for_debug_review(issue_id)
                     decision = self._debug_decision_events[issue_id][1][0]
                     self._debug_decision_events.pop(issue_id, None)
-                    from orca.engine.types import DebugDecisionEvent, InlineComment
+                    from orca.engine.types import DebugDecisionEvent
 
                     decision_event = DebugDecisionEvent(
                         issue_id=issue_id,
                         action=decision["action"],
-                        comments=[InlineComment.from_dict(c) for c in decision["comments"]],
+                        comments=[],
                         timestamp=self.now(),
                     )
                     if decision["action"] == "restart":
@@ -1189,18 +1192,6 @@ class Orchestrator:
         if self._in_flight:
             await asyncio.gather(*self._in_flight.keys(), return_exceptions=True)
         self._in_flight.clear()
-
-        # Clean up insights session
-        if insights_session is not None:
-            await asyncio.sleep(10)  # brief wait for agent to notice completion
-            try:
-                raw = insights_session.capture_scrollback()
-                if raw and self._insights_tracking_id in self._session_log_paths:
-                    Path(self._session_log_paths[self._insights_tracking_id]).write_text(raw)
-            except Exception:
-                pass
-            self._tmux_sessions.pop(self._insights_tracking_id, None)
-            insights_session.close()
 
         capture_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):

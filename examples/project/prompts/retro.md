@@ -28,7 +28,6 @@ Read these to understand what each worker actually did:
 
 - Structured event log (JSONL): `{{ run.log }}`
 - State snapshot (JSON): `{{ run.state }}`
-{% if run.insights %}- Insights agent findings (JSON): `{{ run.insights }}`{% endif %}
 
 ### File Formats
 {% for name, desc in run.formats.items() %}
@@ -46,10 +45,9 @@ Read these to understand what each worker actually did:
 ## Your Task
 
 1. Read the session logs for each completed stage
-2. {% if run.insights %}Read the insights file for any warnings or recommendations{% endif %}
-3. Write `retro.md` covering:
+2. Write `retro.md` covering:
    - **Timeline** — what happened in each stage, how long it took
    - **What went well** — stages that completed smoothly
    - **What went wrong** — failures, retries, wasted time
    - **Recommendations** — concrete suggestions for improving the workflow or prompts
-4. Commit `retro.md` to the repository
+3. Commit `retro.md` to the repository

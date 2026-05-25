@@ -59,26 +59,6 @@ async def test_list_runs(client: DaemonClient) -> None:
 
 
 @pytest.mark.asyncio
-async def test_get_insights_returns_text(client: DaemonClient) -> None:
-    mock_resp = AsyncMock()
-    mock_resp.status = 200
-    mock_resp.text = AsyncMock(return_value="insight line 1\ninsight line 2")
-    mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
-    mock_resp.__aexit__ = AsyncMock(return_value=False)
-
-    mock_session = MagicMock()
-    mock_session.get = MagicMock(return_value=mock_resp)
-    mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-    mock_session.__aexit__ = AsyncMock(return_value=False)
-
-    with patch("aiohttp.ClientSession", return_value=mock_session):
-        result = await client.get_insights("my-run")
-
-    assert result == "insight line 1\ninsight line 2"
-    mock_session.get.assert_called_once_with("http://localhost/api/runs/my-run/insights")
-
-
-@pytest.mark.asyncio
 async def test_start_run_posts_body(client: DaemonClient) -> None:
     mock_resp = AsyncMock()
     mock_resp.status = 201

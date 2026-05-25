@@ -822,7 +822,7 @@ Prompts are Jinja2 markdown templates. The following variables are available:
 | `{{ result_format \| tojson(indent=2) }}` | The output JSON schema used by Orca for validation |
 | `{{ result_example \| tojson(indent=2) }}` | A concrete example result the worker can copy and fill in |
 | `{{ result_path }}` | Path where the worker writes `result.json` |
-| `{{ run }}` | Run context — session logs, insights, state paths, summary (see below) |
+| `{{ run }}` | Run context — session logs, state paths, summary (see below) |
 
 The `run` variable is available in all prompts and contains:
 
@@ -835,14 +835,13 @@ The `run` variable is available in all prompts and contains:
 | `run.workflow` | Workflow name |
 | `run.log` | Path to the structured event log (JSONL) |
 | `run.state` | Path to the state snapshot (JSON) |
-| `run.insights` | Path to insights file (JSON), `None` if insights aren't enabled or the file hasn't been created yet |
 | `run.sessions` | List of worker sessions with `state`, `log`, `duration`, `outcome` |
 | `run.summary.current_state` | Current state of the (root) issue |
 | `run.summary.states_visited` | States the run has passed through |
 | `run.summary.total_duration` | Total elapsed time |
 | `run.summary.outcomes` | Map of state → outcome for each completed phase |
 | `run.summary.failures` | Map of state → error for any failures |
-| `run.formats` | Self-describing format hints: `{log, insights, state, sessions}` — short strings explaining the on-disk shape of each artifact above. Useful in retro/insights prompts that want to teach the worker how to read the files. |
+| `run.formats` | Self-describing format hints: `{log, state, sessions}` — short strings explaining the on-disk shape of each artifact above. Useful in retro prompts that want to teach the worker how to read the files. |
 
 Playbooks (the reference material agents use to build and audit workflows) are bundled inside the installed orca package and served via the `orca_get_playbook` MCP tool — no copy lives in your project. Notable ones include [`orca-prompt-create`](src/orca/playbooks/orca-prompt-create.md) (writing principles, pitfalls, template anatomy), [`reference/orca-config-reference`](src/orca/playbooks/reference/orca-config-reference.md), [`reference/orca-workflow-patterns`](src/orca/playbooks/reference/orca-workflow-patterns.md), and [`orca-workflow-review`](src/orca/playbooks/orca-workflow-review.md). When creating or modifying workflows, tell your coding agent: *"Fetch the relevant orca playbooks and update my workflow."*
 
@@ -881,7 +880,6 @@ orca mcp                      # start MCP stdio bridge
 | `--run-id ID` | `<branch>:<workflow>` | Override the run identifier. Rarely needed — use to disambiguate when multiple runs share a branch/workflow pair. |
 | `--base REF` | — | Accepted for compatibility but **not honored** by the current daemon-backed run path; root run branches are not created from this ref. Check out the desired base before invoking `orca run`. |
 | `--headless` | off | Run without TUI. |
-| `--insights` | off | Enable insights agent for progress monitoring. |
 | `--max-hops N` | `10` | Max state transitions per issue before stopping. |
 | `--max-retries N` | `3` | Max worker crash retries per issue before giving up. |
 
@@ -981,7 +979,6 @@ All tools require `root` (absolute path to the repo) as the first parameter.
 | `orca_get_run` | `root`, `run_id`, `compact?` | Full run state with all issues and sessions. Use `compact: true` for lightweight polling (strips event logs and completed sessions). |
 | `orca_get_issue` | `root`, `run_id`, `issue_id` | Full details for a single issue: fields, state, event log. |
 | `orca_get_worker_log` | `root`, `run_id`, `issue_id`, `tail?` | Terminal output from the latest worker session for an issue. `tail` defaults to 100 lines. |
-| `orca_get_insights` | `root`, `run_id` | Insights agent output (if `--insights` was enabled). |
 
 **Intervention:**
 
@@ -1195,7 +1192,6 @@ Orca stores all runtime state under `.orca-state/` at the repo root. **You must 
         branches.json        # issue-to-branch mapping
         orca.log.jsonl       # structured event log (one JSON object per line)
         config_source.json   # path to the config file used for this run
-        insights.json        # insights agent findings (if --insights enabled)
         retry/               # retry signal files (created by TUI/CLI)
   worktrees/
     {branch-name}/           # git worktree checkouts, one per issue

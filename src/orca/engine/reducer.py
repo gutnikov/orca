@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 from collections.abc import Callable
+from typing import Any
 
 from orca.engine.dispatch import (
     append_log,
@@ -15,22 +16,26 @@ from orca.engine.dispatch import (
 )
 from orca.engine.types import (
     AdvanceEvent,
+    CommentThread,
+    CommentThreadMessageAddedEvent,
+    CommentThreadReviewedEvent,
     CreateEvent,
     DebugDecisionEvent,
     DebugModifyRequestEvent,
-    DebugQuestion,
-    DebugQuestionAnsweredEvent,
-    DebugQuestionAskedEvent,
     DebugReviewRequiredEvent,
     DispatchWorkerEffect,
     Effect,
     ErrorEffect,
     Event,
+    InlineComment,
+    InlineCommentDeletedEvent,
+    InlineCommentSavedEvent,
     Issue,
     OnDecompose,
     OnTransition,
     State,
     StateMachineConfig,
+    ThreadMessage,
     WorkerFailedEvent,
     WorkerResultEvent,
     WorkerResumedEvent,
@@ -69,10 +74,14 @@ def reduce(
         _handle_debug_decision(config, new_state, event, effects, generate_id, ts)
     elif isinstance(event, DebugModifyRequestEvent):
         _handle_debug_modify_request(config, new_state, event, effects, ts)
-    elif isinstance(event, DebugQuestionAskedEvent):
-        _handle_debug_question_asked(config, new_state, event, effects, ts)
-    elif isinstance(event, DebugQuestionAnsweredEvent):
-        _handle_debug_question_answered(config, new_state, event, effects, ts)
+    elif isinstance(event, InlineCommentSavedEvent):
+        _handle_inline_comment_saved(new_state, event)
+    elif isinstance(event, InlineCommentDeletedEvent):
+        _handle_inline_comment_deleted(new_state, event)
+    elif isinstance(event, CommentThreadMessageAddedEvent):
+        _handle_comment_thread_message_added(new_state, event, generate_id)
+    elif isinstance(event, CommentThreadReviewedEvent):
+        _handle_comment_thread_reviewed(new_state, event, generate_id)
 
     return new_state, effects
 
@@ -715,6 +724,32 @@ def _handle_debug_review_required(
     append_log(issue, event.timestamp, "debug_review_required", {"snapshot": event.snapshot.to_dict()})
 
 
+def _build_decision_comments_payload(issue: Issue) -> list[dict[str, Any]]:
+    """Snapshot persisted inline comments + their thread histories for the
+    debug_modify_request event-log payload.
+
+    The orchestrator no longer reads comments from the HTTP request body —
+    they were persisted on the daemon as the user authored them (Task 7).
+    orca-prompt-config-rewrite then reads the full user↔agent dialogue from
+    this snapshot when rewriting prompts/configs.
+    """
+    thread_by_comment = {t.comment_id: t for t in issue.comment_threads}
+    return [
+        {
+            "id": c.id,
+            "file": c.file,
+            "line": c.line,
+            "body": c.body,
+            "thread_messages": (
+                [{"role": m.role, "body": m.body} for m in thread_by_comment[c.id].messages]
+                if c.id in thread_by_comment
+                else []
+            ),
+        }
+        for c in issue.inline_comments
+    ]
+
+
 def _handle_debug_decision(
     config: StateMachineConfig,
     state: State,
@@ -735,15 +770,21 @@ def _handle_debug_decision(
             )
         )
         return
+    # Source-of-truth comments + threads come from the persisted issue, not
+    # from event.comments — the orchestrator no longer carries comments in
+    # the event (they were persisted on save). Build the payload BEFORE we
+    # clear inline_comments/comment_threads below.
+    persisted_comments_payload = _build_decision_comments_payload(issue)
     append_log(
         issue,
         event.timestamp,
         "debug_decision",
-        {"action": event.action, "comments": [c.to_dict() for c in event.comments]},
+        {"action": event.action, "comments": persisted_comments_payload},
     )
-    # Questions are ephemeral aids for the current debug pause — drop them
-    # on every decision so a new pause starts clean.
-    issue.debug_questions = []
+    # Inline comments and their threads are ephemeral aids for the current
+    # debug pause — drop them on every decision so a new pause starts clean.
+    issue.inline_comments = []
+    issue.comment_threads = []
     if event.action == "accept":
         last_result = next(
             (e.data for e in reversed(issue.event_log) if e.type == "worker_result"),
@@ -790,7 +831,7 @@ def _handle_debug_decision(
             issue,
             event.timestamp,
             "debug_modify_request",
-            {"comments": [c.to_dict() for c in event.comments]},
+            {"comments": persisted_comments_payload},
         )
         return
 
@@ -819,7 +860,7 @@ def _handle_debug_decision(
             issue,
             event.timestamp,
             "debug_modify_request",
-            {"comments": [c.to_dict() for c in event.comments]},
+            {"comments": persisted_comments_payload},
         )
         result_event = WorkerResultEvent(
             issue_id=event.issue_id,
@@ -858,42 +899,37 @@ def _handle_debug_modify_request(
         issue,
         event.timestamp,
         "debug_modify_request",
-        {"comments": [c.to_dict() for c in event.comments]},
+        {"comments": _build_decision_comments_payload(issue)},
     )
 
 
-def _handle_debug_question_asked(
-    config: StateMachineConfig,
-    state: State,
-    event: DebugQuestionAskedEvent,
-    effects: list[Effect],
-    ts: str,
-) -> None:
-    if event.issue_id not in state.issues:
-        effects.append(ErrorEffect(issue_id=event.issue_id, message=f"Issue '{event.issue_id}' does not exist"))
+def _handle_inline_comment_saved(state: State, event: InlineCommentSavedEvent) -> None:
+    issue = state.issues.get(event.issue_id)
+    if issue is None:
         return
-    issue = state.issues[event.issue_id]
-    # Idempotency: re-asking the same question_id is a no-op so the host
-    # can retry the POST without risk of duplicates in the list.
-    if any(q.id == event.question_id for q in issue.debug_questions):
-        return
-    issue.debug_questions.append(
-        DebugQuestion(
-            id=event.question_id,
-            client_comment_id=event.client_comment_id,
-            file=event.file,
-            line=event.line,
-            body=event.body,
-            answer=None,
+    existing = next((c for c in issue.inline_comments if c.id == event.comment_id), None)
+    if existing is None:
+        issue.inline_comments.append(
+            InlineComment(
+                id=event.comment_id,
+                file=event.file,
+                line=event.line,
+                body=event.body,
+                created_at=event.timestamp,
+                updated_at=event.timestamp,
+            )
         )
-    )
+    else:
+        existing.body = event.body
+        existing.file = event.file
+        existing.line = event.line
+        existing.updated_at = event.timestamp
     append_log(
         issue,
         event.timestamp,
-        "debug_question_asked",
+        "inline_comment_saved",
         {
-            "question_id": event.question_id,
-            "client_comment_id": event.client_comment_id,
+            "comment_id": event.comment_id,
             "file": event.file,
             "line": event.line,
             "body": event.body,
@@ -901,30 +937,70 @@ def _handle_debug_question_asked(
     )
 
 
-def _handle_debug_question_answered(
-    config: StateMachineConfig,
-    state: State,
-    event: DebugQuestionAnsweredEvent,
-    effects: list[Effect],
-    ts: str,
-) -> None:
-    if event.issue_id not in state.issues:
-        effects.append(ErrorEffect(issue_id=event.issue_id, message=f"Issue '{event.issue_id}' does not exist"))
+def _handle_inline_comment_deleted(state: State, event: InlineCommentDeletedEvent) -> None:
+    issue = state.issues.get(event.issue_id)
+    if issue is None:
         return
-    issue = state.issues[event.issue_id]
-    target = next((q for q in issue.debug_questions if q.id == event.question_id), None)
-    if target is None:
-        effects.append(
-            ErrorEffect(
-                issue_id=event.issue_id,
-                message=f"Question {event.question_id!r} not found on issue {event.issue_id!r}",
-            )
-        )
-        return
-    target.answer = event.answer
+    issue.inline_comments = [c for c in issue.inline_comments if c.id != event.comment_id]
+    issue.comment_threads = [t for t in issue.comment_threads if t.comment_id != event.comment_id]
     append_log(
         issue,
         event.timestamp,
-        "debug_question_answered",
-        {"question_id": event.question_id, "answer": event.answer},
+        "inline_comment_deleted",
+        {"comment_id": event.comment_id},
+    )
+
+
+def _handle_comment_thread_message_added(
+    state: State,
+    event: CommentThreadMessageAddedEvent,
+    generate_id: Callable[[], str],
+) -> None:
+    issue = state.issues.get(event.issue_id)
+    if issue is None:
+        return
+    thread = next((t for t in issue.comment_threads if t.comment_id == event.comment_id), None)
+    if thread is None:
+        thread = CommentThread(id=generate_id(), comment_id=event.comment_id, messages=[])
+        issue.comment_threads.append(thread)
+    thread.messages.append(
+        ThreadMessage(
+            id=event.message_id,
+            role=event.role,
+            body=event.body,
+            timestamp=event.timestamp,
+        )
+    )
+    if event.role == "agent":
+        thread.agent_last_reviewed_at = event.timestamp
+    append_log(
+        issue,
+        event.timestamp,
+        "comment_thread_message_added",
+        {
+            "comment_id": event.comment_id,
+            "message_id": event.message_id,
+            "role": event.role,
+        },
+    )
+
+
+def _handle_comment_thread_reviewed(
+    state: State,
+    event: CommentThreadReviewedEvent,
+    generate_id: Callable[[], str],
+) -> None:
+    issue = state.issues.get(event.issue_id)
+    if issue is None:
+        return
+    thread = next((t for t in issue.comment_threads if t.comment_id == event.comment_id), None)
+    if thread is None:
+        thread = CommentThread(id=generate_id(), comment_id=event.comment_id, messages=[])
+        issue.comment_threads.append(thread)
+    thread.agent_last_reviewed_at = event.timestamp
+    append_log(
+        issue,
+        event.timestamp,
+        "comment_thread_reviewed",
+        {"comment_id": event.comment_id, "reason": event.reason},
     )
