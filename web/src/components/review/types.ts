@@ -55,6 +55,9 @@ export type ChangesetFile = {
 
 // ReviewComment: an inline comment attached to a specific file+line
 export type ReviewComment = {
+  // Client-side stable id, used to correlate a comment with its agent
+  // question/answer record. Not the same as the global array index.
+  id: string
   file: string
   line: number
   side: "old" | "new"

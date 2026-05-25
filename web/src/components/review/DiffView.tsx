@@ -20,6 +20,11 @@ export type DiffViewOverlay = {
   onEditComment: (index: number, body: string) => void
   onDeleteComment: (index: number) => void
   highlightedCommentIndex: number | null
+  // "Ask agent" support — undefined when the layout hasn't wired it up
+  // (older callers, tests). When provided, CommentThread renders the
+  // per-comment Ask-agent button and threaded answer.
+  questionForComment?: (commentId: string) => { pending: boolean; answer: string | null } | undefined
+  onAskQuestion?: (comment: ReviewComment) => void
 }
 
 export function DiffView({
@@ -52,6 +57,8 @@ export function DiffView({
         onDraftSave={() => overlay.onSaveDraft(side, line)}
         onDraftCancel={() => overlay.onCloseDraft(side, line)}
         highlightedIndex={overlay.highlightedCommentIndex}
+        questionForComment={overlay.questionForComment}
+        onAskQuestion={overlay.onAskQuestion}
       />
     )
   }

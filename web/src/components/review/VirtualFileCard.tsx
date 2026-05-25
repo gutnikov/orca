@@ -16,7 +16,7 @@ interface VirtualFileCardProps {
   content: string
   language: "markdown" | "json" | "yaml" | "plain"
   comments: InlineComment[]
-  onAddComment: (c: InlineComment) => void
+  onAddComment: (c: Omit<InlineComment, "id"> & Partial<Pick<InlineComment, "id">>) => void
   onRemoveComment: (idx: number) => void
   /** Anchor id used for sidebar click-to-scroll. Falls back to `id` if not provided. */
   anchorId?: string
@@ -57,7 +57,7 @@ function LineComposer({
 }: {
   fileId: string
   line: number
-  onAdd: (c: InlineComment) => void
+  onAdd: (c: Omit<InlineComment, "id"> & Partial<Pick<InlineComment, "id">>) => void
   onCancel: () => void
 }) {
   const [body, setBody] = useState("")

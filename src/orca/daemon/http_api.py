@@ -348,6 +348,71 @@ async def _post_restart_state(request: Request) -> JSONResponse:
     return JSONResponse({"status": "restarted"})
 
 
+async def _post_debug_question(request: Request) -> JSONResponse:
+    """Flag a review comment as a question the agent should answer."""
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    issue_id: str = request.path_params["issue_id"]
+    try:
+        body: dict[str, Any] = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+
+    client_comment_id = body.get("client_comment_id")
+    file = body.get("file")
+    line = body.get("line")
+    comment_body = body.get("body")
+    if not isinstance(client_comment_id, str) or not client_comment_id:
+        return JSONResponse({"error": "client_comment_id required"}, status_code=400)
+    if not isinstance(file, str) or not isinstance(comment_body, str):
+        return JSONResponse({"error": "file and body required"}, status_code=400)
+
+    try:
+        question_id = manager.ask_debug_question(
+            run_id,
+            issue_id,
+            client_comment_id,
+            file,
+            line if isinstance(line, int) else None,
+            comment_body,
+        )
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=404)
+    return JSONResponse({"question_id": question_id, "answer": None})
+
+
+async def _get_debug_questions(request: Request) -> JSONResponse:
+    """List all questions (answered + unanswered) for the current debug pause."""
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    issue_id: str = request.path_params["issue_id"]
+    try:
+        questions = manager.list_debug_questions(run_id, issue_id)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=404)
+    return JSONResponse({"questions": questions})
+
+
+async def _post_debug_answer(request: Request) -> JSONResponse:
+    """Agent posts an answer to a previously-asked question. Called via MCP."""
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    issue_id: str = request.path_params["issue_id"]
+    question_id: str = request.path_params["question_id"]
+    try:
+        body: dict[str, Any] = await request.json()
+    except Exception:
+        return JSONResponse({"error": "invalid JSON body"}, status_code=400)
+    answer = body.get("answer")
+    if not isinstance(answer, str) or not answer.strip():
+        return JSONResponse({"error": "answer required (non-empty string)"}, status_code=400)
+    try:
+        manager.answer_debug_question(run_id, issue_id, question_id, answer)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=404)
+    return JSONResponse({"status": "ok"})
+
+
 def _api_routes() -> list[Route]:
     return [
         Route("/api/status", _status, methods=["GET"]),
@@ -356,6 +421,13 @@ def _api_routes() -> list[Route]:
         Route("/api/runs/{run_id:path}/issues/{issue_id}/debug", _get_debug_review, methods=["GET"]),
         Route("/api/runs/{run_id:path}/issues/{issue_id}/debug/decide", _post_debug_decide, methods=["POST"]),
         Route("/api/runs/{run_id:path}/issues/{issue_id}/debug/restart", _post_restart_state, methods=["POST"]),
+        Route("/api/runs/{run_id:path}/issues/{issue_id}/debug/questions", _post_debug_question, methods=["POST"]),
+        Route("/api/runs/{run_id:path}/issues/{issue_id}/debug/questions", _get_debug_questions, methods=["GET"]),
+        Route(
+            "/api/runs/{run_id:path}/issues/{issue_id}/debug/questions/{question_id}/answer",
+            _post_debug_answer,
+            methods=["POST"],
+        ),
         Route("/api/runs/{run_id:path}/issues/{issue_id}", _get_issue, methods=["GET"]),
         Route("/api/runs/{run_id:path}/insights", _get_insights, methods=["GET"]),
         Route("/api/runs/{run_id:path}/logs/{issue_id}", _get_worker_log, methods=["GET"]),

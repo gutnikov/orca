@@ -62,6 +62,8 @@ class TestMcpToolRegistration:
             "orca_get_debug_review",
             "orca_submit_debug_decision",
             "orca_restart_state",
+            "orca_list_unanswered_questions",
+            "orca_answer_review_question",
             "orca_get_playbook",
             "orca_list_playbooks",
         }

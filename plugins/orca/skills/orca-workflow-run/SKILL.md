@@ -131,6 +131,21 @@ Per-issue `debug_review_url` on entries in the `issues` dict carries the same UR
 - If the issue's `state` is the same and `modify_pending: true` appears on the compact issue → user picked **modify_restart**. Delegate to the `orca-prompt-config-rewrite` skill (pass `run_id` and `issue_id`). The skill calls `orca_restart_state` when done.
 - If the run's `status` transitioned to `stopped` → user picked **stop**. Exit watch.
 
+#### Answering review questions during the pause
+
+While the debug pause is still unresolved (`debug_reviews` non-empty), users can flag individual review comments with the *Ask agent* button. After **each** debug-review poll, before sleeping again:
+
+1. Call `orca_list_unanswered_questions(root, run_id, issue_id)`.
+2. For each `{question_id, file, line, body}` returned:
+   - Read the rendered prompt, the worker's result, and the diff hunk around `(file, line)` from the snapshot you already fetched. If you need the snapshot again, call `orca_get_debug_review(root, run_id, issue_id)`.
+   - Formulate a concise answer (2-5 sentences, markdown ok). Answer based on what the diff and prompt actually say, not what you wish were true. If the comment is *not* a question (e.g. instructions, observations), answer anyway with a one-line acknowledgement — the user explicitly flagged it.
+   - Call `orca_answer_review_question(root, run_id, issue_id, question_id, body)` with the answer.
+3. Then continue to the next debug-review poll.
+
+This loop is independent of the decision wait — the user can flag a question and keep reviewing without ever submitting Accept/Modify+restart. Once they do submit, all questions are dropped server-side and the next pause starts clean.
+
+Do NOT print the answers in your CLI output. They render threaded under the user's comment in the browser; duplicating in chat is noise.
+
 #### Other paused states (check after debug_reviews)
 
 **Healthy** — `worker_active: true`, log shows new output since last poll, `failure_count < MAX_RETRIES`, `hop_count < HOP_ASK_THRESHOLD`: continue polling.
