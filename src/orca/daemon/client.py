@@ -114,3 +114,18 @@ class DaemonClient:
 
     async def restart_state(self, run_id: str, issue_id: str) -> dict[str, Any]:
         return await self._post_json(f"/api/runs/{run_id}/issues/{issue_id}/debug/restart")
+
+    async def list_debug_questions(self, run_id: str, issue_id: str) -> dict[str, Any]:
+        return await self._get_json(f"/api/runs/{run_id}/issues/{issue_id}/debug/questions")
+
+    async def answer_debug_question(
+        self,
+        run_id: str,
+        issue_id: str,
+        question_id: str,
+        answer: str,
+    ) -> dict[str, Any]:
+        return await self._post_json(
+            f"/api/runs/{run_id}/issues/{issue_id}/debug/questions/{question_id}/answer",
+            {"answer": answer},
+        )

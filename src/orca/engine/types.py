@@ -135,6 +135,9 @@ class Issue:
     state_base_commit: str | None = None
     debug_pending: bool = False
     modify_pending: bool = False
+    # Ephemeral list of user-flagged questions for the current debug pause.
+    # Cleared whenever a debug decision is processed.
+    debug_questions: list[DebugQuestion] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -151,6 +154,7 @@ class Issue:
             "state_base_commit": self.state_base_commit,
             "debug_pending": self.debug_pending,
             "modify_pending": self.modify_pending,
+            "debug_questions": [q.to_dict() for q in self.debug_questions],
         }
 
     @classmethod
@@ -169,6 +173,7 @@ class Issue:
             state_base_commit=data.get("state_base_commit"),
             debug_pending=data.get("debug_pending", False),
             modify_pending=data.get("modify_pending", False),
+            debug_questions=[DebugQuestion.from_dict(q) for q in data.get("debug_questions", [])],
         )
 
 
@@ -258,6 +263,29 @@ class DebugModifyRequestEvent:
     timestamp: str
 
 
+@dataclass(frozen=True)
+class DebugQuestionAskedEvent:
+    """User flagged a review comment for the agent to answer."""
+
+    issue_id: str
+    question_id: str
+    client_comment_id: str
+    file: str
+    line: int | None
+    body: str
+    timestamp: str
+
+
+@dataclass(frozen=True)
+class DebugQuestionAnsweredEvent:
+    """Agent posted an answer to a previously-asked review question."""
+
+    issue_id: str
+    question_id: str
+    answer: str
+    timestamp: str
+
+
 Event = (
     CreateEvent
     | AdvanceEvent
@@ -268,6 +296,8 @@ Event = (
     | DebugReviewRequiredEvent
     | DebugDecisionEvent
     | DebugModifyRequestEvent
+    | DebugQuestionAskedEvent
+    | DebugQuestionAnsweredEvent
 )
 
 
@@ -308,6 +338,46 @@ class InlineComment:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> InlineComment:
         return cls(file=data["file"], line=data.get("line"), body=data["body"])
+
+
+@dataclass
+class DebugQuestion:
+    """A user-flagged review comment that needs an agent answer.
+
+    Separate from `InlineComment` because comments are draft-only until the
+    user submits a decision — questions need to round-trip through the server
+    *during* review so the host agent (CC via MCP) can pick them up and
+    answer them in-place. `client_comment_id` lets the browser correlate the
+    answer back to its local draft comment when polling.
+    """
+
+    id: str
+    client_comment_id: str
+    file: str
+    line: int | None
+    body: str
+    answer: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "client_comment_id": self.client_comment_id,
+            "file": self.file,
+            "line": self.line,
+            "body": self.body,
+            "answer": self.answer,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DebugQuestion:
+        return cls(
+            id=data["id"],
+            client_comment_id=data["client_comment_id"],
+            file=data["file"],
+            line=data.get("line"),
+            body=data["body"],
+            answer=data.get("answer"),
+        )
 
 
 @dataclass

@@ -18,6 +18,9 @@ from orca.engine.types import (
     CreateEvent,
     DebugDecisionEvent,
     DebugModifyRequestEvent,
+    DebugQuestion,
+    DebugQuestionAnsweredEvent,
+    DebugQuestionAskedEvent,
     DebugReviewRequiredEvent,
     DispatchWorkerEffect,
     Effect,
@@ -66,6 +69,10 @@ def reduce(
         _handle_debug_decision(config, new_state, event, effects, generate_id, ts)
     elif isinstance(event, DebugModifyRequestEvent):
         _handle_debug_modify_request(config, new_state, event, effects, ts)
+    elif isinstance(event, DebugQuestionAskedEvent):
+        _handle_debug_question_asked(config, new_state, event, effects, ts)
+    elif isinstance(event, DebugQuestionAnsweredEvent):
+        _handle_debug_question_answered(config, new_state, event, effects, ts)
 
     return new_state, effects
 
@@ -734,6 +741,9 @@ def _handle_debug_decision(
         "debug_decision",
         {"action": event.action, "comments": [c.to_dict() for c in event.comments]},
     )
+    # Questions are ephemeral aids for the current debug pause — drop them
+    # on every decision so a new pause starts clean.
+    issue.debug_questions = []
     if event.action == "accept":
         last_result = next(
             (e.data for e in reversed(issue.event_log) if e.type == "worker_result"),
@@ -813,4 +823,72 @@ def _handle_debug_modify_request(
         event.timestamp,
         "debug_modify_request",
         {"comments": [c.to_dict() for c in event.comments]},
+    )
+
+
+def _handle_debug_question_asked(
+    config: StateMachineConfig,
+    state: State,
+    event: DebugQuestionAskedEvent,
+    effects: list[Effect],
+    ts: str,
+) -> None:
+    if event.issue_id not in state.issues:
+        effects.append(ErrorEffect(issue_id=event.issue_id, message=f"Issue '{event.issue_id}' does not exist"))
+        return
+    issue = state.issues[event.issue_id]
+    # Idempotency: re-asking the same question_id is a no-op so the host
+    # can retry the POST without risk of duplicates in the list.
+    if any(q.id == event.question_id for q in issue.debug_questions):
+        return
+    issue.debug_questions.append(
+        DebugQuestion(
+            id=event.question_id,
+            client_comment_id=event.client_comment_id,
+            file=event.file,
+            line=event.line,
+            body=event.body,
+            answer=None,
+        )
+    )
+    append_log(
+        issue,
+        event.timestamp,
+        "debug_question_asked",
+        {
+            "question_id": event.question_id,
+            "client_comment_id": event.client_comment_id,
+            "file": event.file,
+            "line": event.line,
+            "body": event.body,
+        },
+    )
+
+
+def _handle_debug_question_answered(
+    config: StateMachineConfig,
+    state: State,
+    event: DebugQuestionAnsweredEvent,
+    effects: list[Effect],
+    ts: str,
+) -> None:
+    if event.issue_id not in state.issues:
+        effects.append(ErrorEffect(issue_id=event.issue_id, message=f"Issue '{event.issue_id}' does not exist"))
+        return
+    issue = state.issues[event.issue_id]
+    target = next((q for q in issue.debug_questions if q.id == event.question_id), None)
+    if target is None:
+        effects.append(
+            ErrorEffect(
+                issue_id=event.issue_id,
+                message=f"Question {event.question_id!r} not found on issue {event.issue_id!r}",
+            )
+        )
+        return
+    target.answer = event.answer
+    append_log(
+        issue,
+        event.timestamp,
+        "debug_question_answered",
+        {"question_id": event.question_id, "answer": event.answer},
     )

@@ -15,6 +15,7 @@ import { DiffFileCard } from "./DiffFileCard";
 import { FileTreeSidebar } from "./FileTreeSidebar";
 import { VirtualFileCard } from "./VirtualFileCard";
 import { useDraftComments, type InlineComment } from "./useDraftComments";
+import { useDebugQuestions } from "./useDebugQuestions";
 import type { ChangesetFile, FileStatus, ReviewComment } from "./types";
 
 function anchorForId(id: string): string {
@@ -81,7 +82,7 @@ function toChangesetFile(
  */
 function buildOverlay(
   comments: InlineComment[],
-  onAdd: (c: InlineComment) => void,
+  onAdd: (c: Omit<InlineComment, "id"> & Partial<Pick<InlineComment, "id">>) => void,
   onRemove: (idx: number) => void,
   openDraftKey: string | null,
   setOpenDraftKey: (k: string | null) => void,
@@ -91,7 +92,7 @@ function buildOverlay(
   // Map InlineComment → ReviewComment for the DiffView API
   const reviewComments: ReviewComment[] = comments
     .filter((c) => c.line !== null)
-    .map((c) => ({ file: c.file, line: c.line as number, side: "new" as const, body: c.body }));
+    .map((c) => ({ id: c.id, file: c.file, line: c.line as number, side: "new" as const, body: c.body }));
 
   const draftFileLineKey = (file: string, side: "old" | "new", line: number) =>
     `${file}:${side}:${line}`;
@@ -157,7 +158,7 @@ function buildOverlay(
 function wrapOverlayForFile(
   overlay: DiffViewOverlay,
   file: string,
-  onAdd: (c: InlineComment) => void,
+  onAdd: (c: Omit<InlineComment, "id"> & Partial<Pick<InlineComment, "id">>) => void,
   openDraftKey: string | null,
   setOpenDraftKey: (k: string | null) => void,
   draftBody: string,
@@ -204,6 +205,7 @@ export function DebugReviewLayout({
 }: DebugReviewLayoutProps) {
   const { comments, add, remove, clear } = useDraftComments(runId, issueId);
   const [submitting, setSubmitting] = useState(false);
+  const { byCommentId, ask: askAgent } = useDebugQuestions(runId, issueId);
 
   // Free-form, file-agnostic feedback bundled with line comments at submit time.
   const [overallFeedback, setOverallFeedback] = useState<string>("");
@@ -220,8 +222,8 @@ export function DebugReviewLayout({
   const [draftBody, setDraftBody] = useState("");
 
   const baseOverlay = useMemo(
-    () =>
-      buildOverlay(
+    () => {
+      const overlay = buildOverlay(
         comments,
         add,
         remove,
@@ -229,9 +231,23 @@ export function DebugReviewLayout({
         setOpenDraftKey,
         draftBody,
         setDraftBody,
-      ),
+      );
+      // Wire the per-comment "Ask agent" surfaces. CommentThread reads
+      // `questionForComment` to know whether to render the pending spinner /
+      // threaded answer; it invokes `onAskQuestion` when the user clicks
+      // the sparkles button.
+      overlay.questionForComment = (commentId: string) => {
+        const q = byCommentId[commentId];
+        if (!q) return undefined;
+        return { pending: q.answer === null, answer: q.answer };
+      };
+      overlay.onAskQuestion = (c: ReviewComment) => {
+        void askAgent(c.id, c.file, c.line, c.body);
+      };
+      return overlay;
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [comments, add, remove, openDraftKey, draftBody],
+    [comments, add, remove, openDraftKey, draftBody, byCommentId, askAgent],
   );
 
   // Result first — that's what the user looks at to decide what to do next.
@@ -306,7 +322,14 @@ export function DebugReviewLayout({
       const allComments: InlineComment[] = trimmedOverall
         ? [
             ...comments,
-            { file: OVERALL_FEEDBACK_FILE, line: null, body: trimmedOverall },
+            {
+              id: typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? crypto.randomUUID()
+                : `overall-${Date.now()}`,
+              file: OVERALL_FEEDBACK_FILE,
+              line: null,
+              body: trimmedOverall,
+            },
           ]
         : comments;
       await onSubmit(action, allComments);
