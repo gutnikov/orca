@@ -32,6 +32,9 @@ def mock_client() -> MagicMock:
     mock.stop_run = AsyncMock(return_value={"error": "run 'nope:default' not found"})
     mock.drop_run = AsyncMock(return_value={"error": "run 'nope:default' not found"})
     mock.resume_run = AsyncMock(return_value={"error": "run 'nope:default' not found"})
+    mock.list_inline_comments = AsyncMock(return_value={"comments": []})
+    mock.add_thread_message = AsyncMock(return_value={"message_id": "msg-1"})
+    mock.skip_comment = AsyncMock(return_value={"ok": True})
     return mock
 
 
@@ -61,6 +64,9 @@ class TestMcpToolRegistration:
             "orca_submit_debug_decision",
             "orca_restart_state",
             "orca_clear_modify_pending",
+            "orca_list_pending_comments",
+            "orca_reply_to_comment",
+            "orca_skip_comment",
             "orca_get_playbook",
             "orca_list_playbooks",
         }
@@ -252,3 +258,332 @@ class TestListPlaybooksTool:
         names = json.loads(_first_text(content_blocks))
         for n in names:
             assert not n.endswith(".md")
+
+
+# -------------------------------------------------------------------------- #
+# Inline-comment conversational tools (Task 6)                               #
+# -------------------------------------------------------------------------- #
+
+
+def _comment(
+    cid: str,
+    *,
+    file: str = "src/foo.py",
+    line: int | None = 10,
+    body: str = "please fix this",
+    thread: dict[str, object] | None = None,
+) -> dict[str, object]:
+    return {
+        "id": cid,
+        "file": file,
+        "line": line,
+        "body": body,
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "thread": thread,
+    }
+
+
+def _thread(
+    messages: list[dict[str, object]],
+    *,
+    agent_last_reviewed_at: str | None = None,
+) -> dict[str, object]:
+    return {
+        "id": "thr-1",
+        "comment_id": "c-1",
+        "messages": messages,
+        "agent_last_reviewed_at": agent_last_reviewed_at,
+    }
+
+
+def _msg(role: str, body: str, timestamp: str, mid: str = "m") -> dict[str, object]:
+    return {"id": mid, "role": role, "body": body, "timestamp": timestamp}
+
+
+@pytest.mark.asyncio()
+class TestListPendingCommentsTool:
+    async def test_no_thread_is_pending(self, mock_client: MagicMock) -> None:
+        mock_client.list_inline_comments = AsyncMock(return_value={"comments": [_comment("c-1", thread=None)]})
+        server = create_mcp_server()
+        with (
+            patch("orca.daemon.mcp_tools.check_daemon_running", return_value=True),
+            patch("orca.daemon.mcp_tools.DaemonClient", return_value=mock_client),
+        ):
+            content_blocks, _ = await server.call_tool(
+                "orca_list_pending_comments",
+                {"root": FAKE_ROOT, "run_id": "r1", "issue_id": "iss-1"},
+            )
+        data = json.loads(_first_text(content_blocks))
+        assert len(data["comments"]) == 1
+        item = data["comments"][0]
+        assert item["id"] == "c-1"
+        assert item["file"] == "src/foo.py"
+        assert item["line"] == 10
+        assert item["body"] == "please fix this"
+        assert item["thread_messages"] == []
+
+    async def test_agent_latest_message_not_pending(self, mock_client: MagicMock) -> None:
+        thread = _thread(
+            [
+                _msg("user", "please fix", "2026-01-01T00:00:00Z", "m1"),
+                _msg("agent", "ok will do", "2026-01-01T00:00:01Z", "m2"),
+            ],
+            agent_last_reviewed_at="2026-01-01T00:00:01Z",
+        )
+        mock_client.list_inline_comments = AsyncMock(return_value={"comments": [_comment("c-1", thread=thread)]})
+        server = create_mcp_server()
+        with (
+            patch("orca.daemon.mcp_tools.check_daemon_running", return_value=True),
+            patch("orca.daemon.mcp_tools.DaemonClient", return_value=mock_client),
+        ):
+            content_blocks, _ = await server.call_tool(
+                "orca_list_pending_comments",
+                {"root": FAKE_ROOT, "run_id": "r1", "issue_id": "iss-1"},
+            )
+        data = json.loads(_first_text(content_blocks))
+        assert data["comments"] == []
+
+    async def test_user_reply_newer_than_reviewed_is_pending(self, mock_client: MagicMock) -> None:
+        thread = _thread(
+            [
+                _msg("user", "first", "2026-01-01T00:00:00Z", "m1"),
+                _msg("agent", "got it", "2026-01-01T00:00:01Z", "m2"),
+                _msg("user", "also this", "2026-01-01T00:00:03Z", "m3"),
+            ],
+            agent_last_reviewed_at="2026-01-01T00:00:01Z",
+        )
+        mock_client.list_inline_comments = AsyncMock(return_value={"comments": [_comment("c-1", thread=thread)]})
+        server = create_mcp_server()
+        with (
+            patch("orca.daemon.mcp_tools.check_daemon_running", return_value=True),
+            patch("orca.daemon.mcp_tools.DaemonClient", return_value=mock_client),
+        ):
+            content_blocks, _ = await server.call_tool(
+                "orca_list_pending_comments",
+                {"root": FAKE_ROOT, "run_id": "r1", "issue_id": "iss-1"},
+            )
+        data = json.loads(_first_text(content_blocks))
+        assert len(data["comments"]) == 1
+        item = data["comments"][0]
+        assert item["id"] == "c-1"
+        assert len(item["thread_messages"]) == 3
+        assert item["thread_messages"][-1]["body"] == "also this"
+
+    async def test_user_msg_older_than_reviewed_not_pending(self, mock_client: MagicMock) -> None:
+        thread = _thread(
+            [_msg("user", "already-seen", "2026-01-01T00:00:00Z", "m1")],
+            agent_last_reviewed_at="2026-01-01T00:00:05Z",
+        )
+        mock_client.list_inline_comments = AsyncMock(return_value={"comments": [_comment("c-1", thread=thread)]})
+        server = create_mcp_server()
+        with (
+            patch("orca.daemon.mcp_tools.check_daemon_running", return_value=True),
+            patch("orca.daemon.mcp_tools.DaemonClient", return_value=mock_client),
+        ):
+            content_blocks, _ = await server.call_tool(
+                "orca_list_pending_comments",
+                {"root": FAKE_ROOT, "run_id": "r1", "issue_id": "iss-1"},
+            )
+        data = json.loads(_first_text(content_blocks))
+        assert data["comments"] == []
+
+    async def test_mixed_only_pending_returned(self, mock_client: MagicMock) -> None:
+        pending_no_thread = _comment("c-pending-1", thread=None)
+        not_pending_agent_last = _comment(
+            "c-not-1",
+            thread=_thread(
+                [
+                    _msg("user", "u", "2026-01-01T00:00:00Z", "m1"),
+                    _msg("agent", "a", "2026-01-01T00:00:01Z", "m2"),
+                ],
+                agent_last_reviewed_at="2026-01-01T00:00:01Z",
+            ),
+        )
+        pending_new_user = _comment(
+            "c-pending-2",
+            thread=_thread(
+                [
+                    _msg("user", "old", "2026-01-01T00:00:00Z", "m1"),
+                    _msg("agent", "a", "2026-01-01T00:00:01Z", "m2"),
+                    _msg("user", "new", "2026-01-01T00:00:05Z", "m3"),
+                ],
+                agent_last_reviewed_at="2026-01-01T00:00:01Z",
+            ),
+        )
+        mock_client.list_inline_comments = AsyncMock(
+            return_value={"comments": [pending_no_thread, not_pending_agent_last, pending_new_user]}
+        )
+        server = create_mcp_server()
+        with (
+            patch("orca.daemon.mcp_tools.check_daemon_running", return_value=True),
+            patch("orca.daemon.mcp_tools.DaemonClient", return_value=mock_client),
+        ):
+            content_blocks, _ = await server.call_tool(
+                "orca_list_pending_comments",
+                {"root": FAKE_ROOT, "run_id": "r1", "issue_id": "iss-1"},
+            )
+        data = json.loads(_first_text(content_blocks))
+        ids = [c["id"] for c in data["comments"]]
+        assert ids == ["c-pending-1", "c-pending-2"]
+
+
+@pytest.mark.asyncio()
+class TestReplyToCommentTool:
+    async def test_returns_message_id(self, mock_client: MagicMock) -> None:
+        mock_client.add_thread_message = AsyncMock(return_value={"message_id": "m-new"})
+        server = create_mcp_server()
+        with (
+            patch("orca.daemon.mcp_tools.check_daemon_running", return_value=True),
+            patch("orca.daemon.mcp_tools.DaemonClient", return_value=mock_client),
+        ):
+            content_blocks, _ = await server.call_tool(
+                "orca_reply_to_comment",
+                {
+                    "root": FAKE_ROOT,
+                    "run_id": "r1",
+                    "issue_id": "iss-1",
+                    "comment_id": "c-1",
+                    "body": "thanks, will address",
+                },
+            )
+        data = json.loads(_first_text(content_blocks))
+        assert data == {"message_id": "m-new"}
+        mock_client.add_thread_message.assert_awaited_once_with("r1", "iss-1", "c-1", "agent", "thanks, will address")
+
+    async def test_after_reply_comment_not_pending(self, mock_client: MagicMock) -> None:
+        # Simulate: before reply -> pending (no thread). After reply -> thread
+        # exists with agent as latest message, so not pending.
+        responses = iter(
+            [
+                {"comments": [_comment("c-1", thread=None)]},
+                {
+                    "comments": [
+                        _comment(
+                            "c-1",
+                            thread=_thread(
+                                [
+                                    _msg("agent", "thanks", "2026-01-01T00:00:10Z", "m1"),
+                                ],
+                                agent_last_reviewed_at="2026-01-01T00:00:10Z",
+                            ),
+                        )
+                    ]
+                },
+            ]
+        )
+        mock_client.list_inline_comments = AsyncMock(side_effect=lambda *_a, **_k: next(responses))
+        server = create_mcp_server()
+        with (
+            patch("orca.daemon.mcp_tools.check_daemon_running", return_value=True),
+            patch("orca.daemon.mcp_tools.DaemonClient", return_value=mock_client),
+        ):
+            # Before
+            content_blocks, _ = await server.call_tool(
+                "orca_list_pending_comments",
+                {"root": FAKE_ROOT, "run_id": "r1", "issue_id": "iss-1"},
+            )
+            before = json.loads(_first_text(content_blocks))
+            assert len(before["comments"]) == 1
+            # Reply
+            await server.call_tool(
+                "orca_reply_to_comment",
+                {
+                    "root": FAKE_ROOT,
+                    "run_id": "r1",
+                    "issue_id": "iss-1",
+                    "comment_id": "c-1",
+                    "body": "thanks",
+                },
+            )
+            # After
+            content_blocks, _ = await server.call_tool(
+                "orca_list_pending_comments",
+                {"root": FAKE_ROOT, "run_id": "r1", "issue_id": "iss-1"},
+            )
+            after = json.loads(_first_text(content_blocks))
+        assert after["comments"] == []
+
+
+@pytest.mark.asyncio()
+class TestSkipCommentTool:
+    async def test_returns_ok(self, mock_client: MagicMock) -> None:
+        mock_client.skip_comment = AsyncMock(return_value={"ok": True})
+        server = create_mcp_server()
+        with (
+            patch("orca.daemon.mcp_tools.check_daemon_running", return_value=True),
+            patch("orca.daemon.mcp_tools.DaemonClient", return_value=mock_client),
+        ):
+            content_blocks, _ = await server.call_tool(
+                "orca_skip_comment",
+                {
+                    "root": FAKE_ROOT,
+                    "run_id": "r1",
+                    "issue_id": "iss-1",
+                    "comment_id": "c-1",
+                    "reason": "directive — worker will see it",
+                },
+            )
+        data = json.loads(_first_text(content_blocks))
+        assert data == {"ok": True}
+        mock_client.skip_comment.assert_awaited_once_with("r1", "iss-1", "c-1", "directive — worker will see it")
+
+    async def test_after_skip_comment_not_pending(self, mock_client: MagicMock) -> None:
+        # Simulate skip bumping agent_last_reviewed_at past the user message timestamp.
+        responses = iter(
+            [
+                {
+                    "comments": [
+                        _comment(
+                            "c-1",
+                            thread=_thread(
+                                [_msg("user", "u", "2026-01-01T00:00:00Z", "m1")],
+                                agent_last_reviewed_at=None,
+                            ),
+                        )
+                    ]
+                },
+                {
+                    "comments": [
+                        _comment(
+                            "c-1",
+                            thread=_thread(
+                                [_msg("user", "u", "2026-01-01T00:00:00Z", "m1")],
+                                agent_last_reviewed_at="2026-01-01T00:00:05Z",
+                            ),
+                        )
+                    ]
+                },
+            ]
+        )
+        mock_client.list_inline_comments = AsyncMock(side_effect=lambda *_a, **_k: next(responses))
+        server = create_mcp_server()
+        with (
+            patch("orca.daemon.mcp_tools.check_daemon_running", return_value=True),
+            patch("orca.daemon.mcp_tools.DaemonClient", return_value=mock_client),
+        ):
+            # Before: pending because reviewed_at is None
+            content_blocks, _ = await server.call_tool(
+                "orca_list_pending_comments",
+                {"root": FAKE_ROOT, "run_id": "r1", "issue_id": "iss-1"},
+            )
+            before = json.loads(_first_text(content_blocks))
+            assert len(before["comments"]) == 1
+            # Skip
+            await server.call_tool(
+                "orca_skip_comment",
+                {
+                    "root": FAKE_ROOT,
+                    "run_id": "r1",
+                    "issue_id": "iss-1",
+                    "comment_id": "c-1",
+                    "reason": "n/a",
+                },
+            )
+            # After
+            content_blocks, _ = await server.call_tool(
+                "orca_list_pending_comments",
+                {"root": FAKE_ROOT, "run_id": "r1", "issue_id": "iss-1"},
+            )
+            after = json.loads(_first_text(content_blocks))
+        assert after["comments"] == []

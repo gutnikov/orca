@@ -308,6 +308,87 @@ def create_mcp_server() -> FastMCP:
         result = await _get_client(root).restart_state(run_id, issue_id)
         return json.dumps(result)
 
+    async def orca_list_pending_comments(root: str, run_id: str, issue_id: str) -> str:
+        """During a debug pause, return inline comments awaiting agent attention.
+
+        Inclusion rule: a comment is pending iff EITHER (a) it has no thread yet
+        OR (b) the thread's `messages[-1].role == "user"` AND either
+        `agent_last_reviewed_at` is None or that message's timestamp is later
+        than `agent_last_reviewed_at`.
+
+        Each item: id, file, line, body, thread_messages (may be empty list).
+        Empty result = nothing to do.
+
+        Args:
+            root: Absolute path to the target project's repo root.
+            run_id: The run identifier.
+            issue_id: The issue identifier.
+        """
+        payload = await _get_client(root).list_inline_comments(run_id, issue_id)
+        comments = payload.get("comments", [])
+        pending: list[dict[str, Any]] = []
+        for c in comments:
+            thread = c.get("thread")
+            if thread is None:
+                pending.append(
+                    {
+                        "id": c["id"],
+                        "file": c["file"],
+                        "line": c.get("line"),
+                        "body": c["body"],
+                        "thread_messages": [],
+                    }
+                )
+                continue
+            messages = thread.get("messages", [])
+            reviewed_at = thread.get("agent_last_reviewed_at")
+            if not messages:
+                # Empty thread with reviewed_at set → already skipped, not pending.
+                continue
+            last = messages[-1]
+            if last["role"] == "user" and (reviewed_at is None or last["timestamp"] > reviewed_at):
+                pending.append(
+                    {
+                        "id": c["id"],
+                        "file": c["file"],
+                        "line": c.get("line"),
+                        "body": c["body"],
+                        "thread_messages": messages,
+                    }
+                )
+        return json.dumps({"comments": pending})
+
+    async def orca_reply_to_comment(root: str, run_id: str, issue_id: str, comment_id: str, body: str) -> str:
+        """Append an agent message to a comment's thread. Lazily creates the thread.
+
+        Args:
+            root: Absolute path to the target project's repo root.
+            run_id: The run identifier.
+            issue_id: The issue identifier.
+            comment_id: The id of the comment to reply to (from orca_list_pending_comments).
+            body: The agent's reply (markdown allowed).
+        """
+        result = await _get_client(root).add_thread_message(run_id, issue_id, comment_id, "agent", body)
+        return json.dumps(result)
+
+    async def orca_skip_comment(root: str, run_id: str, issue_id: str, comment_id: str, reason: str) -> str:
+        """Mark a comment reviewed-no-engagement. Bumps agent_last_reviewed_at so
+        the comment won't surface again unless the user posts new content.
+
+        Use this when the user's comment is a directive (the worker will see it
+        verbatim when the user submits a decision — no need for the supervising
+        agent to acknowledge), or when there's no substantive feedback to add.
+
+        Args:
+            root: Absolute path to the target project's repo root.
+            run_id: The run identifier.
+            issue_id: The issue identifier.
+            comment_id: The id of the comment to skip.
+            reason: A short string recorded for diagnostics; not shown to the user.
+        """
+        result = await _get_client(root).skip_comment(run_id, issue_id, comment_id, reason)
+        return json.dumps(result)
+
     async def orca_clear_modify_pending(root: str, run_id: str, issue_id: str) -> str:
         """Clear modify_pending after a modify_continue rewrite is done.
 
@@ -339,6 +420,9 @@ def create_mcp_server() -> FastMCP:
     server.add_tool(orca_submit_debug_decision, name="orca_submit_debug_decision")
     server.add_tool(orca_restart_state, name="orca_restart_state")
     server.add_tool(orca_clear_modify_pending, name="orca_clear_modify_pending")
+    server.add_tool(orca_list_pending_comments, name="orca_list_pending_comments")
+    server.add_tool(orca_reply_to_comment, name="orca_reply_to_comment")
+    server.add_tool(orca_skip_comment, name="orca_skip_comment")
     server.add_tool(orca_get_playbook, name="orca_get_playbook")
     server.add_tool(orca_list_playbooks, name="orca_list_playbooks")
 
