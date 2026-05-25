@@ -10,13 +10,27 @@
 
 ## Steps
 
-1. **Fetch the review snapshot.** Call
-   `orca_get_debug_review(root, run_id, issue_id)`.
-   - If the response has `"error": "not_pending"`, the issue is no longer
-     paused — report this to the user and stop.
-
-2. **Fetch the user's comments.** Call
+1. **Determine the variant** (restart vs continue). Call
    `orca_get_issue(root, run_id, issue_id)` and scan its `event_log` in
+   reverse for the most recent entry with `type == "debug_decision"`.
+   - `data.action == "modify_restart"` → user picked
+     **Modify prompts & configs → restart step**. After rewriting, finish
+     with `orca_restart_state` (resets worktree + re-dispatches worker).
+   - `data.action == "modify_continue"` → user picked
+     **Modify prompts & configs → continue**. The state has already
+     advanced — finish with `orca_clear_modify_pending` (no re-dispatch).
+   The variant only affects the *final* call in step 6; the rewrite itself
+   is identical.
+
+2. **Fetch the review snapshot.** Call
+   `orca_get_debug_review(root, run_id, issue_id)`.
+   - On the `modify_restart` path: if the response has `"error": "not_pending"`,
+     the issue is no longer paused — report this to the user and stop.
+   - On the `modify_continue` path: the snapshot endpoint returns
+     `not_pending` (because `debug_pending` was cleared on accept). Read the
+     comments from the same `debug_modify_request` event in step 3 instead.
+
+3. **Fetch the user's comments.** Scan the `event_log` from step 1 in
    reverse for the most recent entry with `type == "debug_modify_request"`.
    Extract `data.comments` — each comment is `{file, line, body}`.
 
@@ -50,13 +64,18 @@
 5. **Verify the workflow YAML still parses.** Read the rewritten YAML and
    confirm it loads. If not, ask the user to confirm or revert.
 
-6. **Restart the state.** Call
-   `orca_restart_state(root, run_id, issue_id)`.
-   - On success: the daemon resets the worktree and re-dispatches the worker
+6. **Finish based on the variant from step 1.**
+   - `modify_restart` → call `orca_restart_state(root, run_id, issue_id)`.
+     On success the daemon resets the worktree and re-dispatches the worker
      with the new prompt. Report success.
-   - On failure (e.g., config still invalid): surface the error. The issue
-     remains in `modify_pending` — user can iterate or pick another action
-     in the browser.
+   - `modify_continue` → call
+     `orca_clear_modify_pending(root, run_id, issue_id)`. The state has
+     already advanced (the user accepted the worker's output at decide
+     time); this just drops the flag so the polling loop stops seeing
+     pending work. Report success.
+   - On failure of either call (e.g., config still invalid for
+     `restart`): surface the error. The issue remains in `modify_pending`
+     — user can iterate or pick another action in the browser.
 
 ## What this skill does NOT do
 

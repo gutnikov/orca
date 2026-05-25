@@ -8,7 +8,8 @@ interface PostDecisionScreenProps {
 }
 
 const ACTION_PAST_TENSE: Record<DebugAction, string> = {
-  modify_restart: "modify prompt + config & restart",
+  modify_restart: "modify prompts & configs → restart step",
+  modify_continue: "modify prompts & configs → continue",
   restart: "restart without changes",
   accept: "accept & continue",
   stop: "stop run",

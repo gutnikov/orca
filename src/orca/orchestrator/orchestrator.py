@@ -295,6 +295,22 @@ class Orchestrator:
             raise ValueError(f"Issue {issue_id!r} not found")
         return [q.to_dict() for q in issue.debug_questions]
 
+    def clear_modify_pending(self, issue_id: str) -> None:
+        """Clear modify_pending after a modify_continue rewrite is done.
+
+        Used when the user picked "Modify prompts & configs → continue":
+        the state already advanced (worker_result was accepted), so no
+        worker re-dispatch is needed — just drop the flag so the agent's
+        polling loop stops seeing this as pending work.
+        """
+        issue = self._state.issues.get(issue_id)
+        if issue is None:
+            raise ValueError(f"Issue {issue_id!r} not found")
+        if not issue.modify_pending:
+            return
+        issue.modify_pending = False
+        self.persistence.save(self._state)
+
     def _is_terminal(self, issue_id: str) -> bool:
         """Return True if the issue's current state is terminal in config."""
         issue = self._state.issues.get(issue_id)
