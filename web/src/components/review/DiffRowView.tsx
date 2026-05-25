@@ -94,7 +94,11 @@ export function DiffRowView({
           long lines scroll horizontally inside the wrapper. */}
       <span className={cn(rowStyles.gutterNumber, "left-0")}>{row.oldLine ?? ""}</span>
       <span className={cn(rowStyles.gutterNumber, "left-[3rem]")}>{row.newLine ?? ""}</span>
-      <span className={cn(rowStyles.gutterSign, "relative left-[6rem]")}>
+      {/* Sticky sign column. `position: sticky` is itself a positioning
+          context for `position: absolute` descendants, so the hover-overlay
+          button below anchors correctly without adding `relative` — which
+          would override `sticky` and push the cell into the content area. */}
+      <span className={cn(rowStyles.gutterSign, "left-[6rem]")}>
         {showGutterButton ? (
           <button
             type="button"
