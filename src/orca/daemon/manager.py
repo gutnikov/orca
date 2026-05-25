@@ -118,7 +118,6 @@ class RunInfo:
     config: StateMachineConfig | None = None
     orchestrator: Orchestrator | None = None
     task: asyncio.Task[None] | None = field(default=None, repr=False)
-    insights: bool = False
     debug: bool = False
 
     def to_summary(self, browser_port: int | None = None) -> dict[str, Any]:
@@ -178,7 +177,6 @@ class RunManager:
         max_hops: int | None = None,
         max_retries: int | None = None,
         *,
-        insights: bool = False,
         debug: bool = False,
         worker_overrides: dict[str, dict[str, str]] | None = None,
     ) -> str:
@@ -316,7 +314,6 @@ class RunManager:
             repo_root=self.repo_root,
             flow_root=flow_root,
             session_sync=session_sync,
-            insights_enabled=insights,
             worker_overrides=worker_overrides,
         )
         orchestrator.debug = debug
@@ -332,7 +329,6 @@ class RunManager:
             created_at=now_str,
             config=config,
             orchestrator=orchestrator,
-            insights=insights,
             debug=debug,
         )
 
@@ -553,7 +549,6 @@ class RunManager:
             repo_root=self.repo_root,
             flow_root=flow_root,
             session_sync=session_sync,
-            insights_enabled=run_info.insights,
         )
         run_info.orchestrator = orchestrator
         run_info.issue_count = len(state.issues)
@@ -671,16 +666,6 @@ class RunManager:
             else:
                 parts.append(f"{header}\n(no log)")
         return "\n\n".join(parts)
-
-    def get_insights(self, run_id: str) -> str:
-        """Get insights log content for the given run."""
-        run_info = self._runs.get(run_id)
-        if run_info is None or run_info.orchestrator is None:
-            return ""
-        tid = run_info.orchestrator.insights_tracking_id
-        if not tid:
-            return ""
-        return run_info.orchestrator.get_session_log(tid)
 
     def unblock_worker(self, run_id: str, issue_id: str, message: str) -> None:
         """Unblock a blocked worker in a run."""

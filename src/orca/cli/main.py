@@ -65,7 +65,6 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("-b", "--branch", type=str, default=None)
     run_parser.add_argument("--base", type=str, default=None)
     run_parser.add_argument("--headless", action="store_true")
-    run_parser.add_argument("--insights", action="store_true")
     run_parser.add_argument(
         "--debug",
         action="store_true",

@@ -65,10 +65,8 @@ class Orchestrator:
         repo_root: Path | None = None,
         flow_root: Path | None = None,
         session_sync: SessionSync | None = None,
-        insights_enabled: bool = False,
         hot_sessions: set[str] | None = None,
         session_log_paths: dict[str, str] | None = None,
-        insights_state: dict[str, str] | None = None,
         worker_overrides: dict[str, dict[str, str]] | None = None,
     ) -> None:
         self._config = config
@@ -83,9 +81,6 @@ class Orchestrator:
         self.repo_root = repo_root
         self.flow_root = flow_root or repo_root
         self._session_sync = session_sync
-        self._insights_enabled = insights_enabled
-        self._insights_state = insights_state
-        self._insights_tracking_id: str = ""
         # Shared with TUI: which sessions should be captured frequently
         self._hot_sessions: set[str] = hot_sessions if hot_sessions is not None else set()
         # Shared with TUI: maps tracking_id -> log file path
@@ -146,10 +141,6 @@ class Orchestrator:
     def session_log_paths(self) -> dict[str, str]:
         """Map of tracking_id -> log file path (shared with TUI)."""
         return self._session_log_paths
-
-    @property
-    def insights_tracking_id(self) -> str:
-        return self._insights_tracking_id
 
     def get_session_log(self, tracking_id: str, tail: int = 100) -> str:
         """Read session log content for a tracking ID.
@@ -862,28 +853,6 @@ class Orchestrator:
                     extra={"event": "error_effect", "issue_id": effect.issue_id, "error": effect.message},
                 )
 
-    def _build_insights_prompt(self) -> str:
-        prompt_path = Path(__file__).parent / "prompts" / "insights.md"
-        template = prompt_path.read_text()
-        run_dir = self.persistence.state_path.parent
-        config_path = ""
-        if self.repo_root:
-            orca_dir = self.repo_root / ".orca"
-            if orca_dir.is_dir():
-                for candidate in sorted(orca_dir.glob("*.yml")):
-                    config_path = str(candidate)
-                    break
-            if not config_path:
-                for candidate in sorted(self.repo_root.glob("orca*.yml")):
-                    config_path = str(candidate)
-                    break
-        return template.format(
-            run_dir=str(run_dir),
-            branch_name=self.root_branch,
-            config_path=config_path,
-            repo_root=str(self.repo_root or "."),
-        )
-
     async def _session_capture_loop(self) -> None:
         """Periodically capture tmux scrollback to log files.
 
@@ -924,30 +893,6 @@ class Orchestrator:
 
         pending: list[DispatchWorkerEffect] = []
         self._route_effects(initial_effects, pending)
-
-        # Spawn insights tmux session if enabled
-        insights_session: PtySession | None = None
-        if self._insights_enabled and self.repo_root is not None:
-            from orca.orchestrator.pty_session import TmuxSession
-
-            insights_id = f"insights-{uuid4()}"
-            self._insights_tracking_id = insights_id
-            insights_session = TmuxSession(session_name=insights_id, cols=120, rows=40)
-            prompt = self._build_insights_prompt()
-            log_dir = self.repo_root / ".orca-state" / "sessions"
-            log_dir.mkdir(parents=True, exist_ok=True)
-            ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
-            insights_log = log_dir / f"insights-{ts}.log"
-            await insights_session.spawn(
-                "claude",
-                ["--dangerously-skip-permissions", "--max-turns", "200"],
-                cwd=self.repo_root,
-                stdin_data=prompt.encode(),
-            )
-            self._tmux_sessions[insights_id] = insights_session
-            self._session_log_paths[insights_id] = str(insights_log)
-            if self._insights_state is not None:
-                self._insights_state["tracking_id"] = insights_id
 
         while not self._is_terminal(root_issue_id):
             # Spawn all pending dispatch effects
@@ -1124,18 +1069,6 @@ class Orchestrator:
         if self._in_flight:
             await asyncio.gather(*self._in_flight.keys(), return_exceptions=True)
         self._in_flight.clear()
-
-        # Clean up insights session
-        if insights_session is not None:
-            await asyncio.sleep(10)  # brief wait for agent to notice completion
-            try:
-                raw = insights_session.capture_scrollback()
-                if raw and self._insights_tracking_id in self._session_log_paths:
-                    Path(self._session_log_paths[self._insights_tracking_id]).write_text(raw)
-            except Exception:
-                pass
-            self._tmux_sessions.pop(self._insights_tracking_id, None)
-            insights_session.close()
 
         capture_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):

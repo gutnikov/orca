@@ -27,7 +27,6 @@ def mock_client() -> MagicMock:
     mock.list_runs = AsyncMock(return_value=[])
     mock.get_run = AsyncMock(return_value={"error": "run 'nope:default' not found"})
     mock.get_issue = AsyncMock(return_value={"error": "issue 'iss-1' not found in run 'nope:default'"})
-    mock.get_insights = AsyncMock(return_value="")
     mock.get_worker_log = AsyncMock(return_value="")
     mock.retry_issue = AsyncMock(return_value={"error": "run 'nope:default' not found"})
     mock.stop_run = AsyncMock(return_value={"error": "run 'nope:default' not found"})
@@ -52,7 +51,6 @@ class TestMcpToolRegistration:
             "orca_list_runs",
             "orca_get_run",
             "orca_get_issue",
-            "orca_get_insights",
             "orca_get_worker_log",
             "orca_retry_issue",
             "orca_stop_run",
@@ -133,20 +131,6 @@ class TestGetIssueTool:
             )
         data = json.loads(_first_text(content_blocks))
         assert "error" in data
-
-
-@pytest.mark.asyncio()
-class TestGetInsightsTool:
-    async def test_empty_for_unknown_run(self, mock_client: MagicMock) -> None:
-        server = create_mcp_server()
-        with (
-            patch("orca.daemon.mcp_tools.check_daemon_running", return_value=True),
-            patch("orca.daemon.mcp_tools.DaemonClient", return_value=mock_client),
-        ):
-            content_blocks, _ = await server.call_tool(
-                "orca_get_insights", {"root": FAKE_ROOT, "run_id": "nope:default"}
-            )
-        assert _first_text(content_blocks) == ""
 
 
 @pytest.mark.asyncio()

@@ -12,7 +12,7 @@ _PLACEHOLDER = "*Select an issue or worker run from the tree*"
 
 
 class IssueDetail(VerticalScroll):
-    """Content panel — shows issue title/description or insights."""
+    """Content panel — shows issue title/description."""
 
     DEFAULT_CSS = """
     IssueDetail {

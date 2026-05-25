@@ -81,7 +81,6 @@ async def _start_run(request: Request) -> JSONResponse:
             run_id=body.get("run_id"),
             max_hops=body.get("max_hops"),
             max_retries=body.get("max_retries"),
-            insights=bool(body.get("insights", False)),
             debug=bool(body.get("debug", False)),
             worker_overrides=worker_overrides,
         )
@@ -192,13 +191,6 @@ async def _get_issue(request: Request) -> JSONResponse:
     if issue is None:
         return JSONResponse({"error": f"issue '{issue_id}' not found in run '{run_id}'"}, status_code=404)
     return JSONResponse(issue)
-
-
-async def _get_insights(request: Request) -> PlainTextResponse:
-    manager: RunManager = request.app.state.manager
-    run_id: str = request.path_params["run_id"]
-    text = manager.get_insights(run_id)
-    return PlainTextResponse(text)
 
 
 async def _get_worker_log(request: Request) -> PlainTextResponse:
@@ -389,7 +381,6 @@ def _api_routes() -> list[Route]:
             methods=["POST"],
         ),
         Route("/api/runs/{run_id:path}/issues/{issue_id}", _get_issue, methods=["GET"]),
-        Route("/api/runs/{run_id:path}/insights", _get_insights, methods=["GET"]),
         Route("/api/runs/{run_id:path}/logs/{issue_id}", _get_worker_log, methods=["GET"]),
         Route("/api/runs/{run_id:path}/logs", _get_all_worker_logs, methods=["GET"]),
         Route("/api/runs/{run_id:path}/stop", _stop_run, methods=["POST"]),

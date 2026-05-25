@@ -25,8 +25,6 @@ You are not expected to understand what each state in the workflow means. Trust 
 | `POLL_INTERVAL_SECONDS` | 45 | Seconds to wait between health-check polls during the watch loop |
 | `DEBUG_PAUSE_POLL_INTERVAL_SECONDS` | 10 | Faster poll interval while waiting for a debug-review decision — once the URL is surfaced, the user is actively reviewing and the round-trip should feel responsive |
 
-**Insights:** `--insights` and the matching `orca_get_insights` MCP tool are a CLI-side opt-in for a separate insights agent — not surfaced by this supervisor SKILL. If a user mentions insights, point them at the CLI (`orca run … --insights`) and at the `orca_get_insights` tool to read the resulting log.
-
 ### Run-derived thresholds
 
 `max_worker_retries` and `max_hops` are launch-time flags on `orca run` (`--max-retries` / `--max-hops`), **not** workflow YAML fields — the parser ignores top-level YAML keys with those names. The CLI applies defaults of **3** retries and **10** hops unless the user overrode them; MCP-started runs may not expose the effective values back to the supervisor. If you cannot read them from the caller context, fall back to those CLI defaults and note the assumption.

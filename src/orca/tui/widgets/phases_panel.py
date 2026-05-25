@@ -65,18 +65,12 @@ class PhasesPanel(VerticalScroll):
         color: #666666;
         text-style: bold;
     }
-    PhasesPanel #phases-hint {
-        dock: bottom;
-        height: 1;
-        color: #444444;
-    }
     """
 
     def __init__(self) -> None:
         super().__init__(id="phases-panel")
         self._header = Static("WORKERS", id="phases-header")
         self._static = Static(_PLACEHOLDER)
-        self._hint = Static("i  insights", id="phases-hint")
         self._sessions: list[dict[str, Any]] = []
         self._issue_id: str = ""
         self._tick: int = 0
@@ -87,7 +81,6 @@ class PhasesPanel(VerticalScroll):
     def compose(self) -> ComposeResult:
         yield self._header
         yield self._static
-        yield self._hint
 
     def show_phases(self, issue_id: str, sessions: list[dict[str, Any]]) -> None:
         """Display phases for the given issue."""

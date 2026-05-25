@@ -137,8 +137,8 @@ states:
       failed: implementing             # go back to fix conflicts
 
   # Stage 5: Review the full run and write a retrospective.
-  # Uses the `run` template variable to access session logs, insights,
-  # and structured event history. Writes retro.md in the repo root.
+  # Uses the `run` template variable to access session logs and
+  # structured event history. Writes retro.md in the repo root.
   retro:
     worker:
       kind: claude-code

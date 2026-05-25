@@ -153,17 +153,6 @@ def create_mcp_server() -> FastMCP:
         result = await _get_client(root).get_issue(run_id, issue_id)
         return json.dumps(result)
 
-    async def orca_get_insights(root: str, run_id: str) -> str:
-        """Get insights log text for a run.
-
-        Args:
-            root: Absolute path to the target project's repo root.
-            run_id: The run identifier.
-
-        Returns plain text insights content, or empty string if not available.
-        """
-        return await _get_client(root).get_insights(run_id)
-
     async def orca_get_worker_log(root: str, run_id: str, issue_id: str, tail: int = 100) -> str:
         """Get the worker log for a specific issue in a run.
 
@@ -340,7 +329,6 @@ def create_mcp_server() -> FastMCP:
     server.add_tool(orca_list_runs, name="orca_list_runs")
     server.add_tool(orca_get_run, name="orca_get_run")
     server.add_tool(orca_get_issue, name="orca_get_issue")
-    server.add_tool(orca_get_insights, name="orca_get_insights")
     server.add_tool(orca_get_worker_log, name="orca_get_worker_log")
     server.add_tool(orca_retry_issue, name="orca_retry_issue")
     server.add_tool(orca_stop_run, name="orca_stop_run")

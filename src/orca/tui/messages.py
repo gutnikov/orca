@@ -60,21 +60,3 @@ class RetryIssue(Message):
     def __init__(self, issue_id: str) -> None:
         super().__init__()
         self.issue_id = issue_id
-
-
-class InsightsSelected(Message):
-    """Posted when the user highlights the Insights root node."""
-
-    def __init__(self) -> None:
-        super().__init__()
-
-
-class InsightEntrySelected(Message):
-    """Posted when the user highlights a specific insight entry."""
-
-    def __init__(self, title: str, detail: str, remediation: str, severity: str) -> None:
-        super().__init__()
-        self.title = title
-        self.detail = detail
-        self.remediation = remediation
-        self.severity = severity

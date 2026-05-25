@@ -54,9 +54,6 @@ class DaemonClient:
     async def get_issue(self, run_id: str, issue_id: str) -> dict[str, Any]:
         return await self._get_json(f"/api/runs/{run_id}/issues/{issue_id}")
 
-    async def get_insights(self, run_id: str) -> str:
-        return await self._get_text(f"/api/runs/{run_id}/insights")
-
     async def get_worker_log(self, run_id: str, issue_id: str, tail: int = 100) -> str:
         return await self._get_text(f"/api/runs/{run_id}/logs/{issue_id}?tail={tail}")
 

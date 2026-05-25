@@ -296,10 +296,8 @@ async def run(
     branch_name: str,
     config_path: Path,
     base_ref: str | None = None,
-    insights_enabled: bool = False,
     hot_sessions: set[str] | None = None,
     session_log_paths: dict[str, str] | None = None,
-    insights_state: dict[str, str] | None = None,
     workflow: str = "default",
     max_hops: int | None = None,
     max_retries: int | None = None,
@@ -451,10 +449,8 @@ async def run(
         repo_root=repo_root,
         flow_root=flow_root,
         session_sync=session_sync,
-        insights_enabled=insights_enabled,
         hot_sessions=hot_sessions,
         session_log_paths=session_log_paths,
-        insights_state=insights_state,
     )
 
     try:
@@ -485,7 +481,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--base", type=str, default=None, help="Base ref to branch from (default: config or origin/main)"
     )
     parser.add_argument("--headless", action="store_true", help="Run without TUI (headless mode)")
-    parser.add_argument("--insights", action="store_true", help="Enable insights agent for progress monitoring")
     parser.add_argument("--max-hops", type=int, default=10, help="Maximum state transitions per issue (default: 10)")
     parser.add_argument(
         "--max-retries", type=int, default=3, help="Maximum worker crash retries per issue (default: 3)"
@@ -494,7 +489,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    """CLI entry point: orca <task_file> [-b branch] [--base ref] [-w workflow] [--headless] [--insights]."""
+    """CLI entry point: orca <task_file> [-b branch] [--base ref] [-w workflow] [--headless]."""
     parser = build_parser()
     args = parser.parse_args()
 
@@ -550,7 +545,6 @@ def main() -> None:
                 branch_name,
                 config_path,
                 base_ref=base_ref,
-                insights_enabled=args.insights,
                 workflow=workflow,
                 max_hops=args.max_hops,
                 max_retries=args.max_retries,
@@ -562,7 +556,6 @@ def main() -> None:
         # session_log_paths: orchestrator writes log file paths for each worker
         hot_sessions: set[str] = set()
         session_log_paths: dict[str, str] = {}
-        insights_state: dict[str, str] = {}
 
         run_error: BaseException | None = None
 
@@ -575,10 +568,8 @@ def main() -> None:
                         branch_name,
                         config_path,
                         base_ref=base_ref,
-                        insights_enabled=args.insights,
                         hot_sessions=hot_sessions,
                         session_log_paths=session_log_paths,
-                        insights_state=insights_state,
                         workflow=workflow,
                         max_hops=args.max_hops,
                         max_retries=args.max_retries,
@@ -605,10 +596,8 @@ def main() -> None:
             run_dir=run_dir,
             branch_name=branch_name,
             config=config,
-            insights_enabled=args.insights,
             hot_sessions=hot_sessions,
             session_log_paths=session_log_paths,
-            insights_state=insights_state,
         )
         app.run()
 

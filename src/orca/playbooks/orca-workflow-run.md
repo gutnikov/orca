@@ -80,14 +80,13 @@ Available flags (defaults shown):
 | `--max-hops <N>` | 10 | Cap total state transitions per issue. Overrides the CLI default; workflow YAML does not currently set this. |
 | `--max-retries <N>` | 3 | Cap worker failures per issue per state. Overrides the CLI default; workflow YAML does not currently set this. |
 | `--headless` | off | Accepted for compatibility/scripted invocations. Daemon-backed `orca run` already submits the run and returns rather than launching a TUI. |
-| `--insights` | off | Generate an insights log alongside the run (readable via `orca_get_insights`). |
 
 Or via MCP (if invoked through Claude Code / Cursor / etc.):
 ```
 orca_start_run(root="<absolute path>", task_file="<task-file>", workflow="<flow-name>", branch=None, run_id=None)
 ```
 
-The MCP form exposes only the five common arguments (`root`, `task_file`, `workflow`, `branch`, `run_id`). For `--max-hops`, `--max-retries`, and `--insights` you need the CLI form. `--base` is also CLI-only, but the daemon-backed run path currently does not apply it.
+The MCP form exposes only the five common arguments (`root`, `task_file`, `workflow`, `branch`, `run_id`). For `--max-hops` and `--max-retries` you need the CLI form. `--base` is also CLI-only, but the daemon-backed run path currently does not apply it.
 
 `workflow` is optional — omit it to load `.orca/default.yml`. Pass it only when the project has multiple workflows under `.orca/` and you need a specific one.
 
@@ -236,7 +235,6 @@ MCP tool equivalents (when invoked through a coding agent):
 | `orca_list_runs` | `orca runs` | |
 | `orca_get_run` | (no CLI) | Use `compact=true` while polling to save context tokens. |
 | `orca_get_issue` | (no CLI) | Inspect a single issue by id. Useful inside multi-issue runs. |
-| `orca_get_insights` | (no CLI) | Read the insights log when the run was started with `--insights`. |
 | `orca_get_worker_log` | `orca logs <run_id> <issue_id>` | Pass `tail=N` for trailing lines; the CLI's `--tail N` does the same. |
 | `orca_unblock_worker` | `orca unblock <run_id> <issue_id> -m "msg"` | |
 | `orca_retry_issue` | `orca retry <run_id> <issue_id>` | |
