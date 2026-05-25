@@ -7,6 +7,7 @@ restart and modify_restart variants are skipped pending fuller harness wiring
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import subprocess
 from pathlib import Path
 from typing import Any
@@ -223,3 +224,79 @@ async def test_debug_modify_restart_path(tmp_path: Path) -> None:
         "E2E harness wiring TBD — exercises modify_restart + orca_restart_state path; "
         "needs WorktreeManager.reset_to with real git branching."
     )
+
+
+@pytest.mark.asyncio()
+async def test_debug_modify_restart_does_not_deadlock(tmp_path: Path) -> None:
+    """After modify_restart, the run loop must wait (not raise DeadlockError).
+
+    Regression for 0.5.11: the user clicked "Modify prompt + restart" in the
+    web UI and the daemon flipped the run to FAILED status because the
+    orchestrator's deadlock check saw empty _in_flight + no pending effects
+    and bailed out. modify_pending is an external-unblock waiting state —
+    the host calls orca_restart_state which spawns the worker directly.
+    """
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+
+    config = parse_config(SIMPLE_DEBUG_CONFIG)
+    state = State(issues={}, worker_queues={})
+
+    create_event = CreateEvent(issue_id="issue-1", fields={"title": "Test task"}, timestamp=_now())
+    state, initial_effects = reduce(config, state, create_event, _counter(), _now)
+
+    persistence = Persistence(repo, "main")
+    persistence.save(state)
+    branches = BranchMap(repo, "main")
+
+    worker = MockWorker(outcome=WorkerSuccess(result={"outcome": "done"}))
+    workers = {"claude-code": worker}
+
+    orch = Orchestrator(
+        config=config,
+        state=state,
+        root_branch="main",
+        persistence=persistence,
+        branches=branches,
+        workers=workers,
+        generate_id=_counter(),
+        now=_now,
+        worktree_mgr=GitWorktreeManager(repo),
+        repo_root=repo,
+    )
+    orch.debug = True
+
+    fake_snapshot = _make_fake_snapshot()
+    with patch(
+        "orca.orchestrator.snapshot.build_snapshot",
+        new=AsyncMock(return_value=fake_snapshot),
+    ):
+        run_task = asyncio.create_task(orch.run("issue-1", initial_effects))
+
+        for _ in range(100):
+            if orch.is_debug_pending("issue-1"):
+                break
+            await asyncio.sleep(0.1)
+
+        assert orch.is_debug_pending("issue-1"), "Orchestrator never paused for debug review"
+
+        orch.submit_debug_decision("issue-1", "modify_restart", [])
+
+        # The run loop should NOT crash after the modify_restart decision —
+        # it should sit idle waiting for orca_restart_state. Give it 2s to
+        # demonstrate that. Pre-fix, this raised DeadlockError immediately.
+        await asyncio.sleep(2.0)
+        assert not run_task.done(), (
+            "Run task ended after modify_restart — orchestrator should wait for restart_state. "
+            f"Exception: {run_task.exception() if run_task.done() else None}"
+        )
+
+        issue = orch.state.issues["issue-1"]
+        assert issue.modify_pending, "Issue should be in modify_pending state"
+        assert not issue.debug_pending, "debug_pending should be cleared after modify_restart"
+
+        # Cancel the run cleanly so the test exits.
+        run_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await run_task
