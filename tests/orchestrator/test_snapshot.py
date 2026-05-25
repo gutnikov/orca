@@ -222,3 +222,46 @@ def test_diff_file_round_trip_preserves_raw_diff() -> None:
     assert f2.raw_diff == f.raw_diff
     assert f2.additions == 1
     assert f2.deletions == 1
+
+
+def test_build_snapshot_populates_old_and_new_content_for_modified_file(tmp_path: Path) -> None:
+    """Modified files get both old_content (from base) and new_content (from HEAD)."""
+    import subprocess as _sp
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _sp.run(["git", "init", "-q", "-b", "main"], cwd=repo, check=True)
+    _sp.run(["git", "config", "user.email", "t@t"], cwd=repo, check=True)
+    _sp.run(["git", "config", "user.name", "T"], cwd=repo, check=True)
+    (repo / "a.py").write_text("v1\n")
+    _sp.run(["git", "add", "."], cwd=repo, check=True)
+    _sp.run(["git", "commit", "-qm", "c1"], cwd=repo, check=True)
+    base = _sp.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
+    (repo / "a.py").write_text("v1\nv2\n")
+    (repo / "newfile.md").write_text("brand new\n")
+    _sp.run(["git", "add", "."], cwd=repo, check=True)
+    _sp.run(["git", "commit", "-qm", "c2"], cwd=repo, check=True)
+
+    cfg = tmp_path / "flow.yml"
+    cfg.write_text("root_type: t\ntypes:\n  t:\n    initial: a\n    states:\n      a:\n        on: {}\n")
+
+    snapshot = asyncio.run(
+        build_snapshot(
+            worktree_path=repo,
+            base_commit=base,
+            rendered_prompt_path=tmp_path / "missing.md",
+            worker_result={},
+            config_path=cfg,
+            issue_type="t",
+            state_id="a",
+        )
+    )
+    by_path = {f.path: f for f in snapshot.diff_files}
+
+    # Modified file: both sides populated
+    assert by_path["a.py"].old_content == "v1\n"
+    assert by_path["a.py"].new_content == "v1\nv2\n"
+
+    # Added file: new_content populated, old_content empty
+    assert by_path["newfile.md"].old_content == ""
+    assert by_path["newfile.md"].new_content == "brand new\n"
