@@ -5,6 +5,7 @@ import type { ViewMode } from "./types"
 import { DiffRowView } from "./DiffRowView"
 import { rowStyles } from "./diff-viewer-styles"
 import { CommentThread } from "./CommentThread"
+import type { ThreadView } from "./useCommentThreads"
 export type { InlineComment } from "./useDraftComments"
 
 type CommentSide = "old" | "new"
@@ -20,6 +21,10 @@ export type DiffViewOverlay = {
   onEditComment: (index: number, body: string) => void
   onDeleteComment: (index: number) => void
   highlightedCommentIndex: number | null
+  /** Optional: per-comment thread lookup for the conversational UI. */
+  threadFor?: (commentId: string) => ThreadView | undefined
+  /** Optional: post a user reply on a comment thread. */
+  onReply?: (commentId: string, body: string) => Promise<void>
 }
 
 export function DiffView({
@@ -52,6 +57,8 @@ export function DiffView({
         onDraftSave={() => overlay.onSaveDraft(side, line)}
         onDraftCancel={() => overlay.onCloseDraft(side, line)}
         highlightedIndex={overlay.highlightedCommentIndex}
+        threadFor={overlay.threadFor}
+        onReply={overlay.onReply}
       />
     )
   }

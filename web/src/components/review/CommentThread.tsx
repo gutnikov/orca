@@ -5,6 +5,8 @@ import { Pencil, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { CommentComposer } from "./CommentComposer"
+import { CommentThreadView } from "./CommentThreadView"
+import type { ThreadView } from "./useCommentThreads"
 import type { ReviewComment } from "./types"
 
 export function CommentThread({
@@ -17,6 +19,8 @@ export function CommentThread({
   onDraftSave,
   onDraftCancel,
   highlightedIndex,
+  threadFor,
+  onReply,
 }: {
   comments: ReviewComment[]
   globalIndexOf: (c: ReviewComment) => number
@@ -27,6 +31,8 @@ export function CommentThread({
   onDraftSave: () => void
   onDraftCancel: () => void
   highlightedIndex?: number | null
+  threadFor?: (commentId: string) => ThreadView | undefined
+  onReply?: (commentId: string, body: string) => Promise<void>
 }) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [editBody, setEditBody] = useState("")
@@ -95,6 +101,15 @@ export function CommentThread({
                 <div className="prose prose-sm dark:prose-invert max-w-none text-sm px-3 pb-2 pt-0.5 [&_p]:my-1 [&_pre]:my-1 [&_ul]:my-1">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{c.body}</ReactMarkdown>
                 </div>
+                {threadFor && onReply ? (
+                  <div className="px-3 pb-2">
+                    <CommentThreadView
+                      commentId={c.id}
+                      thread={threadFor(c.id)}
+                      onReply={onReply}
+                    />
+                  </div>
+                ) : null}
               </>
             )}
           </div>

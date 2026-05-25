@@ -8,7 +8,9 @@ import { cn } from "@/lib/utils"
 
 import { useIsDark } from "./useIsDark"
 import { PrettyResultView } from "./PrettyResultView"
+import { CommentThreadView } from "./CommentThreadView"
 import type { InlineComment } from "./useDraftComments"
+import type { ThreadView } from "./useCommentThreads"
 
 interface VirtualFileCardProps {
   id: string
@@ -23,6 +25,9 @@ interface VirtualFileCardProps {
   /** Controlled collapsed state. If provided, `onToggleCollapsed` must be too. */
   collapsed?: boolean
   onToggleCollapsed?: () => void
+  /** Optional thread lookup — when provided, a CommentThreadView is rendered below each comment. */
+  threadFor?: (commentId: string) => ThreadView | undefined
+  onReply?: (commentId: string, body: string) => Promise<void>
 }
 
 const LANGUAGE_MAP: Record<VirtualFileCardProps["language"], Language> = {
@@ -110,28 +115,41 @@ function LineComposer({
 function CommentList({
   comments,
   onRemoveComment,
+  threadFor,
+  onReply,
 }: {
   comments: Array<{ comment: InlineComment; globalIdx: number }>
   onRemoveComment: (idx: number) => void
+  threadFor?: (commentId: string) => ThreadView | undefined
+  onReply?: (commentId: string, body: string) => Promise<void>
 }) {
   return (
     <>
       {comments.map(({ comment, globalIdx }) => (
         <div
           key={globalIdx}
-          className="border-l-2 border-primary/60 mx-3 my-2 px-3 py-2 bg-primary/5 rounded flex items-start gap-2"
+          className="border-l-2 border-primary/60 mx-3 my-2 px-3 py-2 bg-primary/5 rounded"
         >
-          <span className="flex-1 text-[13px] text-foreground whitespace-pre-wrap font-sans break-words">
-            {comment.body}
-          </span>
-          <button
-            type="button"
-            onClick={() => onRemoveComment(globalIdx)}
-            className="text-muted-foreground hover:text-destructive shrink-0 cursor-pointer"
-            aria-label="Remove comment"
-          >
-            <X size={14} />
-          </button>
+          <div className="flex items-start gap-2">
+            <span className="flex-1 text-[13px] text-foreground whitespace-pre-wrap font-sans break-words">
+              {comment.body}
+            </span>
+            <button
+              type="button"
+              onClick={() => onRemoveComment(globalIdx)}
+              className="text-muted-foreground hover:text-destructive shrink-0 cursor-pointer"
+              aria-label="Remove comment"
+            >
+              <X size={14} />
+            </button>
+          </div>
+          {threadFor && onReply ? (
+            <CommentThreadView
+              commentId={comment.id}
+              thread={threadFor(comment.id)}
+              onReply={onReply}
+            />
+          ) : null}
         </div>
       ))}
     </>
@@ -149,6 +167,8 @@ export function VirtualFileCard({
   anchorId,
   collapsed: collapsedProp,
   onToggleCollapsed,
+  threadFor,
+  onReply,
 }: VirtualFileCardProps) {
   const isDark = useIsDark()
   const [composingLine, setComposingLine] = useState<number | null>(null)
@@ -275,6 +295,8 @@ export function VirtualFileCard({
                     <CommentList
                       comments={fileLevelComments}
                       onRemoveComment={onRemoveComment}
+                      threadFor={threadFor}
+                      onReply={onReply}
                     />
                   </div>
                 ) : null}
@@ -314,6 +336,8 @@ export function VirtualFileCard({
               <CommentList
                 comments={fileLevelComments}
                 onRemoveComment={onRemoveComment}
+                threadFor={threadFor}
+                onReply={onReply}
               />
             </div>
           ) : null}
@@ -398,6 +422,8 @@ export function VirtualFileCard({
                         <CommentList
                           comments={lineComments}
                           onRemoveComment={onRemoveComment}
+                          threadFor={threadFor}
+                          onReply={onReply}
                         />
                         {isComposing ? (
                           <LineComposer

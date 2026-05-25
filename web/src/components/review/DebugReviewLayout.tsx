@@ -14,6 +14,7 @@ import { type DiffViewOverlay } from "./DiffView";
 import { DiffFileCard } from "./DiffFileCard";
 import { FileTreeSidebar } from "./FileTreeSidebar";
 import { VirtualFileCard } from "./VirtualFileCard";
+import { useCommentThreads, type ThreadView } from "./useCommentThreads";
 import { useDraftComments, type InlineComment } from "./useDraftComments";
 import type { ChangesetFile, FileStatus, ReviewComment } from "./types";
 
@@ -87,6 +88,8 @@ function buildOverlay(
   setOpenDraftKey: (k: string | null) => void,
   draftBody: string,
   setDraftBody: (v: string) => void,
+  threadFor: (commentId: string) => ThreadView | undefined,
+  onReply: (commentId: string, body: string) => Promise<void>,
 ): DiffViewOverlay {
   // Map InlineComment → ReviewComment for the DiffView API
   const reviewComments: ReviewComment[] = comments
@@ -147,6 +150,9 @@ function buildOverlay(
     },
 
     highlightedCommentIndex: null,
+
+    threadFor,
+    onReply,
   };
 }
 
@@ -203,6 +209,7 @@ export function DebugReviewLayout({
   onSubmit,
 }: DebugReviewLayoutProps) {
   const { comments, add, remove, clear } = useDraftComments(runId, issueId);
+  const { threadFor, reply } = useCommentThreads(runId, issueId);
   const [submitting, setSubmitting] = useState(false);
 
   // Free-form, file-agnostic feedback bundled with line comments at submit time.
@@ -229,9 +236,11 @@ export function DebugReviewLayout({
         setOpenDraftKey,
         draftBody,
         setDraftBody,
+        threadFor,
+        reply,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [comments, add, remove, openDraftKey, draftBody],
+    [comments, add, remove, openDraftKey, draftBody, threadFor, reply],
   );
 
   // Result first — that's what the user looks at to decide what to do next.
@@ -441,6 +450,8 @@ export function DebugReviewLayout({
               onRemoveComment={remove}
               collapsed={collapsedIds.has("result.json")}
               onToggleCollapsed={() => toggleCollapsed("result.json")}
+              threadFor={threadFor}
+              onReply={reply}
             />
             <VirtualFileCard
               id="prompt.md"
@@ -453,6 +464,8 @@ export function DebugReviewLayout({
               onRemoveComment={remove}
               collapsed={collapsedIds.has("prompt.md")}
               onToggleCollapsed={() => toggleCollapsed("prompt.md")}
+              threadFor={threadFor}
+              onReply={reply}
             />
             <VirtualFileCard
               id={`flow.yml::${state}`}
@@ -465,6 +478,8 @@ export function DebugReviewLayout({
               onRemoveComment={remove}
               collapsed={collapsedIds.has(`flow.yml::${state}`)}
               onToggleCollapsed={() => toggleCollapsed(`flow.yml::${state}`)}
+              threadFor={threadFor}
+              onReply={reply}
             />
 
             {/* Real diff files */}
