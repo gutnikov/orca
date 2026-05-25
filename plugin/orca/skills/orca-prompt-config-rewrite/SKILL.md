@@ -24,3 +24,10 @@ event to pick the variant, fetch snapshot + comments, read source files,
 compose edits via the `Edit` tool (user reviews inline), validate YAML, and
 finish with the matching call — `orca_restart_state` for `modify_restart`,
 `orca_clear_modify_pending` for `modify_continue`.
+
+Each comment may carry `thread_messages`: a list of `{role, body}` entries
+from the user↔agent dialogue that happened during the review. When present,
+read the WHOLE thread — the final user intent often emerges over multiple
+turns, and the original `body` is just the first message. If
+`thread_messages` is empty or absent, treat the comment as a single message
+(pre-0.7.0 shape).

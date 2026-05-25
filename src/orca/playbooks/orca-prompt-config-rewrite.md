@@ -32,7 +32,14 @@
 
 3. **Fetch the user's comments.** Scan the `event_log` from step 1 in
    reverse for the most recent entry with `type == "debug_modify_request"`.
-   Extract `data.comments` — each comment is `{file, line, body}`.
+   Extract `data.comments` — each comment has shape
+   `{id, file, line, body, thread_messages}` where `thread_messages` is a
+   list of `{role: "user"|"agent", body: str}` entries representing the
+   in-review dialogue. Empty list (or missing field, on pre-0.7.0 daemons)
+   means no agent interaction happened. The original comment `body` is the
+   user's first message; `thread_messages` entries are subsequent turns.
+   Read the WHOLE thread — the final user intent often emerges over
+   multiple turns rather than in the original `body` alone.
 
 3. **Read the source files the comments target.**
    - Comments anchored to `prompt.md` → read `.orca/prompts/<state>.md`. The
