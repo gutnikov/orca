@@ -102,6 +102,7 @@ class MockWorker:
         on_blocked: Any = None,
         on_unblocked: Any = None,
         prompt_text: str | None = None,
+        effort: str | None = None,
     ) -> WorkerOutcome:
         self.call_count += 1
         return self.outcome

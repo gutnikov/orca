@@ -48,6 +48,11 @@ class WorkerDef:
     # When True, `prompt` holds inline Jinja template source.
     # When False (default), `prompt` is a path (relative to flow_root) to a template file.
     prompt_inline: bool = False
+    # Reasoning-effort hint passed to the agent CLI when its kind supports
+    # one (e.g. codex → `--reasoning-effort <effort>`). Silently dropped for
+    # kinds that don't expose an effort flag. Typical values: low / medium /
+    # high / xhigh.
+    effort: str | None = None
 
 
 @dataclass(frozen=True)

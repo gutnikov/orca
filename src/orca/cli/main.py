@@ -74,6 +74,18 @@ def build_parser() -> argparse.ArgumentParser:
     run_parser.add_argument("--run-id", type=str, default=None)
     run_parser.add_argument("--max-hops", type=int, default=10)
     run_parser.add_argument("--max-retries", type=int, default=3)
+    run_parser.add_argument(
+        "--override",
+        action="append",
+        default=None,
+        metavar="STATE.FIELD=VALUE",
+        help=(
+            "Override a worker field for one state at run time. Repeatable. "
+            "FIELD is one of kind / model / effort. Example: "
+            "--override preflight.kind=codex --override preflight.model=gpt-5.5 "
+            "--override preflight.effort=high"
+        ),
+    )
 
     # orca tui
     sub.add_parser("tui", help="Attach TUI to daemon")

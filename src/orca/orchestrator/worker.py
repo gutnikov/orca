@@ -80,6 +80,7 @@ class Worker(Protocol):
         on_blocked: Callable[[str], None] | None = None,
         on_unblocked: Callable[[str], None] | None = None,
         prompt_text: str | None = None,
+        effort: str | None = None,
     ) -> WorkerOutcome: ...
 
 
@@ -91,6 +92,11 @@ class KindConfig:
     prompt_via: str  # "stdin" or "arg"
     subcommand: str | None = None
     default_args: tuple[str, ...] = ()
+    # CLI flag this kind uses for a reasoning-effort hint. None means the
+    # kind doesn't expose one — worker silently drops any configured /
+    # overridden `effort` for that kind instead of passing an unrecognised
+    # flag.
+    effort_flag: str | None = None
 
 
 KIND_REGISTRY: dict[str, KindConfig] = {
@@ -98,18 +104,23 @@ KIND_REGISTRY: dict[str, KindConfig] = {
         bin="claude",
         prompt_via="stdin",
         default_args=("--dangerously-skip-permissions", "--max-turns", "50"),
+        # claude code: effort is implicit in the model choice (opus / sonnet /
+        # haiku), no separate flag.
+        effort_flag=None,
     ),
     "opencode": KindConfig(
         bin="opencode",
         prompt_via="arg",
         subcommand="run",
         default_args=(),
+        effort_flag=None,
     ),
     "codex": KindConfig(
         bin="codex",
         prompt_via="arg",
         subcommand="exec",
         default_args=(),
+        effort_flag="--reasoning-effort",
     ),
 }
 
@@ -151,6 +162,7 @@ class CliAgentWorker:
         on_blocked: Callable[[str], None] | None = None,
         on_unblocked: Callable[[str], None] | None = None,
         prompt_text: str | None = None,
+        effort: str | None = None,
     ) -> WorkerOutcome:
         assert pty_session is not None, "pty_session is required"
 
@@ -204,6 +216,12 @@ class CliAgentWorker:
             cmd_parts.extend(extra_args)
         if model:
             cmd_parts.extend(["--model", model])
+        # Reasoning-effort hint, only if this kind knows the flag. Kinds
+        # without `effort_flag` (e.g. claude-code) silently drop the value
+        # so workflows can declare effort once and have it apply only
+        # where it's meaningful.
+        if effort and self._kind_config.effort_flag:
+            cmd_parts.extend([self._kind_config.effort_flag, effort])
 
         # d. Spawn in tmux session
         await pty_session.spawn(

@@ -67,17 +67,18 @@ class DaemonClient:
         branch: str | None = None,
         run_id: str | None = None,
         debug: bool = False,
+        worker_overrides: dict[str, dict[str, str]] | None = None,
     ) -> dict[str, Any]:
-        return await self._post_json(
-            "/api/runs/start",
-            {
-                "task_file": task_file,
-                "workflow": workflow,
-                "branch": branch,
-                "run_id": run_id,
-                "debug": debug,
-            },
-        )
+        body: dict[str, Any] = {
+            "task_file": task_file,
+            "workflow": workflow,
+            "branch": branch,
+            "run_id": run_id,
+            "debug": debug,
+        }
+        if worker_overrides:
+            body["worker_overrides"] = worker_overrides
+        return await self._post_json("/api/runs/start", body)
 
     async def stop_run(self, run_id: str) -> dict[str, Any]:
         return await self._post_json(f"/api/runs/{run_id}/stop")

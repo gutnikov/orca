@@ -108,6 +108,7 @@ class TestCommandAssembly:
         tmp_path: Path,
         model: str | None = None,
         extra_args: list[str] | None = None,
+        effort: str | None = None,
     ) -> tuple[str, list[str], bytes | None]:
         """Run worker with a mock pty that captures spawn args. Returns (cmd, args, stdin_data)."""
         effect = _make_effect()
@@ -126,6 +127,7 @@ class TestCommandAssembly:
             pty_session=pty,
             model=model,
             extra_args=extra_args,
+            effort=effort,
         )
         call_args = pty.spawn.call_args
         return call_args[0][0], list(call_args[0][1]), call_args[1].get("stdin_data")
@@ -179,6 +181,22 @@ class TestCommandAssembly:
         kind_config = KIND_REGISTRY["claude-code"]
         cmd, args, stdin_data = await self._spawn_and_capture(kind_config, tmp_path, model=None)
         assert "--model" not in args
+
+    async def test_codex_appends_reasoning_effort_flag(self, tmp_path: Path) -> None:
+        """codex's kind has effort_flag=--reasoning-effort; the value flows through."""
+        kind_config = KIND_REGISTRY["codex"]
+        _cmd, args, _stdin = await self._spawn_and_capture(kind_config, tmp_path, effort="high")
+        assert "--reasoning-effort" in args
+        # The value immediately follows the flag.
+        idx = args.index("--reasoning-effort")
+        assert args[idx + 1] == "high"
+
+    async def test_claude_code_drops_effort_silently(self, tmp_path: Path) -> None:
+        """claude-code has effort_flag=None — passing effort should be a no-op."""
+        kind_config = KIND_REGISTRY["claude-code"]
+        _cmd, args, _stdin = await self._spawn_and_capture(kind_config, tmp_path, effort="high")
+        assert "--reasoning-effort" not in args
+        assert "high" not in args
 
 
 @pytest.mark.asyncio()

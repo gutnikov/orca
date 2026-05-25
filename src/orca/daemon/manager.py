@@ -180,6 +180,7 @@ class RunManager:
         *,
         insights: bool = False,
         debug: bool = False,
+        worker_overrides: dict[str, dict[str, str]] | None = None,
     ) -> str:
         """Start a new orchestrator run. Returns run_id.
 
@@ -190,6 +191,29 @@ class RunManager:
         config_path = resolve_config_path(self.repo_root, workflow)
         config = parse_config(config_path.read_text())
         flow_root = config_path.parent
+
+        # Validate worker overrides: every state name must exist in the
+        # workflow's state graph, and any `kind` value must be a registered
+        # CLI kind. We don't validate `model`/`effort` strings — the agent
+        # CLI itself will reject unknown values at spawn time.
+        if worker_overrides:
+            known_states: set[str] = set()
+            for type_def in config.types.values():
+                known_states.update(type_def.states.keys())
+            for state_name, fields in worker_overrides.items():
+                if state_name not in known_states:
+                    msg = f"override references unknown state {state_name!r}"
+                    raise ValueError(msg)
+                if "kind" in fields and fields["kind"] not in KIND_REGISTRY:
+                    msg = (
+                        f"override for state {state_name!r}: unknown kind {fields['kind']!r} "
+                        f"(known: {sorted(KIND_REGISTRY)})"
+                    )
+                    raise ValueError(msg)
+                for key in fields:
+                    if key not in ("kind", "model", "effort"):
+                        msg = f"override for state {state_name!r}: unknown field {key!r} (allowed: kind, model, effort)"
+                        raise ValueError(msg)
 
         # Derive effective_workflow name (short name for run directory)
         if workflow and ("/" in workflow or workflow.endswith(".yml")):
@@ -293,6 +317,7 @@ class RunManager:
             flow_root=flow_root,
             session_sync=session_sync,
             insights_enabled=insights,
+            worker_overrides=worker_overrides,
         )
         orchestrator.debug = debug
 
