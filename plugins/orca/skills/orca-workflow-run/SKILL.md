@@ -23,6 +23,7 @@ You are not expected to understand what each state in the workflow means. Trust 
 | Name | Value | Description |
 |---|---|---|
 | `POLL_INTERVAL_SECONDS` | 45 | Seconds to wait between health-check polls during the watch loop |
+| `DEBUG_PAUSE_POLL_INTERVAL_SECONDS` | 10 | Faster poll interval while waiting for a debug-review decision — once the URL is surfaced, the user is actively reviewing and the round-trip should feel responsive |
 
 **Insights:** `--insights` and the matching `orca_get_insights` MCP tool are a CLI-side opt-in for a separate insights agent — not surfaced by this supervisor SKILL. If a user mentions insights, point them at the CLI (`orca run … --insights`) and at the `orca_get_insights` tool to read the resulting log.
 
@@ -80,7 +81,7 @@ If multiple runs exist (shouldn't happen under serial execution), handle in prio
 
 A run is `running`. Enter a polling loop. Each iteration:
 
-1. Sleep `POLL_INTERVAL_SECONDS` (skip the sleep on the very first poll).
+1. Sleep `POLL_INTERVAL_SECONDS` — **except** when you've already surfaced a debug-review URL on a previous poll and the pause is still unresolved. In that case sleep `DEBUG_PAUSE_POLL_INTERVAL_SECONDS` (10 s) so the round-trip after the user clicks an action feels responsive. Skip the sleep on the very first poll.
 2. Call `orca_get_run(root, run_id, compact=true)` and `orca_get_worker_log(root, run_id, issue_id, tail=50)`.
 3. Print a brief 1-line status update including the current state name as reported by orca, e.g., `[poll 3] state=<state-name> — worker active (hop 4, failures 0)`.
 4. Assess health and decide.
