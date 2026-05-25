@@ -144,7 +144,16 @@ def test_debug_decision_modify_continue_advances_state_and_marks_modify_pending(
     issue.debug_pending = True
     issue.event_log.append(EventLogEntry(timestamp="t0", type="worker_result", data={"outcome": "done"}))
 
-    comments = [InlineComment(file="prompt.md", line=None, body="add a step about retries")]
+    comments = [
+        InlineComment(
+            id="c1",
+            file="prompt.md",
+            line=None,
+            body="add a step about retries",
+            created_at="t1",
+            updated_at="t1",
+        )
+    ]
     event = DebugDecisionEvent(issue_id="i1", action="modify_continue", comments=comments, timestamp="t1")
     new_state, _ = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
 
@@ -181,7 +190,16 @@ def test_debug_decision_modify_restart_marks_modify_pending_and_logs_request() -
     state = _make_state(worker_active=False)
     state.issues["i1"].debug_pending = True
 
-    comments = [InlineComment(file="prompt.md", line=None, body="use Result type")]
+    comments = [
+        InlineComment(
+            id="c1",
+            file="prompt.md",
+            line=None,
+            body="use Result type",
+            created_at="t1",
+            updated_at="t1",
+        )
+    ]
     event = DebugDecisionEvent(issue_id="i1", action="modify_restart", comments=comments, timestamp="t1")
     new_state, _ = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")
 
@@ -208,9 +226,30 @@ def test_modify_restart_preserves_overall_feedback_and_line_comments() -> None:
     state.issues["i1"].debug_pending = True
 
     comments = [
-        InlineComment(file="prompt.md", line=12, body="use Result type"),
-        InlineComment(file="result.json", line=3, body="this enum should also include 'partial'"),
-        InlineComment(file="__overall__", line=None, body="prefer concise prompts; trim the recap block"),
+        InlineComment(
+            id="c1",
+            file="prompt.md",
+            line=12,
+            body="use Result type",
+            created_at="t1",
+            updated_at="t1",
+        ),
+        InlineComment(
+            id="c2",
+            file="result.json",
+            line=3,
+            body="this enum should also include 'partial'",
+            created_at="t1",
+            updated_at="t1",
+        ),
+        InlineComment(
+            id="c3",
+            file="__overall__",
+            line=None,
+            body="prefer concise prompts; trim the recap block",
+            created_at="t1",
+            updated_at="t1",
+        ),
     ]
     event = DebugDecisionEvent(issue_id="i1", action="modify_restart", comments=comments, timestamp="t1")
     new_state, _ = reduce(config, state, event, generate_id=lambda: "id", now=lambda: "now")

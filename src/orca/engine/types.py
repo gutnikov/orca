@@ -140,6 +140,8 @@ class Issue:
     state_base_commit: str | None = None
     debug_pending: bool = False
     modify_pending: bool = False
+    inline_comments: list[InlineComment] = field(default_factory=list)
+    comment_threads: list[CommentThread] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -156,6 +158,8 @@ class Issue:
             "state_base_commit": self.state_base_commit,
             "debug_pending": self.debug_pending,
             "modify_pending": self.modify_pending,
+            "inline_comments": [c.to_dict() for c in self.inline_comments],
+            "comment_threads": [t.to_dict() for t in self.comment_threads],
         }
 
     @classmethod
@@ -174,6 +178,8 @@ class Issue:
             state_base_commit=data.get("state_base_commit"),
             debug_pending=data.get("debug_pending", False),
             modify_pending=data.get("modify_pending", False),
+            inline_comments=[InlineComment.from_dict(c) for c in data.get("inline_comments", [])],
+            comment_threads=[CommentThread.from_dict(t) for t in data.get("comment_threads", [])],
         )
 
 
@@ -263,6 +269,56 @@ class DebugModifyRequestEvent:
     timestamp: str
 
 
+@dataclass(frozen=True)
+class InlineCommentSavedEvent:
+    """User saved (created or edited) an inline review comment."""
+
+    issue_id: str
+    comment_id: str
+    file: str
+    line: int | None
+    body: str
+    timestamp: str
+
+
+@dataclass(frozen=True)
+class InlineCommentDeletedEvent:
+    """User deleted an inline review comment (cascade-deletes its thread)."""
+
+    issue_id: str
+    comment_id: str
+    timestamp: str
+
+
+@dataclass(frozen=True)
+class CommentThreadMessageAddedEvent:
+    """A user-reply or agent-reply appended to a comment's thread.
+
+    Lazily creates the CommentThread on the first message. Agent messages bump
+    `agent_last_reviewed_at`; user messages don't.
+    """
+
+    issue_id: str
+    comment_id: str
+    role: str  # "user" | "agent"
+    message_id: str
+    body: str
+    timestamp: str
+
+
+@dataclass(frozen=True)
+class CommentThreadReviewedEvent:
+    """Agent reviewed the comment and chose not to engage. Bumps
+    `agent_last_reviewed_at` without appending a message. Lazily creates an
+    empty thread if none exists yet.
+    """
+
+    issue_id: str
+    comment_id: str
+    timestamp: str
+    reason: str
+
+
 Event = (
     CreateEvent
     | AdvanceEvent
@@ -273,6 +329,10 @@ Event = (
     | DebugReviewRequiredEvent
     | DebugDecisionEvent
     | DebugModifyRequestEvent
+    | InlineCommentSavedEvent
+    | InlineCommentDeletedEvent
+    | CommentThreadMessageAddedEvent
+    | CommentThreadReviewedEvent
 )
 
 
@@ -302,17 +362,87 @@ Effect = DispatchWorkerEffect | ErrorEffect
 
 
 @dataclass
+class ThreadMessage:
+    id: str
+    role: str  # "user" | "agent"
+    body: str
+    timestamp: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"id": self.id, "role": self.role, "body": self.body, "timestamp": self.timestamp}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ThreadMessage:
+        return cls(
+            id=data["id"],
+            role=data["role"],
+            body=data["body"],
+            timestamp=data["timestamp"],
+        )
+
+
+@dataclass
+class CommentThread:
+    id: str
+    comment_id: str
+    messages: list[ThreadMessage] = field(default_factory=list)
+    agent_last_reviewed_at: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "comment_id": self.comment_id,
+            "messages": [m.to_dict() for m in self.messages],
+            "agent_last_reviewed_at": self.agent_last_reviewed_at,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> CommentThread:
+        return cls(
+            id=data["id"],
+            comment_id=data["comment_id"],
+            messages=[ThreadMessage.from_dict(m) for m in data.get("messages", [])],
+            agent_last_reviewed_at=data.get("agent_last_reviewed_at"),
+        )
+
+
+@dataclass
 class InlineComment:
+    """A user-authored review comment, persisted on the issue during debug pause.
+
+    Persisted on save (not just on decision submit) so the supervising agent
+    can poll for new comments and engage with them in-place.
+    """
+
+    id: str
     file: str
     line: int | None
     body: str
+    created_at: str
+    updated_at: str
 
     def to_dict(self) -> dict[str, Any]:
-        return {"file": self.file, "line": self.line, "body": self.body}
+        return {
+            "id": self.id,
+            "file": self.file,
+            "line": self.line,
+            "body": self.body,
+            "created_at": self.created_at,
+            "updated_at": self.updated_at,
+        }
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> InlineComment:
-        return cls(file=data["file"], line=data.get("line"), body=data["body"])
+        # Back-compat: legacy decision-event payloads (pre-Task 3) only had {file, line, body}.
+        # Backfill id/created_at/updated_at from data or sensible defaults.
+        return cls(
+            id=data.get("id", ""),
+            file=data["file"],
+            line=data.get("line"),
+            body=data["body"],
+            created_at=data.get("created_at", ""),
+            updated_at=data.get("updated_at", ""),
+        )
 
 
 @dataclass
