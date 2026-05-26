@@ -309,10 +309,30 @@ async def _get_debug_review(request: Request) -> JSONResponse:
     manager: RunManager = request.app.state.manager
     run_id: str = request.path_params["run_id"]
     issue_id: str = request.path_params["issue_id"]
-    snapshot = manager.get_debug_review(run_id, issue_id)
+    attempt_raw = request.query_params.get("attempt")
+    attempt: int | None
+    if attempt_raw is None:
+        attempt = None
+    else:
+        try:
+            attempt = int(attempt_raw)
+        except ValueError:
+            return JSONResponse({"error": "invalid attempt"}, status_code=400)
+    snapshot = manager.get_debug_review(run_id, issue_id, attempt=attempt)
     if snapshot is None:
-        return JSONResponse({"error": "not_pending"}, status_code=404)
+        # Preserve "not_pending" for the live-mode contract (orca-prompt-config-rewrite
+        # playbook branches on it). Use "not_found" only for past-mode misses.
+        error = "not_found" if attempt is not None else "not_pending"
+        return JSONResponse({"error": error}, status_code=404)
     return JSONResponse(snapshot)
+
+
+async def _get_debug_attempts(request: Request) -> JSONResponse:
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    issue_id: str = request.path_params["issue_id"]
+    attempts = manager.list_debug_attempts(run_id, issue_id)
+    return JSONResponse(attempts)
 
 
 async def _post_debug_decide(request: Request) -> JSONResponse:
@@ -460,6 +480,7 @@ def _api_routes() -> list[Route]:
         Route("/api/runs", _list_runs, methods=["GET"]),
         Route("/api/runs/start", _start_run, methods=["POST"]),
         Route("/api/runs/{run_id:path}/issues/{issue_id}/debug", _get_debug_review, methods=["GET"]),
+        Route("/api/runs/{run_id:path}/issues/{issue_id}/debug/attempts", _get_debug_attempts, methods=["GET"]),
         Route("/api/runs/{run_id:path}/issues/{issue_id}/debug/decide", _post_debug_decide, methods=["POST"]),
         Route("/api/runs/{run_id:path}/issues/{issue_id}/debug/restart", _post_restart_state, methods=["POST"]),
         Route(

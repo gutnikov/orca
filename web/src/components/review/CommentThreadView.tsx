@@ -9,10 +9,12 @@ export function CommentThreadView({
   commentId,
   thread,
   onReply,
+  readOnly = false,
 }: {
   commentId: string
   thread: ThreadView | undefined
   onReply: (commentId: string, body: string) => Promise<void>
+  readOnly?: boolean
 }) {
   const [composer, setComposer] = useState("")
   const [composerOpen, setComposerOpen] = useState(false)
@@ -47,7 +49,7 @@ export function CommentThreadView({
           <span>Orca is reviewing…</span>
         </div>
       ) : null}
-      {composerOpen ? (
+      {!readOnly && (composerOpen ? (
         <div className="space-y-1.5">
           <textarea
             autoFocus
@@ -91,7 +93,7 @@ export function CommentThreadView({
         >
           Reply…
         </button>
-      )}
+      ))}
     </div>
   )
 }

@@ -10,11 +10,17 @@
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as RunsRunIdRouteImport } from './routes/runs.$runId'
 import { Route as DebugRunIdIssueIdRouteImport } from './routes/debug.$runId.$issueId'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RunsRunIdRoute = RunsRunIdRouteImport.update({
+  id: '/runs/$runId',
+  path: '/runs/$runId',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DebugRunIdIssueIdRoute = DebugRunIdIssueIdRouteImport.update({
@@ -25,27 +31,31 @@ const DebugRunIdIssueIdRoute = DebugRunIdIssueIdRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/runs/$runId': typeof RunsRunIdRoute
   '/debug/$runId/$issueId': typeof DebugRunIdIssueIdRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/runs/$runId': typeof RunsRunIdRoute
   '/debug/$runId/$issueId': typeof DebugRunIdIssueIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/runs/$runId': typeof RunsRunIdRoute
   '/debug/$runId/$issueId': typeof DebugRunIdIssueIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/debug/$runId/$issueId'
+  fullPaths: '/' | '/runs/$runId' | '/debug/$runId/$issueId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/debug/$runId/$issueId'
-  id: '__root__' | '/' | '/debug/$runId/$issueId'
+  to: '/' | '/runs/$runId' | '/debug/$runId/$issueId'
+  id: '__root__' | '/' | '/runs/$runId' | '/debug/$runId/$issueId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  RunsRunIdRoute: typeof RunsRunIdRoute
   DebugRunIdIssueIdRoute: typeof DebugRunIdIssueIdRoute
 }
 
@@ -56,6 +66,13 @@ declare module '@tanstack/react-router' {
       path: '/'
       fullPath: '/'
       preLoaderRoute: typeof IndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/runs/$runId': {
+      id: '/runs/$runId'
+      path: '/runs/$runId'
+      fullPath: '/runs/$runId'
+      preLoaderRoute: typeof RunsRunIdRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/debug/$runId/$issueId': {
@@ -70,6 +87,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  RunsRunIdRoute: RunsRunIdRoute,
   DebugRunIdIssueIdRoute: DebugRunIdIssueIdRoute,
 }
 export const routeTree = rootRouteImport

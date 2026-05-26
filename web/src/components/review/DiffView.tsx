@@ -25,6 +25,8 @@ export type DiffViewOverlay = {
   threadFor?: (commentId: string) => ThreadView | undefined
   /** Optional: post a user reply on a comment thread. */
   onReply?: (commentId: string, body: string) => Promise<void>
+  /** When true, suppress all mutation affordances (edit/delete, reply, draft composer). */
+  readOnly?: boolean
 }
 
 export function DiffView({
@@ -59,6 +61,7 @@ export function DiffView({
         highlightedIndex={overlay.highlightedCommentIndex}
         threadFor={overlay.threadFor}
         onReply={overlay.onReply}
+        readOnly={overlay.readOnly}
       />
     )
   }
@@ -78,7 +81,7 @@ export function DiffView({
               <DiffRowView
                 row={r.row}
                 language={file.language}
-                onAddComment={() => overlay.onOpenDraft(side, line)}
+                onAddComment={overlay.readOnly ? undefined : () => overlay.onOpenDraft(side, line)}
               />
               {renderOverlay(side, line)}
             </div>
@@ -103,7 +106,7 @@ export function DiffView({
                 row={left}
                 language={file.language}
                 pairedWith={r.pair.right ?? undefined}
-                onAddComment={() => overlay.onOpenDraft("old", line)}
+                onAddComment={overlay.readOnly ? undefined : () => overlay.onOpenDraft("old", line)}
               />
               {renderOverlay("old", line)}
             </div>
@@ -122,7 +125,7 @@ export function DiffView({
                 row={right}
                 language={file.language}
                 pairedWith={r.pair.left ?? undefined}
-                onAddComment={() => overlay.onOpenDraft("new", line)}
+                onAddComment={overlay.readOnly ? undefined : () => overlay.onOpenDraft("new", line)}
               />
               {renderOverlay("new", line)}
             </div>
