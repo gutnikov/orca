@@ -57,7 +57,7 @@ interface ActionButtonProps {
 }
 
 export function ActionButton({
-  defaultAction = "modify_restart",
+  defaultAction = "accept",
   onSubmit,
   disabled,
 }: ActionButtonProps) {

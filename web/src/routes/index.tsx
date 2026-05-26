@@ -142,51 +142,82 @@ function HomePage() {
             </div>
           ) : (
             <ul className="space-y-2">
-              {runs.map((run) => (
-                <li key={run.run_id}>
-                  <div className="rounded-lg border border-border bg-card px-4 py-3 flex items-center gap-3">
-                    <div className="flex-1 min-w-0">
-                      <div className="font-mono text-sm font-semibold truncate">
-                        {run.run_id}
-                      </div>
-                      <div className="text-[12px] text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-                        <span>
-                          status{" "}
-                          <span
-                            className={
-                              run.status === "running"
-                                ? "text-foreground"
-                                : run.status === "completed"
-                                  ? "text-[oklch(0.65_0.18_150)]"
-                                  : "text-muted-foreground"
-                            }
-                          >
-                            {run.status}
-                          </span>
-                        </span>
-                        <span>
-                          {run.terminal_count}/{run.issue_count} done
-                        </span>
-                        {run.debug ? (
-                          <span className="text-[#d4a064]">debug mode</span>
-                        ) : null}
-                        {(run.debug_reviews?.length ?? 0) > 0 ? (
-                          <span className="text-[#d4a064] font-semibold">
-                            ⏸ {run.debug_reviews?.length} paused
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-                    <Link
-                      to="/runs/$runId"
-                      params={{ runId: run.run_id }}
-                      className="text-xs underline opacity-70 hover:opacity-100 shrink-0"
+              {runs.map((run) => {
+                const activeReviews = run.debug_reviews ?? []
+                return (
+                  <li key={run.run_id}>
+                    <div
+                      className={
+                        activeReviews.length > 0
+                          ? "rounded-lg border-2 border-[#d4a064]/45 bg-[#d4a064]/5 px-4 py-3 flex items-center gap-3"
+                          : "rounded-lg border border-border bg-card px-4 py-3 flex items-center gap-3"
+                      }
                     >
-                      view past reviews →
-                    </Link>
-                  </div>
-                </li>
-              ))}
+                      <div className="flex-1 min-w-0">
+                        <div className="font-mono text-sm font-semibold truncate">
+                          {run.run_id}
+                        </div>
+                        <div className="text-[12px] text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                          <span>
+                            status{" "}
+                            <span
+                              className={
+                                run.status === "running"
+                                  ? "text-foreground"
+                                  : run.status === "completed"
+                                    ? "text-[oklch(0.65_0.18_150)]"
+                                    : "text-muted-foreground"
+                              }
+                            >
+                              {run.status}
+                            </span>
+                          </span>
+                          <span>
+                            {run.terminal_count}/{run.issue_count} done
+                          </span>
+                          {run.debug ? (
+                            <span className="text-[#d4a064]">debug mode</span>
+                          ) : null}
+                          {activeReviews.length > 0 ? (
+                            <span className="inline-flex items-center gap-1.5 text-[#d4a064] font-semibold">
+                              <Pause size={12} />
+                              awaiting review
+                            </span>
+                          ) : null}
+                        </div>
+                        {activeReviews.length > 0 ? (
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {activeReviews.map((review) => {
+                              let pathname = ""
+                              try {
+                                pathname = new URL(review.url).pathname
+                              } catch {
+                                pathname = `/debug/${run.run_id}/${review.issue_id}`
+                              }
+                              return (
+                                <Link
+                                  key={review.issue_id}
+                                  to={pathname}
+                                  className="inline-flex items-center rounded-md border border-[#d4a064]/35 bg-[#d4a064]/10 px-2 py-0.5 text-[11px] font-mono text-[#d4a064] hover:bg-[#d4a064]/15"
+                                >
+                                  {review.issue_id} · {review.state}
+                                </Link>
+                              )
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+                      <Link
+                        to="/runs/$runId"
+                        params={{ runId: run.run_id }}
+                        className="text-xs underline opacity-70 hover:opacity-100 shrink-0"
+                      >
+                        view past reviews →
+                      </Link>
+                    </div>
+                  </li>
+                )
+              })}
             </ul>
           )}
         </section>
