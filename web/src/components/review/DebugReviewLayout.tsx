@@ -485,7 +485,7 @@ export function DebugReviewLayout({
 
         {/* Two-pane layout */}
         <div className="flex gap-5 items-start">
-          <div className="w-[260px] shrink-0 sticky top-6 max-h-[calc(100vh-3rem)] overflow-hidden">
+          <div className="w-[260px] shrink-0 sticky top-6 h-[calc(100vh-3rem)] overflow-hidden">
             <FileTreeSidebar
               virtualFiles={virtualFiles}
               realFiles={realFiles}

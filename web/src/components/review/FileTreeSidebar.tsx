@@ -51,7 +51,7 @@ export function FileTreeSidebar({
   )
 
   return (
-    <aside className="w-full h-full flex flex-col gap-3 overflow-hidden">
+    <aside className="w-full h-full min-h-0 flex flex-col gap-3 overflow-hidden">
       {/* Filter input */}
       <div className="relative shrink-0">
         <Search
@@ -72,7 +72,7 @@ export function FileTreeSidebar({
         />
       </div>
 
-      <div className="flex-1 overflow-y-auto pr-1 space-y-3">
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1 space-y-3">
         {/* Virtual review surfaces */}
         {filteredVirtual.length > 0 ? (
           <div>
