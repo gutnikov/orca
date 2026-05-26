@@ -873,20 +873,77 @@ class RunManager:
             raise ValueError(f"Run {run_id!r} not found")
         return run_info.orchestrator.list_inline_comments_with_threads(issue_id)
 
-    def get_debug_review(self, run_id: str, issue_id: str) -> dict[str, Any] | None:
-        """Return the latest DebugReviewSnapshot as a dict, or None if not pending."""
+    def get_debug_review(
+        self,
+        run_id: str,
+        issue_id: str,
+        *,
+        attempt: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the debug-review snapshot as a dict, or None.
+
+        When `attempt` is None: returns the active pause's snapshot if
+        `is_debug_pending(issue_id)`, else None. (Original behavior.)
+
+        When `attempt` is an int: bypasses the pending guard. Walks the
+        issue's event_log for the Nth debug_review_required event, finds
+        the next debug_decision, projects its persisted comments back into
+        the live wire shape, and returns the snapshot dict EXTENDED with a
+        `past_review` field. Returns None if the attempt index is out of
+        range.
+        """
         run_info = self._runs.get(run_id)
         if run_info is None or run_info.orchestrator is None:
-            return None
-        if not run_info.orchestrator.is_debug_pending(issue_id):
             return None
         issue = run_info.orchestrator.state.issues.get(issue_id)
         if issue is None:
             return None
-        for entry in reversed(issue.event_log):
+
+        if attempt is None:
+            if not run_info.orchestrator.is_debug_pending(issue_id):
+                return None
+            for entry in reversed(issue.event_log):
+                if entry.type == "debug_review_required":
+                    return entry.data.get("snapshot")
+            return None
+
+        # Past-attempt branch: bypass debug_pending guard.
+        if attempt < 0:
+            return None
+        attempts = _pair_debug_attempts(issue.event_log, drop_pending_tail=False)
+        if attempt >= len(attempts):
+            return None
+        target = attempts[attempt]
+
+        # Find the matching snapshot: it's the (attempt+1)th debug_review_required.
+        snapshot: dict[str, Any] | None = None
+        decision_comments: list[dict[str, Any]] = []
+        seen = -1
+        for entry in issue.event_log:
             if entry.type == "debug_review_required":
-                return entry.data.get("snapshot")
-        return None
+                seen += 1
+                if seen == attempt:
+                    snapshot = entry.data.get("snapshot")
+            elif entry.type == "debug_decision" and seen == attempt and snapshot is not None:
+                decision_comments = entry.data.get("comments", [])
+                break
+        if snapshot is None:
+            return None
+
+        inline_comments, comment_threads = _project_past_comments(decision_comments)
+        return {
+            **snapshot,
+            "past_review": {
+                "attempt": target["attempt"],
+                "state": target["state"],
+                "state_local_index": target["state_local_index"],
+                "paused_at": target["paused_at"],
+                "decision_action": target["decision"],
+                "decided_at": target["decided_at"],
+                "inline_comments": inline_comments,
+                "comment_threads": comment_threads,
+            },
+        }
 
     def list_debug_attempts(self, run_id: str, issue_id: str) -> list[dict[str, Any]]:
         """Return the list of past debug-review attempts for this issue.

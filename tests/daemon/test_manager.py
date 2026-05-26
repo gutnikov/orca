@@ -694,3 +694,116 @@ class TestListDebugAttempts:
         out = mgr.list_debug_attempts("r1", "i1")
         assert len(out) == 1
         assert out[0]["decision"] is None
+
+
+class TestGetDebugReviewWithAttempt:
+    def _setup(self, mgr: RunManager, *, debug_pending: bool, event_log: list[EventLogEntry]) -> None:
+        issue = MagicMock()
+        issue.debug_pending = debug_pending
+        issue.event_log = event_log
+        run_info = MagicMock()
+        run_info.orchestrator = MagicMock()
+        run_info.orchestrator.state.issues = {"i1": issue}
+        run_info.orchestrator.is_debug_pending = lambda x: debug_pending and x == "i1"
+        mgr._runs["r1"] = run_info
+
+    def test_attempt_none_preserves_old_behavior(self, tmp_path: Path) -> None:
+        mgr = RunManager(tmp_path)
+        self._setup(
+            mgr,
+            debug_pending=False,  # not pending → old behavior returns None
+            event_log=[
+                _entry("t1", "debug_review_required", {"snapshot": {"base_commit": "abc"}}),
+                _entry("t2", "debug_decision", {"action": "accept", "comments": []}),
+            ],
+        )
+        assert mgr.get_debug_review("r1", "i1", attempt=None) is None
+
+    def test_attempt_int_bypasses_pending_guard(self, tmp_path: Path) -> None:
+        mgr = RunManager(tmp_path)
+        self._setup(
+            mgr,
+            debug_pending=False,
+            event_log=[
+                _entry("t1", "created", {"state": "planning"}),
+                _entry("t2", "debug_review_required", {"snapshot": {"base_commit": "abc"}}),
+                _entry(
+                    "t3",
+                    "debug_decision",
+                    {
+                        "action": "accept",
+                        "comments": [{"id": "c1", "file": "x.py", "line": 1, "body": "ok", "thread_messages": []}],
+                    },
+                ),
+            ],
+        )
+        result = mgr.get_debug_review("r1", "i1", attempt=0)
+        assert result is not None
+        assert result["base_commit"] == "abc"  # snapshot fields at top level
+        assert "past_review" in result
+        pr = result["past_review"]
+        assert pr["attempt"] == 0
+        assert pr["state"] == "planning"
+        assert pr["state_local_index"] == 1
+        assert pr["decision_action"] == "accept"
+        assert pr["decided_at"] == "t3"
+        assert pr["inline_comments"] == [{"id": "c1", "file": "x.py", "line": 1, "body": "ok"}]
+        assert pr["comment_threads"] == []
+
+    def test_attempt_out_of_range_returns_none(self, tmp_path: Path) -> None:
+        mgr = RunManager(tmp_path)
+        self._setup(
+            mgr,
+            debug_pending=False,
+            event_log=[
+                _entry("t1", "debug_review_required", {"snapshot": {}}),
+            ],
+        )
+        assert mgr.get_debug_review("r1", "i1", attempt=5) is None
+        assert mgr.get_debug_review("r1", "i1", attempt=-1) is None
+
+    def test_undecided_pause_returns_null_decision(self, tmp_path: Path) -> None:
+        mgr = RunManager(tmp_path)
+        self._setup(
+            mgr,
+            debug_pending=False,
+            event_log=[
+                _entry("t1", "created", {"state": "planning"}),
+                _entry("t2", "debug_review_required", {"snapshot": {"base_commit": "x"}}),
+            ],
+        )
+        result = mgr.get_debug_review("r1", "i1", attempt=0)
+        assert result is not None
+        assert result["past_review"]["decision_action"] is None
+        assert result["past_review"]["decided_at"] is None
+        assert result["past_review"]["inline_comments"] == []
+
+    def test_thread_messages_projected(self, tmp_path: Path) -> None:
+        mgr = RunManager(tmp_path)
+        self._setup(
+            mgr,
+            debug_pending=False,
+            event_log=[
+                _entry("t1", "created", {"state": "planning"}),
+                _entry("t2", "debug_review_required", {"snapshot": {}}),
+                _entry(
+                    "t3",
+                    "debug_decision",
+                    {
+                        "action": "modify_restart",
+                        "comments": [
+                            {
+                                "id": "c1",
+                                "file": "x.py",
+                                "line": 1,
+                                "body": "fix",
+                                "thread_messages": [{"role": "agent", "body": "ack"}],
+                            }
+                        ],
+                    },
+                ),
+            ],
+        )
+        result = mgr.get_debug_review("r1", "i1", attempt=0)
+        assert len(result["past_review"]["comment_threads"]) == 1
+        assert result["past_review"]["comment_threads"][0]["messages"][0]["role"] == "agent"
