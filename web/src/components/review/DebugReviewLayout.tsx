@@ -117,6 +117,7 @@ function buildOverlay(
   setDraftBody: (v: string) => void,
   threadFor: (commentId: string) => ThreadView | undefined,
   onReply: (commentId: string, body: string) => Promise<void>,
+  readOnly: boolean,
 ): DiffViewOverlay {
   // Map InlineComment → ReviewComment for the DiffView API
   const reviewComments: ReviewComment[] = comments
@@ -180,6 +181,7 @@ function buildOverlay(
 
     threadFor,
     onReply,
+    readOnly,
   };
 }
 
@@ -321,9 +323,10 @@ export function DebugReviewLayout({
         setDraftBody,
         threadFor,
         reply,
+        readOnly,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [comments, add, remove, openDraftKey, draftBody, threadFor, reply],
+    [comments, add, remove, openDraftKey, draftBody, threadFor, reply, readOnly],
   );
 
   // Result first — that's what the user looks at to decide what to do next.
@@ -564,6 +567,7 @@ export function DebugReviewLayout({
               onToggleCollapsed={() => toggleCollapsed("result.json")}
               threadFor={threadFor}
               onReply={reply}
+              readOnly={readOnly}
             />
             <VirtualFileCard
               id="prompt.md"
@@ -578,6 +582,7 @@ export function DebugReviewLayout({
               onToggleCollapsed={() => toggleCollapsed("prompt.md")}
               threadFor={threadFor}
               onReply={reply}
+              readOnly={readOnly}
             />
             <VirtualFileCard
               id={`flow.yml::${state}`}
@@ -592,6 +597,7 @@ export function DebugReviewLayout({
               onToggleCollapsed={() => toggleCollapsed(`flow.yml::${state}`)}
               threadFor={threadFor}
               onReply={reply}
+              readOnly={readOnly}
             />
 
             {/* Real diff files */}

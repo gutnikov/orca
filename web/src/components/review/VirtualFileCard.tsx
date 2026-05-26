@@ -28,6 +28,8 @@ interface VirtualFileCardProps {
   /** Optional thread lookup — when provided, a CommentThreadView is rendered below each comment. */
   threadFor?: (commentId: string) => ThreadView | undefined
   onReply?: (commentId: string, body: string) => Promise<void>
+  /** When true, suppress all mutation affordances (add/remove comments, reply). */
+  readOnly?: boolean
 }
 
 const LANGUAGE_MAP: Record<VirtualFileCardProps["language"], Language> = {
@@ -117,11 +119,13 @@ function CommentList({
   onRemoveComment,
   threadFor,
   onReply,
+  readOnly = false,
 }: {
   comments: Array<{ comment: InlineComment; globalIdx: number }>
   onRemoveComment: (idx: number) => void
   threadFor?: (commentId: string) => ThreadView | undefined
   onReply?: (commentId: string, body: string) => Promise<void>
+  readOnly?: boolean
 }) {
   return (
     <>
@@ -134,20 +138,23 @@ function CommentList({
             <span className="flex-1 text-[13px] text-foreground whitespace-pre-wrap font-sans break-words">
               {comment.body}
             </span>
-            <button
-              type="button"
-              onClick={() => onRemoveComment(globalIdx)}
-              className="text-muted-foreground hover:text-destructive shrink-0 cursor-pointer"
-              aria-label="Remove comment"
-            >
-              <X size={14} />
-            </button>
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={() => onRemoveComment(globalIdx)}
+                className="text-muted-foreground hover:text-destructive shrink-0 cursor-pointer"
+                aria-label="Remove comment"
+              >
+                <X size={14} />
+              </button>
+            )}
           </div>
           {threadFor && onReply ? (
             <CommentThreadView
               commentId={comment.id}
               thread={threadFor(comment.id)}
               onReply={onReply}
+              readOnly={readOnly}
             />
           ) : null}
         </div>
@@ -169,6 +176,7 @@ export function VirtualFileCard({
   onToggleCollapsed,
   threadFor,
   onReply,
+  readOnly = false,
 }: VirtualFileCardProps) {
   const isDark = useIsDark()
   const [composingLine, setComposingLine] = useState<number | null>(null)
@@ -297,6 +305,7 @@ export function VirtualFileCard({
                       onRemoveComment={onRemoveComment}
                       threadFor={threadFor}
                       onReply={onReply}
+                      readOnly={readOnly}
                     />
                   </div>
                 ) : null}
@@ -338,6 +347,7 @@ export function VirtualFileCard({
                 onRemoveComment={onRemoveComment}
                 threadFor={threadFor}
                 onReply={onReply}
+                readOnly={readOnly}
               />
             </div>
           ) : null}
@@ -382,18 +392,20 @@ export function VirtualFileCard({
                           "flex items-center justify-end gap-1",
                         )}
                       >
-                        <button
-                          type="button"
-                          onClick={() => setComposingLine(lineNumber)}
-                          className={cn(
-                            "opacity-0 group-hover:opacity-100 transition-opacity",
-                            "inline-flex items-center justify-center w-4 h-4 rounded",
-                            "bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer",
-                          )}
-                          aria-label={`Comment on line ${lineNumber}`}
-                        >
-                          <MessageSquarePlus size={10} strokeWidth={2.5} />
-                        </button>
+                        {!readOnly && (
+                          <button
+                            type="button"
+                            onClick={() => setComposingLine(lineNumber)}
+                            className={cn(
+                              "opacity-0 group-hover:opacity-100 transition-opacity",
+                              "inline-flex items-center justify-center w-4 h-4 rounded",
+                              "bg-primary text-primary-foreground hover:bg-primary/90 cursor-pointer",
+                            )}
+                            aria-label={`Comment on line ${lineNumber}`}
+                          >
+                            <MessageSquarePlus size={10} strokeWidth={2.5} />
+                          </button>
+                        )}
                         <span>{lineNumber}</span>
                       </div>
 
@@ -424,8 +436,9 @@ export function VirtualFileCard({
                           onRemoveComment={onRemoveComment}
                           threadFor={threadFor}
                           onReply={onReply}
+                          readOnly={readOnly}
                         />
-                        {isComposing ? (
+                        {!readOnly && isComposing ? (
                           <LineComposer
                             fileId={id}
                             line={lineNumber}

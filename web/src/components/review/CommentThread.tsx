@@ -21,6 +21,7 @@ export function CommentThread({
   highlightedIndex,
   threadFor,
   onReply,
+  readOnly = false,
 }: {
   comments: ReviewComment[]
   globalIndexOf: (c: ReviewComment) => number
@@ -33,6 +34,7 @@ export function CommentThread({
   highlightedIndex?: number | null
   threadFor?: (commentId: string) => ThreadView | undefined
   onReply?: (commentId: string, body: string) => Promise<void>
+  readOnly?: boolean
 }) {
   const [editingIndex, setEditingIndex] = useState<number | null>(null)
   const [editBody, setEditBody] = useState("")
@@ -72,31 +74,33 @@ export function CommentThread({
                     {c.file}
                     <span className="text-muted-foreground/60">:{c.line}</span>
                   </span>
-                  <div className="flex gap-0.5 opacity-0 group-hover/comment:opacity-100 transition-opacity shrink-0">
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="h-5 w-5"
-                      onClick={() => {
-                        setEditingIndex(idx)
-                        setEditBody(c.body)
-                      }}
-                      aria-label="Edit comment"
-                    >
-                      <Pencil size={11} />
-                    </Button>
-                    <Button
-                      type="button"
-                      size="icon"
-                      variant="ghost"
-                      className="h-5 w-5 text-destructive"
-                      onClick={() => onDelete(idx)}
-                      aria-label="Delete comment"
-                    >
-                      <Trash2 size={11} />
-                    </Button>
-                  </div>
+                  {!readOnly && (
+                    <div className="flex gap-0.5 opacity-0 group-hover/comment:opacity-100 transition-opacity shrink-0">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-5 w-5"
+                        onClick={() => {
+                          setEditingIndex(idx)
+                          setEditBody(c.body)
+                        }}
+                        aria-label="Edit comment"
+                      >
+                        <Pencil size={11} />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-5 w-5 text-destructive"
+                        onClick={() => onDelete(idx)}
+                        aria-label="Delete comment"
+                      >
+                        <Trash2 size={11} />
+                      </Button>
+                    </div>
+                  )}
                 </div>
                 <div className="prose prose-sm dark:prose-invert max-w-none text-sm px-3 pb-2 pt-0.5 [&_p]:my-1 [&_pre]:my-1 [&_ul]:my-1">
                   <ReactMarkdown remarkPlugins={[remarkGfm]}>{c.body}</ReactMarkdown>
@@ -107,6 +111,7 @@ export function CommentThread({
                       commentId={c.id}
                       thread={threadFor(c.id)}
                       onReply={onReply}
+                      readOnly={readOnly}
                     />
                   </div>
                 ) : null}
@@ -115,7 +120,7 @@ export function CommentThread({
           </div>
         )
       })}
-      {draft !== undefined ? (
+      {!readOnly && draft !== undefined ? (
         <CommentComposer
           value={draft}
           onChange={onDraftChange}
