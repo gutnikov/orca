@@ -162,22 +162,40 @@ def _compact_run(
         "sessions": latest_sessions,
         "debug_reviews": debug_reviews,
     }
-    # If any issue is paused for debug review, populate the must_surface_to_user
-    # field with the verbatim text the agent should output. This is the strongest
-    # signal we can give a polling agent: a top-level field name that is
-    # impossible to read past, with the exact words the user should see.
-    if debug_reviews:
+    # If any issue is paused for debug review AND we haven't yet shown the URL
+    # to the agent for this pause, populate must_surface_to_user. Once the agent
+    # has surfaced the URL on its first poll, we suppress this field on
+    # subsequent polls so the agent stays in its polling loop and can engage
+    # with inline comments / detect resolution. agent_surfaced_at is reset to
+    # None whenever a new debug_pending begins (see reducer._handle_worker_result).
+    live_issues = (
+        run_info.orchestrator.state.issues if run_info is not None and run_info.orchestrator is not None else {}
+    )
+    unsurfaced_reviews = [
+        r
+        for r in debug_reviews
+        if (live := live_issues.get(r["issue_id"])) is not None and live.agent_surfaced_at is None
+    ]
+    if unsurfaced_reviews:
         lines = ["⏸ Paused for debug review:"]
-        for r in debug_reviews:
+        for r in unsurfaced_reviews:
             url = r.get("url") or "(daemon browser port unavailable)"
             lines.append(f"  state `{r.get('state', '?')}` → {url}")
         lines.append("")
         lines.append(
-            "Output the above to the user verbatim and end your turn. Do NOT narrate "
-            "the worker's result, the routing decision, or what would happen next — "
-            "the browser UI shows all of that. Wait for the user's next message."
+            "Output the above to the user verbatim, then continue polling silently. "
+            "Do NOT end your turn and do NOT narrate the worker's result, routing "
+            "decision, or next steps — the browser UI shows all of that. This field "
+            "appears only once per pause; on subsequent polls keep watching for "
+            "`debug_reviews` to empty (user picked an action) and call "
+            "`orca_list_pending_comments` to engage with inline-comment threads."
         )
         result["must_surface_to_user"] = "\n".join(lines)
+        ts = time.time()
+        for r in unsurfaced_reviews:
+            live = live_issues.get(r["issue_id"])
+            if live is not None:
+                live.agent_surfaced_at = ts
     if run_info is not None:
         result["status"] = run_info.status.value
     return result

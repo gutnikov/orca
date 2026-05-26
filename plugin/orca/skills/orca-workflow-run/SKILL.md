@@ -90,39 +90,37 @@ Extract `issue_id` from the run's `issues` dict.
 
 #### ⭐ Rule #0 — `must_surface_to_user` overrides everything
 
-On every poll, **before** assessing worker health, narrating anything, or reading any other field of the compact run response:
+On the **first** poll where a new debug pause appears, the daemon attaches `must_surface_to_user` to the compact run response. Before assessing worker health, narrating anything, or reading any other field:
 
 ```
 if response.get("must_surface_to_user"):
     print(response["must_surface_to_user"])  # verbatim
-    end_turn()
-    return
+    # Do NOT end your turn — continue the polling loop below.
 ```
 
-That field is the daemon's pre-built message to the user. It already contains the review URL and the available actions. Output it verbatim as your next message — nothing before it, nothing after — and end your turn.
+That field is the daemon's pre-built message to the user containing the review URL. Output it verbatim as your next chat message — nothing before it, nothing after — then continue polling silently. The field is one-shot per pause: subsequent polls will not carry it, so the URL stays the last visible thing in the CLI until the pause resolves or you need to print something else (e.g., status update after resolution).
 
 **Do not:**
 - Wrap it in your own commentary or summary
 - Re-format it as a table, menu, or "options" list
 - Narrate the worker's result, the routing decision, affected areas, classification, or next state
 - Offer "show URL" as one of several menu choices the user has to pick from
+- End your turn after surfacing — you need to keep polling so you can engage with inline-comment threads (see below) and notice when the user picks an action
 
 The browser UI rendered at the URL shows all of that — prompt, result, config slice, diff, inline-comment composer. Duplicating it in chat buries the URL and weakens the UI's job.
 
 #### Backup signal — `debug_reviews` array
 
-Older daemons (pre-0.5.5) don't populate `must_surface_to_user`. If that field is absent or empty, check the top-level `debug_reviews` array:
+After the one-shot surface, `must_surface_to_user` is absent but `debug_reviews` stays populated for as long as the pause is unresolved. Treat `debug_reviews` non-empty as the live "pause still pending" indicator for every subsequent poll — don't re-construct or re-print the URL banner; it's already on screen.
 
-- If non-empty: each entry has `{issue_id, state, url}`. Construct the message yourself in the format below and follow the same rule (print verbatim, end turn).
+Per-issue `debug_review_url` on entries in the `issues` dict carries the same URL anchored to that issue if you ever need to re-reference it (e.g. user asks "what was the URL again?").
+
+If you're attaching to a run mid-pause and you see `debug_reviews` non-empty but never saw `must_surface_to_user` (e.g. fresh CLI session, or a pre-0.5.14 daemon), surface the URL manually once using the format below and then keep polling — do not end your turn:
 
 ```
 ⏸ Paused for debug review:
   state `<state>` → <url>
-
-(Then end your turn — no narration.)
 ```
-
-Per-issue `debug_review_url` on entries in the `issues` dict carries the same URL anchored to that issue.
 
 **When the next poll shows `debug_reviews` is now empty**, the user has chosen an action via the browser:
 - If the issue's `state` advanced or its `worker_active` flipped back to true → user picked **accept** or **restart**. Resume the normal watch loop.

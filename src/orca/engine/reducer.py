@@ -326,6 +326,7 @@ def _handle_worker_result(
         issue.worker_active = False
         issue.failure_count = 0
         issue.debug_pending = True
+        issue.agent_surfaced_at = None
         append_log(issue, event.timestamp, "worker_result", event.result)
         return
 

@@ -9,7 +9,7 @@
       "name": "orca",
       "source": "./plugin/orca",
       "description": "Coding agent orchestrator — MCP server + slash commands for setup, workflow authoring, and run supervision",
-      "version": "0.8.0",
+      "version": "0.8.1",
       "homepage": "https://github.com/gutnikov/orca",
       "license": "MIT",
       "keywords": ["orchestrator", "mcp", "claude-code", "codex", "opencode", "agents", "workflow"]

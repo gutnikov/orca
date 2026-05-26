@@ -14,6 +14,7 @@ def test_issue_has_debug_state_fields_with_defaults() -> None:
     assert issue.state_base_commit is None
     assert issue.debug_pending is False
     assert issue.modify_pending is False
+    assert issue.agent_surfaced_at is None
 
 
 def test_issue_round_trip_preserves_debug_fields() -> None:
@@ -28,11 +29,13 @@ def test_issue_round_trip_preserves_debug_fields() -> None:
         state_base_commit="abc123",
         debug_pending=True,
         modify_pending=False,
+        agent_surfaced_at=1234567890.0,
     )
     round_tripped = Issue.from_dict(issue.to_dict())
     assert round_tripped.state_base_commit == "abc123"
     assert round_tripped.debug_pending is True
     assert round_tripped.modify_pending is False
+    assert round_tripped.agent_surfaced_at == 1234567890.0
 
 
 def test_issue_from_dict_defaults_missing_debug_fields() -> None:
@@ -50,3 +53,4 @@ def test_issue_from_dict_defaults_missing_debug_fields() -> None:
     assert issue.state_base_commit is None
     assert issue.debug_pending is False
     assert issue.modify_pending is False
+    assert issue.agent_surfaced_at is None

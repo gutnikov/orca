@@ -140,6 +140,7 @@ class Issue:
     state_base_commit: str | None = None
     debug_pending: bool = False
     modify_pending: bool = False
+    agent_surfaced_at: float | None = None
     inline_comments: list[InlineComment] = field(default_factory=list)
     comment_threads: list[CommentThread] = field(default_factory=list)
 
@@ -158,6 +159,7 @@ class Issue:
             "state_base_commit": self.state_base_commit,
             "debug_pending": self.debug_pending,
             "modify_pending": self.modify_pending,
+            "agent_surfaced_at": self.agent_surfaced_at,
             "inline_comments": [c.to_dict() for c in self.inline_comments],
             "comment_threads": [t.to_dict() for t in self.comment_threads],
         }
@@ -178,6 +180,7 @@ class Issue:
             state_base_commit=data.get("state_base_commit"),
             debug_pending=data.get("debug_pending", False),
             modify_pending=data.get("modify_pending", False),
+            agent_surfaced_at=data.get("agent_surfaced_at"),
             inline_comments=[InlineComment.from_dict(c) for c in data.get("inline_comments", [])],
             comment_threads=[CommentThread.from_dict(t) for t in data.get("comment_threads", [])],
         )
