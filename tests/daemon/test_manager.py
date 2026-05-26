@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from orca.daemon.manager import RunManager, RunStatus, _pair_debug_attempts
+from orca.daemon.manager import RunManager, RunStatus, _pair_debug_attempts, _project_past_comments
 from orca.engine.types import DispatchWorkerEffect, EventLogEntry
 from orca.orchestrator.worker import WorkerOutcome, WorkerSuccess
 
@@ -581,3 +581,60 @@ class TestPairDebugAttempts:
         out = _pair_debug_attempts(log, drop_pending_tail=True)
         assert len(out) == 1
         assert out[0]["decision"] == "accept"
+
+
+class TestProjectPastComments:
+    def test_empty(self) -> None:
+        inline, threads = _project_past_comments([])
+        assert inline == []
+        assert threads == []
+
+    def test_single_comment_no_thread(self) -> None:
+        persisted = [
+            {"id": "c1", "file": "foo.py", "line": 12, "body": "fix this", "thread_messages": []},
+        ]
+        inline, threads = _project_past_comments(persisted)
+        assert inline == [{"id": "c1", "file": "foo.py", "line": 12, "body": "fix this"}]
+        assert threads == []
+
+    def test_comment_with_thread_messages(self) -> None:
+        persisted = [
+            {
+                "id": "c1",
+                "file": "foo.py",
+                "line": 12,
+                "body": "fix this",
+                "thread_messages": [
+                    {"role": "agent", "body": "ack"},
+                    {"role": "user", "body": "thanks"},
+                ],
+            }
+        ]
+        inline, threads = _project_past_comments(persisted)
+        assert len(inline) == 1
+        assert len(threads) == 1
+        t = threads[0]
+        assert t["comment_id"] == "c1"
+        assert t["id"] == "thread-c1"
+        assert [m["role"] for m in t["messages"]] == ["agent", "user"]
+        assert [m["body"] for m in t["messages"]] == ["ack", "thanks"]
+        # synthetic message ids should be unique
+        assert len({m["id"] for m in t["messages"]}) == 2
+        assert t["agent_last_reviewed_at"] is None
+
+    def test_mixed_comments(self) -> None:
+        persisted = [
+            {"id": "c1", "file": "a.py", "line": 1, "body": "x", "thread_messages": []},
+            {"id": "c2", "file": "b.py", "line": 2, "body": "y", "thread_messages": [{"role": "user", "body": "hi"}]},
+        ]
+        inline, threads = _project_past_comments(persisted)
+        assert len(inline) == 2
+        assert len(threads) == 1  # only c2 has thread messages
+        assert threads[0]["comment_id"] == "c2"
+
+    def test_missing_thread_messages_field(self) -> None:
+        # Legacy events might not have thread_messages at all
+        persisted = [{"id": "c1", "file": "a.py", "line": 1, "body": "x"}]
+        inline, threads = _project_past_comments(persisted)
+        assert len(inline) == 1
+        assert threads == []

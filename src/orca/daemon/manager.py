@@ -166,6 +166,41 @@ def _pair_debug_attempts(
     return attempts
 
 
+def _project_past_comments(
+    persisted: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Project the persisted debug_decision.comments shape back into the
+    live wire shape (separate inline_comments and comment_threads arrays)
+    so the existing renderer can consume it unchanged.
+
+    Synthetic thread IDs and message IDs are stable per-comment but
+    meaningless beyond React keys — read-only mode never mutates them.
+    """
+    inline_comments = [{"id": c["id"], "file": c["file"], "line": c["line"], "body": c["body"]} for c in persisted]
+    comment_threads: list[dict[str, Any]] = []
+    for c in persisted:
+        messages = c.get("thread_messages") or []
+        if not messages:
+            continue
+        comment_threads.append(
+            {
+                "id": f"thread-{c['id']}",
+                "comment_id": c["id"],
+                "messages": [
+                    {
+                        "id": f"{c['id']}-m{i}",
+                        "role": m["role"],
+                        "body": m["body"],
+                        "timestamp": None,
+                    }
+                    for i, m in enumerate(messages)
+                ],
+                "agent_last_reviewed_at": None,
+            }
+        )
+    return inline_comments, comment_threads
+
+
 @dataclass
 class RunInfo:
     run_id: str
