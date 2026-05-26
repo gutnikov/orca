@@ -190,7 +190,7 @@ Tell the user:
 - What was produced (PR / branch / report / result files)
 - What was merged or kept
 - Any follow-ups surfaced during the run that weren't part of the task
-- Suggest the next action (open the next task? audit the workflow if it surfaced bugs? `orca tui` for live state?)
+- Suggest the next action (open the next task? audit the workflow if it surfaced bugs? `orca tui <run_id>` for live state?)
 
 ## Anti-patterns to refuse
 
@@ -209,7 +209,7 @@ Run-flow commands:
 |---|---|
 | `orca run <task> [-w <flow>]` | Submit a new run; `-w` selects a workflow other than `default` |
 | `orca runs` | List runs (any status) |
-| `orca tui` | Live dashboard — issue tree, worker terminals, history |
+| `orca tui [run_id]` | Live dashboard for one run — issue tree, worker terminals, history |
 | `orca logs <run_id> <issue_id>` | Tail worker logs |
 | `orca stop <run_id>` | Stop a running workflow (ask user first) |
 | `orca resume <run_id>` | Resume a stopped/failed/interrupted run |

@@ -74,6 +74,13 @@ class TestCliDispatch:
         parser = build_parser()
         args = parser.parse_args(["tui"])
         assert args.subcommand == "tui"
+        assert args.run_id is None
+
+    def test_tui_subcommand_accepts_run_id(self) -> None:
+        parser = build_parser()
+        args = parser.parse_args(["tui", "DEV-52_payments_fees:test-plan-execute"])
+        assert args.subcommand == "tui"
+        assert args.run_id == "DEV-52_payments_fees:test-plan-execute"
 
     def test_mcp_subcommand(self) -> None:
         parser = build_parser()

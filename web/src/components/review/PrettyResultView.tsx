@@ -1,4 +1,6 @@
 import type { ReactNode } from "react"
+import ReactMarkdown from "react-markdown"
+import remarkGfm from "remark-gfm"
 
 import { cn } from "@/lib/utils"
 
@@ -48,7 +50,9 @@ const SHORT_STRING_LIMIT = 60
 function isInlineScalar(v: unknown): boolean {
   if (v === null) return true
   if (typeof v === "boolean" || typeof v === "number") return true
-  if (typeof v === "string") return v.length <= SHORT_STRING_LIMIT && !v.includes("\n")
+  if (typeof v === "string") {
+    return v.length <= SHORT_STRING_LIMIT && !v.includes("\n") && !looksLikeMarkdown(v)
+  }
   return false
 }
 
@@ -81,6 +85,9 @@ function ScalarInline({ v }: { v: unknown }) {
 }
 
 function StringBlock({ text }: { text: string }) {
+  if (looksLikeMarkdown(text)) {
+    return <MarkdownBlock text={text} />
+  }
   return (
     <div
       className={cn(
@@ -92,6 +99,44 @@ function StringBlock({ text }: { text: string }) {
       {text}
     </div>
   )
+}
+
+function MarkdownBlock({ text }: { text: string }) {
+  return (
+    <div
+      className={cn(
+        "text-[13px] text-foreground/95 leading-relaxed",
+        "bg-muted/30 border border-border/60 rounded-md px-3 py-2",
+        "prose prose-sm dark:prose-invert max-w-none",
+        "prose-headings:font-semibold prose-headings:tracking-normal prose-headings:my-3",
+        "prose-p:my-2 prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5",
+        "prose-pre:bg-muted prose-pre:text-foreground prose-pre:border prose-pre:border-border/60",
+        "prose-code:before:hidden prose-code:after:hidden",
+        "prose-table:my-3 prose-table:border prose-th:bg-muted prose-th:px-3 prose-th:py-2 prose-td:border prose-td:px-3 prose-td:py-2",
+        "prose-a:text-primary [&_*]:break-words",
+      )}
+    >
+      <ReactMarkdown remarkPlugins={[remarkGfm]}>{text}</ReactMarkdown>
+    </div>
+  )
+}
+
+function looksLikeMarkdown(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed) return false
+
+  return [
+    /^#{1,6}\s+\S/m,
+    /^[-*+]\s+\S/m,
+    /^\d+\.\s+\S/m,
+    /^>\s+\S/m,
+    /^```/m,
+    /^\|.+\|\s*$/m,
+    /`[^`\n]+`/,
+    /\*\*[^*\n]+?\*\*/,
+    /__[^_\n]+?__/,
+    /\[[^\]\n]+?\]\([^)]+?\)/,
+  ].some((pattern) => pattern.test(trimmed))
 }
 
 function Value({ v }: { v: unknown }) {

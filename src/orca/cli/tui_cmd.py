@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 
-def tui_command(root: Path | None = None) -> None:
+def tui_command(root: Path | None = None, run_id: str | None = None) -> None:
     """Check daemon running, launch OrcaApp connected to daemon."""
     from orca.cli.daemon_cmd import _repo_root
     from orca.daemon.lifecycle import check_daemon_running, socket_path
@@ -24,5 +24,9 @@ def tui_command(root: Path | None = None) -> None:
         print("Error: textual is not installed. Install with: uv pip install 'orca[tui]'", file=sys.stderr)
         raise SystemExit(1) from None
 
-    app = OrcaApp.from_daemon(sock_path=sock)
+    try:
+        app = OrcaApp.from_daemon(sock_path=sock, run_id=run_id)
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from None
     app.run()

@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from orca.engine.types import EventLogEntry, Issue, State
-from orca.tui.app import OrcaApp
+from orca.tui.app import OrcaApp, _select_daemon_run_id
 from orca.tui.widgets.issue_detail import IssueDetail
 from orca.tui.widgets.issue_tree import IssueTree
 
@@ -73,3 +73,33 @@ class TestOrcaApp:
         app = OrcaApp(run_dir=run_dir, branch_name="test-branch")
         async with app.run_test() as pilot:
             await pilot.press("q")
+
+
+class TestDaemonRunSelection:
+    def test_selects_requested_run_id(self) -> None:
+        runs = [
+            {"run_id": "branch-a:default", "status": "running"},
+            {"run_id": "branch-b:default", "status": "running"},
+        ]
+
+        assert _select_daemon_run_id(runs, requested_run_id="branch-b:default") == "branch-b:default"
+
+    def test_requested_run_id_must_exist(self) -> None:
+        with pytest.raises(ValueError, match="run 'missing:default' not found"):
+            _select_daemon_run_id([{"run_id": "branch-a:default", "status": "running"}], "missing:default")
+
+    def test_defaults_to_first_running_run(self) -> None:
+        runs = [
+            {"run_id": "branch-a:default", "status": "failed"},
+            {"run_id": "branch-b:default", "status": "running"},
+        ]
+
+        assert _select_daemon_run_id(runs) == "branch-b:default"
+
+    def test_falls_back_to_first_run(self) -> None:
+        runs = [
+            {"run_id": "branch-a:default", "status": "completed"},
+            {"run_id": "branch-b:default", "status": "failed"},
+        ]
+
+        assert _select_daemon_run_id(runs) == "branch-a:default"

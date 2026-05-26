@@ -86,8 +86,15 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    # orca tui
-    sub.add_parser("tui", help="Attach TUI to daemon")
+    # orca tui [run_id]
+    tui_parser = sub.add_parser("tui", help="Attach TUI to daemon")
+    tui_parser.add_argument(
+        "run_id",
+        type=str,
+        nargs="?",
+        default=None,
+        help="Run ID to view (default: first running run)",
+    )
 
     # orca mcp
     sub.add_parser("mcp", help="MCP stdio bridge")
@@ -178,7 +185,7 @@ def main() -> None:
     elif args.subcommand == "tui":
         from orca.cli.tui_cmd import tui_command
 
-        tui_command(root=args.root)
+        tui_command(root=args.root, run_id=args.run_id)
 
     elif args.subcommand == "mcp":
         from orca.cli.mcp_cmd import mcp_command

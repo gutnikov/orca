@@ -8,6 +8,7 @@ import aiohttp
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
+from textual.css.query import NoMatches
 from textual.widgets import Footer
 
 from orca.engine.types import State, StateMachineConfig
@@ -26,6 +27,22 @@ from orca.tui.widgets.terminal_view import TerminalView
 
 _STALE_THRESHOLD = 10.0
 _DEADLOCK_THRESHOLD = 30.0
+
+
+def _select_daemon_run_id(runs: list[dict[str, object]], requested_run_id: str | None = None) -> str:
+    """Choose the daemon run to display in the TUI."""
+    if requested_run_id:
+        available = {str(run.get("run_id", "")) for run in runs}
+        if requested_run_id not in available:
+            raise ValueError(f"run '{requested_run_id}' not found")
+        return requested_run_id
+
+    for run in runs:
+        if run.get("status") == "running":
+            return str(run.get("run_id", ""))
+    if runs:
+        return str(runs[0].get("run_id", ""))
+    return ""
 
 
 class OrcaApp(App[None]):
@@ -91,7 +108,7 @@ class OrcaApp(App[None]):
         self._sessions: list[dict[str, object]] = []
 
     @classmethod
-    def from_daemon(cls, sock_path: Path) -> OrcaApp:
+    def from_daemon(cls, sock_path: Path, run_id: str | None = None) -> OrcaApp:
         """Create an OrcaApp that connects to the daemon."""
         import asyncio
         import tempfile
@@ -109,23 +126,16 @@ class OrcaApp(App[None]):
             return []
 
         runs = asyncio.run(_fetch_runs())
-        # Pick the first running run, or the most recent
-        run_id = ""
+        selected_run_id = _select_daemon_run_id(runs, requested_run_id=run_id)
         branch = "daemon"
-        for r in runs:
-            if r.get("status") == "running":
-                run_id = str(r.get("run_id", ""))
-                break
-        if not run_id and runs:
-            run_id = str(runs[0].get("run_id", ""))
-        if run_id and ":" in run_id:
-            branch = run_id.split(":")[0]
+        if selected_run_id and ":" in selected_run_id:
+            branch = selected_run_id.split(":", 1)[0]
 
         dummy_dir = Path(tempfile.mkdtemp(prefix="orca-daemon-"))
         app = cls(run_dir=dummy_dir, branch_name=branch)
         app._daemon_sock = sock_path
         app._daemon_mode = True
-        app._daemon_run_id = run_id
+        app._daemon_run_id = selected_run_id
         app._reader = None  # Don't use file-based reader
         return app
 
@@ -211,9 +221,12 @@ class OrcaApp(App[None]):
             self.post_message(StateUpdated(state, sessions))
 
     def _tick_spinners(self) -> None:
-        tree = self.query_one(IssueTree)
+        try:
+            tree = self.query_one(IssueTree)
+            phases = self.query_one(PhasesPanel)
+        except NoMatches:
+            return
         tree.refresh_tick()
-        phases = self.query_one(PhasesPanel)
         phases.refresh_tick(tree._tick)
 
     def action_focus_tree(self) -> None:

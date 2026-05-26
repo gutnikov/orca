@@ -80,6 +80,7 @@ After setup, start work by asking your agent to create a task and start an Orca 
 
 ```bash
 orca tui
+orca tui <run_id>  # attach to a specific run from `orca runs`
 ```
 
 ## How It Works
@@ -867,7 +868,7 @@ orca init                     # legacy no-op; removes a stale .orca/playbooks/ d
 
 orca logs <run_id> [issue_id] [--tail N]        # view worker logs
 orca unblock <run_id> <issue_id> -m "message"   # unblock a waiting worker
-orca tui                      # open TUI dashboard
+orca tui [run_id]             # open TUI dashboard, optionally for one run
 orca mcp                      # start MCP stdio bridge
 ```
 
@@ -1141,8 +1142,8 @@ orca runs
 # Stop just one
 orca stop feature-auth:default
 
-# Open TUI — shows all active runs
-orca tui
+# Open TUI for one run
+orca tui feature-auth:default
 ```
 
 Workflow-level `base_branch` and the `--base` CLI flag are accepted for compatibility but **not honored** by the current daemon-backed run path — the daemon does not create the root run branch from this ref. Use `-b/--branch` to set the run branch explicitly, and check out your intended base before invoking `orca run` if branch setup matters:
