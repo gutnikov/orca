@@ -51,3 +51,19 @@ def test_get_debug_review_400_on_non_integer_attempt(client: TestClient) -> None
     r = client.get("/api/runs/none:none/issues/x/debug?attempt=abc")
     assert r.status_code == 400
     assert "invalid attempt" in r.json().get("error", "").lower()
+
+
+def test_get_debug_review_returns_not_pending_for_live_mode_miss(client: TestClient) -> None:
+    """Live-mode 404 must return "not_pending" — the orca-prompt-config-rewrite
+    playbook branches on this exact string."""
+    r = client.get("/api/runs/none:none/issues/x/debug")
+    assert r.status_code == 404
+    assert r.json() == {"error": "not_pending"}
+
+
+def test_get_debug_review_returns_not_found_for_past_mode_miss(client: TestClient) -> None:
+    """Past-mode 404 (attempt= supplied but out of range / unknown run) returns
+    a distinct "not_found" so consumers can tell the two failure modes apart."""
+    r = client.get("/api/runs/none:none/issues/x/debug?attempt=0")
+    assert r.status_code == 404
+    assert r.json() == {"error": "not_found"}

@@ -320,7 +320,10 @@ async def _get_debug_review(request: Request) -> JSONResponse:
             return JSONResponse({"error": "invalid attempt"}, status_code=400)
     snapshot = manager.get_debug_review(run_id, issue_id, attempt=attempt)
     if snapshot is None:
-        return JSONResponse({"error": "not_found"}, status_code=404)
+        # Preserve "not_pending" for the live-mode contract (orca-prompt-config-rewrite
+        # playbook branches on it). Use "not_found" only for past-mode misses.
+        error = "not_found" if attempt is not None else "not_pending"
+        return JSONResponse({"error": error}, status_code=404)
     return JSONResponse(snapshot)
 
 
