@@ -53,14 +53,16 @@ export function FullFileView({
                   >
                     <span className={rowStyles.gutterNumber}>{lineNumber}</span>
                     <span className={cn(rowStyles.gutterSign, "relative")}>
-                      <button
-                        type="button"
-                        onClick={() => overlay.onOpenDraft("new", lineNumber)}
-                        className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/row:opacity-100 transition-opacity text-primary hover:bg-primary/10 rounded"
-                        aria-label="Add comment"
-                      >
-                        <MessageSquarePlus size={12} />
-                      </button>
+                      {!overlay.readOnly && (
+                        <button
+                          type="button"
+                          onClick={() => overlay.onOpenDraft("new", lineNumber)}
+                          className="absolute inset-0 flex items-center justify-center opacity-0 group-hover/row:opacity-100 transition-opacity text-primary hover:bg-primary/10 rounded"
+                          aria-label="Add comment"
+                        >
+                          <MessageSquarePlus size={12} />
+                        </button>
+                      )}
                       <span className="opacity-100 group-hover/row:opacity-0 transition-opacity pointer-events-none">
                         {isAdded ? "+" : ""}
                       </span>
@@ -86,6 +88,7 @@ export function FullFileView({
                       highlightedIndex={overlay.highlightedCommentIndex}
                       threadFor={overlay.threadFor}
                       onReply={overlay.onReply}
+                      readOnly={overlay.readOnly}
                     />
                   ) : null}
                 </div>

@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from orca.engine.config import parse_config
 from orca.engine.reducer import reduce
-from orca.engine.types import CreateEvent, Effect, State, StateMachineConfig, WorkerFailedEvent
+from orca.engine.types import CreateEvent, Effect, EventLogEntry, State, StateMachineConfig, WorkerFailedEvent
 from orca.orchestrator.branches import BranchMap
 from orca.orchestrator.log import setup_logging
 from orca.orchestrator.orchestrator import Orchestrator
@@ -105,6 +105,100 @@ def _collect_debug_reviews(
             record["url"] = url
         result.append(record)
     return result
+
+
+def _pair_debug_attempts(
+    event_log: list[EventLogEntry],
+    *,
+    drop_pending_tail: bool,
+) -> list[dict[str, Any]]:
+    """Walk event_log, pair each debug_review_required with its following
+    debug_decision, and infer the state at pause time.
+
+    Returns list of {attempt, state, state_local_index, paused_at, decision,
+    decided_at}. state_local_index is the 1-based count of attempts (so far)
+    that share this attempt's state.
+
+    State is tracked via "created", "advanced", and "transitioned" events.
+    If the log ends with an unmatched debug_review_required and
+    drop_pending_tail=True, that trailing attempt is excluded (the caller is
+    using the live URL for it).
+    """
+    current_state: str | None = None
+    attempts: list[dict[str, Any]] = []
+    pending: dict[str, Any] | None = None
+    state_counter: dict[str | None, int] = {}
+    attempt_index = 0
+
+    def _finalize_pending(decision: str | None, decided_at: str | None) -> None:
+        nonlocal pending
+        assert pending is not None
+        s = pending["state"]
+        state_counter[s] = state_counter.get(s, 0) + 1
+        attempts.append(
+            {
+                **pending,
+                "state_local_index": state_counter[s],
+                "decision": decision,
+                "decided_at": decided_at,
+            }
+        )
+        pending = None
+
+    for entry in event_log:
+        if entry.type == "created":
+            current_state = entry.data.get("state")
+        elif entry.type in ("advanced", "transitioned"):
+            current_state = entry.data.get("to")
+        elif entry.type == "debug_review_required":
+            if pending is not None:
+                _finalize_pending(None, None)
+            pending = {
+                "attempt": attempt_index,
+                "state": current_state,
+                "paused_at": entry.timestamp,
+            }
+            attempt_index += 1
+        elif entry.type == "debug_decision" and pending is not None:
+            _finalize_pending(entry.data.get("action"), entry.timestamp)
+    if pending is not None and not drop_pending_tail:
+        _finalize_pending(None, None)
+    return attempts
+
+
+def _project_past_comments(
+    persisted: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Project the persisted debug_decision.comments shape back into the
+    live wire shape (separate inline_comments and comment_threads arrays)
+    so the existing renderer can consume it unchanged.
+
+    Synthetic thread IDs and message IDs are stable per-comment but
+    meaningless beyond React keys — read-only mode never mutates them.
+    """
+    inline_comments = [{"id": c["id"], "file": c["file"], "line": c["line"], "body": c["body"]} for c in persisted]
+    comment_threads: list[dict[str, Any]] = []
+    for c in persisted:
+        messages = c.get("thread_messages") or []
+        if not messages:
+            continue
+        comment_threads.append(
+            {
+                "id": f"thread-{c['id']}",
+                "comment_id": c["id"],
+                "messages": [
+                    {
+                        "id": f"{c['id']}-m{i}",
+                        "role": m["role"],
+                        "body": m["body"],
+                        "timestamp": None,
+                    }
+                    for i, m in enumerate(messages)
+                ],
+                "agent_last_reviewed_at": None,
+            }
+        )
+    return inline_comments, comment_threads
 
 
 @dataclass
@@ -779,20 +873,96 @@ class RunManager:
             raise ValueError(f"Run {run_id!r} not found")
         return run_info.orchestrator.list_inline_comments_with_threads(issue_id)
 
-    def get_debug_review(self, run_id: str, issue_id: str) -> dict[str, Any] | None:
-        """Return the latest DebugReviewSnapshot as a dict, or None if not pending."""
+    def get_debug_review(
+        self,
+        run_id: str,
+        issue_id: str,
+        *,
+        attempt: int | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the debug-review snapshot as a dict, or None.
+
+        When `attempt` is None: returns the active pause's snapshot if
+        `is_debug_pending(issue_id)`, else None. (Original behavior.)
+
+        When `attempt` is an int: bypasses the pending guard. Walks the
+        issue's event_log for the Nth debug_review_required event, finds
+        the next debug_decision, projects its persisted comments back into
+        the live wire shape, and returns the snapshot dict EXTENDED with a
+        `past_review` field. Returns None if the attempt index is out of
+        range.
+        """
         run_info = self._runs.get(run_id)
         if run_info is None or run_info.orchestrator is None:
-            return None
-        if not run_info.orchestrator.is_debug_pending(issue_id):
             return None
         issue = run_info.orchestrator.state.issues.get(issue_id)
         if issue is None:
             return None
-        for entry in reversed(issue.event_log):
+
+        if attempt is None:
+            if not run_info.orchestrator.is_debug_pending(issue_id):
+                return None
+            for entry in reversed(issue.event_log):
+                if entry.type == "debug_review_required":
+                    return entry.data.get("snapshot")
+            return None
+
+        # Past-attempt branch: bypass debug_pending guard.
+        if attempt < 0:
+            return None
+        attempts = _pair_debug_attempts(issue.event_log, drop_pending_tail=False)
+        if attempt >= len(attempts):
+            return None
+        target = attempts[attempt]
+
+        # Find the matching snapshot: it's the (attempt+1)th debug_review_required.
+        snapshot: dict[str, Any] | None = None
+        decision_comments: list[dict[str, Any]] = []
+        seen = -1
+        for entry in issue.event_log:
             if entry.type == "debug_review_required":
-                return entry.data.get("snapshot")
-        return None
+                seen += 1
+                if seen == attempt:
+                    snapshot = entry.data.get("snapshot")
+            elif entry.type == "debug_decision" and seen == attempt and snapshot is not None:
+                decision_comments = entry.data.get("comments", [])
+                break
+        if snapshot is None:
+            return None
+
+        inline_comments, comment_threads = _project_past_comments(decision_comments)
+        return {
+            **snapshot,
+            "past_review": {
+                "attempt": target["attempt"],
+                "state": target["state"],
+                "state_local_index": target["state_local_index"],
+                "paused_at": target["paused_at"],
+                "decision_action": target["decision"],
+                "decided_at": target["decided_at"],
+                "inline_comments": inline_comments,
+                "comment_threads": comment_threads,
+            },
+        }
+
+    def list_debug_attempts(self, run_id: str, issue_id: str) -> list[dict[str, Any]]:
+        """Return the list of past debug-review attempts for this issue.
+
+        Each item: {attempt, state, state_local_index, paused_at, decision, decided_at}.
+        Excludes the currently-active pause when issue.debug_pending=True —
+        the live URL serves that one. Undecided pauses from crashed runs
+        still appear with decision=None.
+        """
+        run_info = self._runs.get(run_id)
+        if run_info is None or run_info.orchestrator is None:
+            return []
+        issue = run_info.orchestrator.state.issues.get(issue_id)
+        if issue is None:
+            return []
+        return _pair_debug_attempts(
+            issue.event_log,
+            drop_pending_tail=bool(issue.debug_pending),
+        )
 
     def retry_issue(self, run_id: str, issue_id: str) -> None:
         """Retry a failed issue. If the orchestrator loop has finished, restart it."""
