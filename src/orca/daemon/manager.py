@@ -888,6 +888,25 @@ class RunManager:
                 return entry.data.get("snapshot")
         return None
 
+    def list_debug_attempts(self, run_id: str, issue_id: str) -> list[dict[str, Any]]:
+        """Return the list of past debug-review attempts for this issue.
+
+        Each item: {attempt, state, state_local_index, paused_at, decision, decided_at}.
+        Excludes the currently-active pause when issue.debug_pending=True —
+        the live URL serves that one. Undecided pauses from crashed runs
+        still appear with decision=None.
+        """
+        run_info = self._runs.get(run_id)
+        if run_info is None or run_info.orchestrator is None:
+            return []
+        issue = run_info.orchestrator.state.issues.get(issue_id)
+        if issue is None:
+            return []
+        return _pair_debug_attempts(
+            issue.event_log,
+            drop_pending_tail=bool(issue.debug_pending),
+        )
+
     def retry_issue(self, run_id: str, issue_id: str) -> None:
         """Retry a failed issue. If the orchestrator loop has finished, restart it."""
         run_info = self._runs.get(run_id)

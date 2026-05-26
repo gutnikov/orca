@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -638,3 +638,59 @@ class TestProjectPastComments:
         inline, threads = _project_past_comments(persisted)
         assert len(inline) == 1
         assert threads == []
+
+
+class TestListDebugAttempts:
+    def test_returns_empty_when_run_missing(self, tmp_path: Path) -> None:
+        mgr = RunManager(tmp_path)
+        assert mgr.list_debug_attempts("nope:none", "x") == []
+
+    def test_returns_empty_when_issue_missing(self, tmp_path: Path) -> None:
+        mgr = RunManager(tmp_path)
+        run_info = MagicMock()
+        run_info.orchestrator = MagicMock()
+        run_info.orchestrator.state.issues = {}
+        mgr._runs["r1"] = run_info
+        assert mgr.list_debug_attempts("r1", "missing") == []
+
+    def test_walks_event_log_and_excludes_live_pause(self, tmp_path: Path) -> None:
+        mgr = RunManager(tmp_path)
+        # Build a synthetic issue with three pauses: two decided, one live-pending
+        issue = MagicMock()
+        issue.debug_pending = True
+        issue.event_log = [
+            _entry("t1", "created", {"state": "planning"}),
+            _entry("t2", "debug_review_required", {"snapshot": {}}),
+            _entry("t3", "debug_decision", {"action": "accept", "comments": []}),
+            _entry("t4", "advanced", {"from": "planning", "to": "implementing"}),
+            _entry("t5", "debug_review_required", {"snapshot": {}}),
+            _entry("t6", "debug_decision", {"action": "modify_restart", "comments": []}),
+            _entry("t7", "debug_review_required", {"snapshot": {}}),  # live pause, undecided
+        ]
+        run_info = MagicMock()
+        run_info.orchestrator = MagicMock()
+        run_info.orchestrator.state.issues = {"i1": issue}
+        mgr._runs["r1"] = run_info
+
+        out = mgr.list_debug_attempts("r1", "i1")
+        assert len(out) == 2
+        assert out[0]["state"] == "planning"
+        assert out[1]["state"] == "implementing"
+        assert out[1]["decision"] == "modify_restart"
+
+    def test_keeps_undecided_pause_when_not_live_pending(self, tmp_path: Path) -> None:
+        mgr = RunManager(tmp_path)
+        issue = MagicMock()
+        issue.debug_pending = False  # run crashed/stopped after pause
+        issue.event_log = [
+            _entry("t1", "created", {"state": "planning"}),
+            _entry("t2", "debug_review_required", {"snapshot": {}}),
+        ]
+        run_info = MagicMock()
+        run_info.orchestrator = MagicMock()
+        run_info.orchestrator.state.issues = {"i1": issue}
+        mgr._runs["r1"] = run_info
+
+        out = mgr.list_debug_attempts("r1", "i1")
+        assert len(out) == 1
+        assert out[0]["decision"] is None
