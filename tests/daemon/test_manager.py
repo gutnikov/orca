@@ -7,8 +7,8 @@ from unittest.mock import patch
 
 import pytest
 
-from orca.daemon.manager import RunManager, RunStatus
-from orca.engine.types import DispatchWorkerEffect
+from orca.daemon.manager import RunManager, RunStatus, _pair_debug_attempts
+from orca.engine.types import DispatchWorkerEffect, EventLogEntry
 from orca.orchestrator.worker import WorkerOutcome, WorkerSuccess
 
 SIMPLE_CONFIG_YAML = """\
@@ -480,3 +480,104 @@ class TestCollectWaitingIssues:
             {"issue_id": "a", "state": "state-a", "reason": "A blocked"},
             {"issue_id": "c", "state": "state-c", "reason": "C blocked"},
         ]
+
+
+def _entry(t: str, type_: str, data: dict) -> EventLogEntry:
+    return EventLogEntry(timestamp=t, type=type_, data=data)
+
+
+class TestPairDebugAttempts:
+    def test_empty_log(self) -> None:
+        assert _pair_debug_attempts([], drop_pending_tail=False) == []
+
+    def test_no_debug_events(self) -> None:
+        log = [
+            _entry("t1", "created", {"state": "scoping"}),
+            _entry("t2", "advanced", {"from": "scoping", "to": "planning"}),
+            _entry("t3", "worker_result", {}),
+        ]
+        assert _pair_debug_attempts(log, drop_pending_tail=False) == []
+
+    def test_single_pause_and_decision(self) -> None:
+        log = [
+            _entry("t1", "created", {"state": "planning"}),
+            _entry("t2", "debug_review_required", {"snapshot": {}}),
+            _entry("t3", "debug_decision", {"action": "accept", "comments": []}),
+        ]
+        out = _pair_debug_attempts(log, drop_pending_tail=False)
+        assert out == [
+            {
+                "attempt": 0,
+                "state": "planning",
+                "state_local_index": 1,
+                "paused_at": "t2",
+                "decision": "accept",
+                "decided_at": "t3",
+            }
+        ]
+
+    def test_modify_restart_cycle_two_attempts_same_state(self) -> None:
+        log = [
+            _entry("t1", "created", {"state": "planning"}),
+            _entry("t2", "debug_review_required", {"snapshot": {}}),
+            _entry("t3", "debug_decision", {"action": "modify_restart", "comments": []}),
+            _entry("t4", "debug_review_required", {"snapshot": {}}),
+            _entry("t5", "debug_decision", {"action": "accept", "comments": []}),
+        ]
+        out = _pair_debug_attempts(log, drop_pending_tail=False)
+        assert [a["attempt"] for a in out] == [0, 1]
+        assert all(a["state"] == "planning" for a in out)
+        assert [a["state_local_index"] for a in out] == [1, 2]
+        assert [a["decision"] for a in out] == ["modify_restart", "accept"]
+
+    def test_state_changes_between_attempts(self) -> None:
+        log = [
+            _entry("t1", "created", {"state": "planning"}),
+            _entry("t2", "debug_review_required", {"snapshot": {}}),
+            _entry("t3", "debug_decision", {"action": "accept", "comments": []}),
+            _entry("t4", "advanced", {"from": "planning", "to": "implementing"}),
+            _entry("t5", "debug_review_required", {"snapshot": {}}),
+            _entry("t6", "debug_decision", {"action": "accept", "comments": []}),
+        ]
+        out = _pair_debug_attempts(log, drop_pending_tail=False)
+        assert [a["state"] for a in out] == ["planning", "implementing"]
+        # Each state restarts its own local counter
+        assert [a["state_local_index"] for a in out] == [1, 1]
+
+    def test_transitioned_event_also_tracks_state(self) -> None:
+        log = [
+            _entry("t1", "created", {"state": "planning"}),
+            _entry("t2", "transitioned", {"from": "planning", "to": "reviewing"}),
+            _entry("t3", "debug_review_required", {"snapshot": {}}),
+            _entry("t4", "debug_decision", {"action": "stop", "comments": []}),
+        ]
+        out = _pair_debug_attempts(log, drop_pending_tail=False)
+        assert out[0]["state"] == "reviewing"
+
+    def test_undecided_pause_when_drop_pending_false(self) -> None:
+        log = [
+            _entry("t1", "created", {"state": "planning"}),
+            _entry("t2", "debug_review_required", {"snapshot": {}}),
+        ]
+        out = _pair_debug_attempts(log, drop_pending_tail=False)
+        assert out == [
+            {
+                "attempt": 0,
+                "state": "planning",
+                "state_local_index": 1,
+                "paused_at": "t2",
+                "decision": None,
+                "decided_at": None,
+            }
+        ]
+
+    def test_drops_pending_tail_when_flag_true(self) -> None:
+        log = [
+            _entry("t1", "created", {"state": "planning"}),
+            _entry("t2", "debug_review_required", {"snapshot": {}}),
+            _entry("t3", "debug_decision", {"action": "accept", "comments": []}),
+            _entry("t4", "debug_review_required", {"snapshot": {}}),
+        ]
+        out = _pair_debug_attempts(log, drop_pending_tail=True)
+        assert len(out) == 1
+        assert out[0]["decision"] == "accept"

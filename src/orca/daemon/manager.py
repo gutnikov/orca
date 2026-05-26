@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from orca.engine.config import parse_config
 from orca.engine.reducer import reduce
-from orca.engine.types import CreateEvent, Effect, State, StateMachineConfig, WorkerFailedEvent
+from orca.engine.types import CreateEvent, Effect, EventLogEntry, State, StateMachineConfig, WorkerFailedEvent
 from orca.orchestrator.branches import BranchMap
 from orca.orchestrator.log import setup_logging
 from orca.orchestrator.orchestrator import Orchestrator
@@ -105,6 +105,65 @@ def _collect_debug_reviews(
             record["url"] = url
         result.append(record)
     return result
+
+
+def _pair_debug_attempts(
+    event_log: list[EventLogEntry],
+    *,
+    drop_pending_tail: bool,
+) -> list[dict[str, Any]]:
+    """Walk event_log, pair each debug_review_required with its following
+    debug_decision, and infer the state at pause time.
+
+    Returns list of {attempt, state, state_local_index, paused_at, decision,
+    decided_at}. state_local_index is the 1-based count of attempts (so far)
+    that share this attempt's state.
+
+    State is tracked via "created", "advanced", and "transitioned" events.
+    If the log ends with an unmatched debug_review_required and
+    drop_pending_tail=True, that trailing attempt is excluded (the caller is
+    using the live URL for it).
+    """
+    current_state: str | None = None
+    attempts: list[dict[str, Any]] = []
+    pending: dict[str, Any] | None = None
+    state_counter: dict[str | None, int] = {}
+    attempt_index = 0
+
+    def _finalize_pending(decision: str | None, decided_at: str | None) -> None:
+        nonlocal pending
+        assert pending is not None
+        s = pending["state"]
+        state_counter[s] = state_counter.get(s, 0) + 1
+        attempts.append(
+            {
+                **pending,
+                "state_local_index": state_counter[s],
+                "decision": decision,
+                "decided_at": decided_at,
+            }
+        )
+        pending = None
+
+    for entry in event_log:
+        if entry.type == "created":
+            current_state = entry.data.get("state")
+        elif entry.type in ("advanced", "transitioned"):
+            current_state = entry.data.get("to")
+        elif entry.type == "debug_review_required":
+            if pending is not None:
+                _finalize_pending(None, None)
+            pending = {
+                "attempt": attempt_index,
+                "state": current_state,
+                "paused_at": entry.timestamp,
+            }
+            attempt_index += 1
+        elif entry.type == "debug_decision" and pending is not None:
+            _finalize_pending(entry.data.get("action"), entry.timestamp)
+    if pending is not None and not drop_pending_tail:
+        _finalize_pending(None, None)
+    return attempts
 
 
 @dataclass
