@@ -47,7 +47,7 @@ export function FullFileView({
                 <div key={i}>
                   <div
                     className={cn(
-                      "group/row grid gap-0 font-mono text-[12px] leading-5 min-h-5 grid-cols-[3rem_2rem_1fr]",
+                      rowStyles.fullBase,
                       tint,
                     )}
                   >

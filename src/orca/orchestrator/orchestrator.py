@@ -14,6 +14,7 @@ from uuid import uuid4
 from orca.engine.dispatch import build_run_context
 from orca.engine.reducer import reduce
 from orca.engine.types import (
+    DebugReviewSnapshot,
     DispatchWorkerEffect,
     Effect,
     ErrorEffect,
@@ -722,19 +723,22 @@ class Orchestrator:
                 return candidate
         return (self.flow_root / "orca.yml") if self.flow_root else Path("/dev/null")
 
-    async def _pause_for_debug_review(self, issue_id: str) -> None:
-        """Build the debug snapshot, emit DebugReviewRequiredEvent, and await a decision."""
-        from orca.engine.types import DebugReviewRequiredEvent
+    async def _build_debug_review_snapshot(
+        self,
+        issue_id: str,
+        worker_result: dict[str, Any],
+    ) -> DebugReviewSnapshot | None:
+        """Build the debug review snapshot for a completed worker result."""
         from orca.orchestrator.snapshot import build_snapshot
         from orca.orchestrator.template_persist import rendered_prompt_path
 
         issue = self._state.issues.get(issue_id)
         if issue is None:
-            return
+            return None
         base_commit = issue.state_base_commit
         if base_commit is None:
-            logger.warning("Cannot pause for debug review: no state_base_commit for issue %s", issue_id)
-            return
+            logger.warning("Cannot build debug review snapshot: no state_base_commit for issue %s", issue_id)
+            return None
 
         branch = self.branches.get(issue_id) or self.root_branch
         workdir = self.worktree_mgr.resolve(branch)
@@ -751,13 +755,7 @@ class Orchestrator:
 
         config_path = self._resolve_config_path()
 
-        worker_result: dict[str, Any] = {}
-        for log_entry in reversed(issue.event_log):
-            if log_entry.type == "worker_result":
-                worker_result = log_entry.data
-                break
-
-        snapshot = await build_snapshot(
+        return await build_snapshot(
             worktree_path=workdir,
             base_commit=base_commit,
             rendered_prompt_path=prompt_path,
@@ -766,6 +764,14 @@ class Orchestrator:
             issue_type=issue.type,
             state_id=issue.state,
         )
+
+    async def _pause_for_debug_review(self, issue_id: str, worker_result: dict[str, Any]) -> None:
+        """Build the debug snapshot, emit DebugReviewRequiredEvent, and await a decision."""
+        from orca.engine.types import DebugReviewRequiredEvent
+
+        snapshot = await self._build_debug_review_snapshot(issue_id, worker_result)
+        if snapshot is None:
+            return
 
         ts = self.now()
         review_event = DebugReviewRequiredEvent(
@@ -785,11 +791,13 @@ class Orchestrator:
         decision_event = asyncio.Event()
         decision_box: list[dict[str, Any]] = []
         self._debug_decision_events[issue_id] = (decision_event, decision_box)
+        issue = self._state.issues.get(issue_id)
+        state_name = issue.state if issue is not None else "?"
         logger.info(
             "Debug review pause for issue %s at state %s",
             issue_id,
-            issue.state,
-            extra={"event": "debug_review_pause", "issue_id": issue_id, "state": issue.state},
+            state_name,
+            extra={"event": "debug_review_pause", "issue_id": issue_id, "state": state_name},
         )
 
         # Auto-open the review URL in the user's default browser. Opt out by
@@ -798,6 +806,36 @@ class Orchestrator:
         self._auto_open_review_url(issue_id)
 
         await decision_event.wait()
+
+    async def _build_auto_review_snapshot(self, event: WorkerResultEvent) -> DebugReviewSnapshot | None:
+        """Return a snapshot for non-debug review history when the result would be reviewable.
+
+        The probe reducer call reuses the debug-mode validation path without
+        mutating live state. If debug mode would not pause for this result
+        (invalid outcome, failure retry path, etc.), normal runs should not
+        record a synthetic accept either.
+        """
+        probe_state, probe_effects = reduce(
+            self._config,
+            self._state,
+            event,
+            self.generate_id,
+            self.now,
+            run_debug=True,
+        )
+        probe_issue = probe_state.issues.get(event.issue_id)
+        if probe_effects or probe_issue is None or not probe_issue.debug_pending:
+            return None
+        try:
+            return await self._build_debug_review_snapshot(event.issue_id, event.result)
+        except Exception as exc:
+            logger.warning(
+                "Skipping auto review history for issue %s: failed to build snapshot: %s",
+                event.issue_id,
+                exc,
+                extra={"event": "auto_review_snapshot_failed", "issue_id": event.issue_id},
+            )
+            return None
 
     def _auto_open_review_url(self, issue_id: str) -> None:
         """Best-effort: open the debug-review URL in the user's default browser.
@@ -1102,7 +1140,7 @@ class Orchestrator:
                         run_debug=True,
                     )
                     self.persistence.save(self._state)
-                    await self._pause_for_debug_review(issue_id)
+                    await self._pause_for_debug_review(issue_id, outcome.result)
                     decision = self._debug_decision_events[issue_id][1][0]
                     self._debug_decision_events.pop(issue_id, None)
                     from orca.engine.types import DebugDecisionEvent
@@ -1124,12 +1162,16 @@ class Orchestrator:
                     )
                     self.persistence.save(self._state)
                 else:
+                    auto_review_snapshot = None
+                    if isinstance(event, WorkerResultEvent):
+                        auto_review_snapshot = await self._build_auto_review_snapshot(event)
                     self._state, new_effects = reduce(
                         self._config,
                         self._state,
                         event,
                         self.generate_id,
                         self.now,
+                        auto_review_snapshot=auto_review_snapshot,
                     )
                     self.persistence.save(self._state)
 

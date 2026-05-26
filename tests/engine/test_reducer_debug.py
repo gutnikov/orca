@@ -1,6 +1,7 @@
 from orca.engine.reducer import reduce
 from orca.engine.types import (
     DebugReviewRequiredEvent,
+    DebugReviewSnapshot,
     Issue,
     OnTransition,
     State,
@@ -72,9 +73,41 @@ def test_worker_result_in_non_debug_mode_transitions_normally() -> None:
     assert issue.debug_pending is False
 
 
-def test_debug_review_required_event_appends_log_entry() -> None:
-    from orca.engine.types import DebugReviewSnapshot
+def test_worker_result_with_auto_review_snapshot_records_accept_history_without_pausing() -> None:
+    config = _make_config()
+    state = _make_state()
+    event = WorkerResultEvent(issue_id="i1", result={"outcome": "done"}, timestamp="t1")
+    snapshot = DebugReviewSnapshot(
+        rendered_prompt="prompt",
+        worker_result={"outcome": "done"},
+        config_slice="",
+        diff_files=[],
+        base_commit="abc",
+    )
 
+    new_state, _ = reduce(
+        config,
+        state,
+        event,
+        generate_id=lambda: "id",
+        now=lambda: "now",
+        auto_review_snapshot=snapshot,
+    )
+
+    issue = new_state.issues["i1"]
+    assert issue.state == "done"
+    assert issue.debug_pending is False
+    assert [e.type for e in issue.event_log] == [
+        "worker_result",
+        "debug_review_required",
+        "debug_decision",
+        "transitioned",
+    ]
+    assert issue.event_log[1].data["snapshot"]["base_commit"] == "abc"
+    assert issue.event_log[2].data == {"action": "accept", "comments": []}
+
+
+def test_debug_review_required_event_appends_log_entry() -> None:
     config = _make_config()
     state = _make_state(worker_active=False)
     state.issues["i1"].debug_pending = True

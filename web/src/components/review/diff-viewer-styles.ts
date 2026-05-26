@@ -1,10 +1,8 @@
 export const rowStyles = {
-  // `minmax(0, 1fr)` for the content track is critical: a bare `1fr` does NOT
-  // include `min-width: 0`, so long unbroken lines (markdown paragraphs, JSON
-  // blobs) force the grid track to outgrow its container — the diff's
-  // overflow-x-auto wrapper then sees a row WIDER than itself but renders the
-  // content bleeding past the card's right edge instead of scrolling cleanly.
-  base: "group/row grid grid-cols-[3rem_3rem_2rem_minmax(0,1fr)] gap-0 font-mono text-[12px] leading-5 min-h-5",
+  // Long unbroken lines should widen the row inside the overflow container,
+  // not paint outside a fixed-width row. `w-max min-w-full` keeps short rows
+  // full-width while allowing long rows to extend under horizontal scroll.
+  base: "group/row grid w-max min-w-full grid-cols-[3rem_3rem_2rem_max-content] gap-0 font-mono text-[12px] leading-5 min-h-5",
   // Solid backgrounds (no alpha) — semi-transparent row bgs let scrolled
   // content text bleed through the sticky gutter cells (which use
   // `bg-inherit`), making line numbers and +/− signs unreadable on long
@@ -22,6 +20,7 @@ export const rowStyles = {
     "text-right pr-2 text-muted-foreground/70 select-none sticky z-[1] bg-inherit",
   gutterSign: "text-center select-none sticky z-[1] bg-inherit",
   content: "pl-2 pr-4 whitespace-pre",
+  fullBase: "group/row grid w-max min-w-full grid-cols-[3rem_2rem_max-content] gap-0 font-mono text-[12px] leading-5 min-h-5",
 } as const
 
 export const wordDiff = {

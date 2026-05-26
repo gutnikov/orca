@@ -23,6 +23,7 @@ from orca.engine.types import (
     DebugDecisionEvent,
     DebugModifyRequestEvent,
     DebugReviewRequiredEvent,
+    DebugReviewSnapshot,
     DispatchWorkerEffect,
     Effect,
     ErrorEffect,
@@ -50,6 +51,7 @@ def reduce(
     generate_id: Callable[[], str],
     now: Callable[[], str],
     run_debug: bool = False,
+    auto_review_snapshot: DebugReviewSnapshot | None = None,
 ) -> tuple[State, list[Effect]]:
     """Dispatch event to the appropriate handler and return (new_state, effects)."""
     new_state = copy.deepcopy(state)
@@ -61,7 +63,7 @@ def reduce(
     elif isinstance(event, AdvanceEvent):
         _handle_advance(config, new_state, event, effects, ts)
     elif isinstance(event, WorkerResultEvent):
-        _handle_worker_result(config, new_state, event, effects, generate_id, ts, run_debug)
+        _handle_worker_result(config, new_state, event, effects, generate_id, ts, run_debug, auto_review_snapshot)
     elif isinstance(event, WorkerFailedEvent):
         _handle_worker_failed(config, new_state, event, effects, ts)
     elif isinstance(event, WorkerWaitingEvent):
@@ -209,6 +211,7 @@ def _handle_worker_result(
     generate_id: Callable[[], str],
     ts: str,
     run_debug: bool = False,
+    auto_review_snapshot: DebugReviewSnapshot | None = None,
 ) -> None:
     # --- Validation (before any mutation) ---
 
@@ -340,6 +343,10 @@ def _handle_worker_result(
 
     # 2. Append worker_result log entry
     append_log(issue, event.timestamp, "worker_result", event.result)
+
+    if auto_review_snapshot is not None:
+        append_log(issue, ts, "debug_review_required", {"snapshot": auto_review_snapshot.to_dict()})
+        append_log(issue, ts, "debug_decision", {"action": "accept", "comments": []})
 
     # 3. Merge result fields (except outcome) back into issue fields
     issue_fields = config.get_type(issue.type).fields

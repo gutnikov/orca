@@ -211,6 +211,65 @@ async def test_debug_accept_completes_run(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio()
+async def test_non_debug_run_records_auto_accept_review_history(tmp_path: Path) -> None:
+    """Normal runs should keep review history without pausing the worker flow."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _init_git_repo(repo)
+
+    config = parse_config(SIMPLE_DEBUG_CONFIG)
+    state = State(issues={}, worker_queues={})
+
+    create_event = CreateEvent(issue_id="issue-1", fields={"title": "Test task"}, timestamp=_now())
+    state, initial_effects = reduce(config, state, create_event, _counter(), _now)
+
+    persistence = Persistence(repo, "main")
+    persistence.save(state)
+    branches = BranchMap(repo, "main")
+
+    worker = MockWorker(outcome=WorkerSuccess(result={"outcome": "done"}))
+    workers = {"claude-code": worker}
+
+    orch = Orchestrator(
+        config=config,
+        state=state,
+        root_branch="main",
+        persistence=persistence,
+        branches=branches,
+        workers=workers,
+        generate_id=_counter(),
+        now=_now,
+        worktree_mgr=GitWorktreeManager(repo),
+        repo_root=repo,
+    )
+
+    fake_snapshot = _make_fake_snapshot()
+    snapshot_mock = AsyncMock(return_value=fake_snapshot)
+    with patch("orca.orchestrator.snapshot.build_snapshot", new=snapshot_mock):
+        await asyncio.wait_for(orch.run("issue-1", initial_effects), timeout=15)
+
+    issue = orch.state.issues["issue-1"]
+    assert issue.state == "done"
+    assert issue.debug_pending is False
+    assert worker.call_count == 1
+    snapshot_mock.assert_awaited_once()
+
+    types = [entry.type for entry in issue.event_log]
+    assert types == [
+        "created",
+        "worker_dispatched",
+        "worker_result",
+        "debug_review_required",
+        "debug_decision",
+        "transitioned",
+    ]
+    review = next(entry for entry in issue.event_log if entry.type == "debug_review_required")
+    decision = next(entry for entry in issue.event_log if entry.type == "debug_decision")
+    assert review.data["snapshot"]["worker_result"] == {"outcome": "done"}
+    assert decision.data == {"action": "accept", "comments": []}
+
+
+@pytest.mark.asyncio()
 async def test_debug_restart_re_dispatches(tmp_path: Path) -> None:
     pytest.skip(
         "E2E harness wiring TBD — exercises orchestrator restart path; "
