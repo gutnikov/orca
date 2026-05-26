@@ -45,6 +45,22 @@ export interface DebugReviewSnapshot {
   base_commit: string;
 }
 
+export interface PastReview {
+  attempt: number;
+  state: string;
+  state_local_index: number;
+  paused_at: string;
+  decision_action: string | null;
+  decided_at: string | null;
+  inline_comments: Array<{ id: string; file: string; line: number | null; body: string }>;
+  comment_threads: Array<{
+    id: string;
+    comment_id: string;
+    messages: Array<{ id: string; role: string; body: string; timestamp: string | null }>;
+    agent_last_reviewed_at: string | null;
+  }>;
+}
+
 interface DebugReviewLayoutProps {
   runId: string;
   issueId: string;
@@ -57,6 +73,10 @@ interface DebugReviewLayoutProps {
    * Any free-form "Overall feedback" is persisted just before this is called.
    */
   onSubmit: (action: DebugAction) => Promise<void>;
+  /** When true, suppress all mutation affordances and hide the action bar. */
+  readOnly?: boolean;
+  /** When readOnly, the static comments + decision metadata to render. */
+  pastReview?: PastReview | null;
 }
 
 /** Convert a raw snapshot diff_file entry to the ChangesetFile the DiffView expects. */
@@ -214,9 +234,65 @@ export function DebugReviewLayout({
   state,
   snapshot,
   onSubmit,
+  readOnly = false,
+  pastReview = null,
 }: DebugReviewLayoutProps) {
-  const { comments, add, remove, clear } = useDraftComments(runId, issueId);
-  const { threadFor, reply } = useCommentThreads(runId, issueId);
+  // Always call hooks unconditionally (React rules), but use their data only in live mode.
+  const live = useDraftComments(runId, issueId);
+  const liveThreads = useCommentThreads(runId, issueId);
+
+  // In readOnly mode, derive comments from pastReview instead of the live hook.
+  const comments: InlineComment[] = useMemo(() => {
+    if (readOnly && pastReview) {
+      return pastReview.inline_comments.map((c) => ({
+        id: c.id,
+        file: c.file,
+        line: c.line,
+        body: c.body,
+      }));
+    }
+    return live.comments;
+  }, [readOnly, pastReview, live.comments]);
+
+  // In readOnly mode, build a static thread lookup from pastReview.comment_threads.
+  const pastThreadByCommentId = useMemo(() => {
+    if (!(readOnly && pastReview)) return null;
+    const map = new Map<string, ThreadView>();
+    for (const t of pastReview.comment_threads) {
+      if (t.messages.length === 0) continue;
+      map.set(t.comment_id, {
+        messages: t.messages.map((m) => ({
+          id: m.id,
+          role: m.role as "user" | "agent",
+          body: m.body,
+          timestamp: m.timestamp ?? "",
+        })),
+        agentReviewing: false,
+      });
+    }
+    return map;
+  }, [readOnly, pastReview]);
+
+  const threadFor = useCallback(
+    (commentId: string): ThreadView | undefined => {
+      if (pastThreadByCommentId) {
+        return pastThreadByCommentId.get(commentId);
+      }
+      return liveThreads.threadFor(commentId);
+    },
+    [pastThreadByCommentId, liveThreads.threadFor],
+  );
+
+  // No-op mutations for readOnly mode.
+  const noOpAdd = useCallback((_c: Omit<InlineComment, "id"> & Partial<Pick<InlineComment, "id">>) => {}, []);
+  const noOpRemove = useCallback((_idx: number) => {}, []);
+  const noOpReply = useCallback(async (_commentId: string, _body: string) => {}, []);
+
+  const add = readOnly ? noOpAdd : live.add;
+  const remove = readOnly ? noOpRemove : live.remove;
+  const reply = readOnly ? noOpReply : liveThreads.reply;
+
+  const { clear } = live;
   const [submitting, setSubmitting] = useState(false);
 
   // Free-form, file-agnostic feedback bundled with line comments at submit time.
@@ -362,6 +438,14 @@ export function DebugReviewLayout({
 
   return (
     <div className="min-h-screen bg-background text-foreground">
+      {readOnly && pastReview && (
+        <div className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+          Past review — {pastReview.state}, v{pastReview.state_local_index}
+          {pastReview.decision_action
+            ? ` · decided ${pastReview.decision_action} on ${pastReview.decided_at}`
+            : ` · undecided (run stopped)`}
+        </div>
+      )}
       <div className="max-w-[1280px] mx-auto px-6 py-6 pr-32">
         {/* Commit-card header */}
         <header className="rounded-lg border border-border bg-card p-5 mb-5">
@@ -388,9 +472,11 @@ export function DebugReviewLayout({
                 </span>
               </div>
             </div>
-            <div className="shrink-0">
-              <ActionButton onSubmit={handleSubmit} disabled={submitting} />
-            </div>
+            {!readOnly && (
+              <div className="shrink-0">
+                <ActionButton onSubmit={handleSubmit} disabled={submitting} />
+              </div>
+            )}
           </div>
         </header>
 
@@ -435,7 +521,7 @@ export function DebugReviewLayout({
             </div>
 
             {/* Overall feedback — bundled into the comment payload at submit time */}
-            <div className="rounded-lg border border-border bg-card overflow-hidden">
+            {!readOnly && <div className="rounded-lg border border-border bg-card overflow-hidden">
               <div className="flex items-center gap-2 px-4 py-2.5 border-b border-border bg-muted/30">
                 <MessageSquare size={14} className="text-muted-foreground shrink-0" />
                 <span className="text-[13px] font-semibold">Overall feedback</span>
@@ -462,7 +548,7 @@ export function DebugReviewLayout({
                   )}
                 />
               </div>
-            </div>
+            </div>}
 
             {/* Virtual review surfaces — result first */}
             <VirtualFileCard
