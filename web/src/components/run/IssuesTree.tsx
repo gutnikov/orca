@@ -97,7 +97,7 @@ function Row({
 export function IssuesTree({ issues, selectedIssueId, onSelect }: Props) {
   const tree = useMemo(() => buildTree(issues), [issues])
   if (tree.length === 0) {
-    return <div className="px-2 py-1 text-[12px] text-muted-foreground italic">No issues yet.</div>
+    return <div className="px-2 py-1 text-[12px] text-[var(--fg-muted)] italic">No issues yet.</div>
   }
   return (
     <div className="flex flex-col gap-0.5">
