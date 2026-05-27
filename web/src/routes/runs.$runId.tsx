@@ -13,10 +13,11 @@ import { PhasesPanel } from "@/components/run/PhasesPanel"
 import { IssueDetailTab } from "@/components/run/IssueDetailTab"
 import { WorkerLogTab } from "@/components/run/WorkerLogTab"
 import { RunResultTab } from "@/components/run/RunResultTab"
+import { DiffTab } from "@/components/run/DiffTab"
 import { RunHeader } from "@/components/run/RunHeader"
 import { AppShell, AppHeader } from "@/components/ui/app-shell"
 
-type Tab = "detail" | "session" | "result"
+type Tab = "detail" | "session" | "result" | "diff"
 
 interface SearchParams {
   issue?: string
@@ -263,6 +264,13 @@ function RunViewerPage() {
                 largeTail={tail >= 2000}
               />
             )}
+            {activeTab === "diff" && (
+              <DiffTab
+                runId={runId}
+                issueId={selectedIssueId}
+                debugPending={selectedIssue?.debug_pending}
+              />
+            )}
             {activeTab === "result" && (
               <RunResultTab
                 result={resultData as Record<string, unknown> | null}
@@ -282,7 +290,7 @@ export const Route = createFileRoute("/runs/$runId")({
     issue: typeof raw.issue === "string" ? raw.issue : undefined,
     session: typeof raw.session === "string" ? raw.session : undefined,
     tab:
-      raw.tab === "detail" || raw.tab === "session" || raw.tab === "result"
+      raw.tab === "detail" || raw.tab === "session" || raw.tab === "result" || raw.tab === "diff"
         ? raw.tab
         : undefined,
   }),
