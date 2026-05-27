@@ -10,6 +10,7 @@ import {
 } from "@/hooks/useRunState"
 import { useWorkerLog } from "@/hooks/useWorkerLog"
 import { formatDuration } from "@/lib/duration"
+import { formatTokens } from "@/lib/usage"
 import { cn } from "@/lib/utils"
 import { IssuesTree } from "@/components/run/IssuesTree"
 import { PhasesPanel } from "@/components/run/PhasesPanel"
@@ -22,6 +23,13 @@ import { RunHeader } from "@/components/run/RunHeader"
 import { AppShell, AppHeader } from "@/components/ui/app-shell"
 
 type Tab = "session" | "prompt" | "result" | "diff"
+
+const TAB_LABELS: Record<Tab, string> = {
+  session: "Session",
+  prompt: "Prompt",
+  diff: "Diff",
+  result: "Result",
+}
 
 const SIDEBAR_STORAGE_KEY = "orca.runSidebarWidth"
 const SIDEBAR_DEFAULT_WIDTH = 340
@@ -57,6 +65,7 @@ function RunViewerPage() {
   const [tail, setTail] = useState(500)
   const [detailOpen, setDetailOpen] = useState(false)
   const [sidebarWidth, setSidebarWidth] = useState(initialSidebarWidth)
+  const [promptTokenCounts, setPromptTokenCounts] = useState<Record<string, number>>({})
 
   const selectedIssueId = search.issue ?? null
   const selectedSessionId = search.session ?? null
@@ -181,6 +190,19 @@ function RunViewerPage() {
       replace: true,
     })
   }
+
+  const recordPromptTokenCount = useCallback((sessionId: string, tokenCount: number | null) => {
+    setPromptTokenCounts((current) => {
+      if (tokenCount === null) {
+        if (!(sessionId in current)) return current
+        const next = { ...current }
+        delete next[sessionId]
+        return next
+      }
+      if (current[sessionId] === tokenCount) return current
+      return { ...current, [sessionId]: tokenCount }
+    })
+  }, [])
 
   const startSidebarResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -366,13 +388,23 @@ function RunViewerPage() {
                 type="button"
                 onClick={() => setTab(t)}
                 className={cn(
-                  "px-3 py-2 text-[13px] capitalize border-b-2 -mb-px transition-colors",
+                  "px-3 py-2 text-[13px] border-b-2 -mb-px transition-colors",
                   activeTab === t
                     ? "border-[var(--accent-warm)] text-[var(--fg)] font-medium"
                     : "border-transparent text-[var(--fg-muted)] hover:text-[var(--fg)]",
                 )}
               >
-                {t}
+                <span className="inline-flex items-baseline gap-1.5">
+                  <span>{TAB_LABELS[t]}</span>
+                  {t === "prompt" && selectedSessionId && promptTokenCounts[selectedSessionId] ? (
+                    <span
+                      className="text-[11px] font-normal normal-case text-[var(--fg-muted)]"
+                      title="Estimated from rendered prompt length; actual CLI tokenizer counts can vary by model."
+                    >
+                      ~{formatTokens(promptTokenCounts[selectedSessionId])} tok
+                    </span>
+                  ) : null}
+                </span>
               </button>
             ))}
           </div>
@@ -390,7 +422,11 @@ function RunViewerPage() {
               />
             )}
             {activeTab === "prompt" && (
-              <RenderedPromptTab runId={runId} session={selectedSession} />
+              <RenderedPromptTab
+                runId={runId}
+                session={selectedSession}
+                onPromptTokenCountChange={recordPromptTokenCount}
+              />
             )}
             {activeTab === "diff" && (
               <DiffTab
