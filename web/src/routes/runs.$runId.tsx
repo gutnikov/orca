@@ -1,122 +1,289 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
+import { createFileRoute, useNavigate } from "@tanstack/react-router"
+import { useEffect, useMemo, useState } from "react"
+import { toast } from "sonner"
+import {
+  useRunState,
+  type IssueState,
+  type SessionState,
+} from "@/hooks/useRunState"
+import { useWorkerLog } from "@/hooks/useWorkerLog"
+import { formatDuration } from "@/lib/duration"
+import { IssuesTree } from "@/components/run/IssuesTree"
+import { PhasesPanel } from "@/components/run/PhasesPanel"
+import { IssueDetailTab } from "@/components/run/IssueDetailTab"
+import { WorkerLogTab } from "@/components/run/WorkerLogTab"
+import { RunResultTab } from "@/components/run/RunResultTab"
+import { RunHeader } from "@/components/run/RunHeader"
+import { AppShell, AppHeader } from "@/components/ui/app-shell"
 
-interface Attempt {
-  attempt: number;
-  state: string;
-  state_local_index: number;
-  paused_at: string;
-  decision: string | null;
-  decided_at: string | null;
+type Tab = "detail" | "session" | "result"
+
+interface SearchParams {
+  issue?: string
+  session?: string
+  tab?: Tab
 }
 
-interface IssueValue {
-  state: string;
-  fields?: { title?: string };
-}
+function RunViewerPage() {
+  const { runId } = Route.useParams()
+  const search = Route.useSearch() as SearchParams
+  const navigate = useNavigate()
 
-interface RunDetail {
-  run_id: string;
-  status?: string;
-  state: { issues: Record<string, IssueValue> };
-}
+  const { data, error, refetch } = useRunState(runId)
+  const [tail, setTail] = useState(500)
 
-function groupByState(attempts: Attempt[]): Map<string, Attempt[]> {
-  const m = new Map<string, Attempt[]>();
-  for (const a of attempts) {
-    const key = a.state ?? "?";
-    const arr = m.get(key) ?? [];
-    arr.push(a);
-    m.set(key, arr);
-  }
-  return m;
-}
+  const selectedIssueId = search.issue ?? null
+  const selectedSessionId = search.session ?? null
+  const activeTab: Tab = search.tab ?? "detail"
 
-function AttemptsForIssue({ runId, issueId }: { runId: string; issueId: string }) {
-  const [attempts, setAttempts] = useState<Attempt[] | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      const r = await fetch(`/api/runs/${runId}/issues/${issueId}/debug/attempts`);
-      if (r.ok && !cancelled) setAttempts(await r.json());
-    })();
-    return () => { cancelled = true; };
-  }, [runId, issueId]);
-
-  if (attempts === null) return <span className="text-xs opacity-50">loading…</span>;
-  if (attempts.length === 0) return <span className="text-xs opacity-50">no reviews</span>;
-  const grouped = groupByState(attempts);
-  return (
-    <div className="flex flex-col gap-1 text-sm">
-      {Array.from(grouped.entries()).map(([state, group]) => (
-        <div key={state} className="flex gap-2 items-center">
-          <span className="font-medium">{state}</span>
-          {group.map((a) => (
-            <Link
-              key={a.attempt}
-              to="/debug/$runId/$issueId"
-              params={{ runId, issueId }}
-              search={{ attempt: a.attempt }}
-              className="text-xs underline opacity-70 hover:opacity-100"
-            >
-              v{a.state_local_index}{a.decision === null ? " (undecided)" : ""}
-            </Link>
-          ))}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function RunDetailPage() {
-  const { runId } = Route.useParams();
-  const [run, setRun] = useState<RunDetail | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const decoded = decodeURIComponent(runId);
-    let cancelled = false;
-    void (async () => {
-      try {
-        const r = await fetch(`/api/runs/${decoded}`);
-        if (cancelled) return;
-        if (!r.ok) { setError(`HTTP ${r.status}`); return; }
-        const data: RunDetail = await r.json();
-        if (cancelled) return;
-        setRun(data);
-      } catch (exc) {
-        if (cancelled) return;
-        setError(String(exc));
+  // Build outcomes map by pairing completed sessions with worker_result events
+  // (mirrors tui/app.py:_session_result_map — zip-by-order matching).
+  const outcomes: Record<string, string> = useMemo(() => {
+    if (!data) return {}
+    const out: Record<string, string> = {}
+    for (const [iid, issue] of Object.entries(data.state.issues)) {
+      const completed = data.sessions
+        .filter((s) => s.issue_id === iid && s.completed_at !== null)
+        .sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at))
+      const log = issue.event_log
+      if (!Array.isArray(log)) continue
+      const resultEvents = log.filter((e) => e.type === "worker_result")
+      for (let i = 0; i < completed.length && i < resultEvents.length; i++) {
+        const sid = completed[i].session_id
+        const outcome = resultEvents[i].data.outcome
+        if (typeof outcome === "string") out[sid] = outcome
       }
-    })();
-    return () => { cancelled = true; };
-  }, [runId]);
+    }
+    return out
+  }, [data])
 
-  if (error) return <div className="p-8 text-red-500">{error}</div>;
-  if (!run) return <div className="p-8 opacity-50">Loading…</div>;
-  const decoded = decodeURIComponent(runId);
+  // Default issue selection: first running issue, else first issue.
+  useEffect(() => {
+    if (!data) return
+    if (selectedIssueId && data.state.issues[selectedIssueId]) return
+    const ids = Object.keys(data.state.issues)
+    if (ids.length === 0) return
+    const running = ids.find((id) => data.state.issues[id].worker_active)
+    void navigate({
+      to: "/runs/$runId",
+      params: { runId },
+      search: { issue: running ?? ids[0], tab: "detail" } as SearchParams,
+      replace: true,
+    })
+  }, [data, selectedIssueId, navigate, runId])
+
+  // Surface daemon-reconnect state as an unobtrusive toast.
+  useEffect(() => {
+    if (!error || data === null) return
+    const id = toast("Reconnecting to daemon…", {
+      duration: 4000,
+      description: error,
+    })
+    return () => {
+      toast.dismiss(id)
+    }
+  }, [error, data])
+
+  const selectedIssue: IssueState | null =
+    selectedIssueId && data ? (data.state.issues[selectedIssueId] ?? null) : null
+
+  const selectedSession: SessionState | null = useMemo(
+    () =>
+      data && selectedSessionId
+        ? (data.sessions.find((s) => s.session_id === selectedSessionId) ?? null)
+        : null,
+    [data, selectedSessionId],
+  )
+
+  const debugMode = useMemo(
+    () =>
+      data
+        ? Object.values(data.state.issues).some((i) => i.debug_pending)
+        : false,
+    [data],
+  )
+
+  const issueCount = data ? Object.keys(data.state.issues).length : 0
+  const doneCount = data
+    ? Object.values(data.state.issues).filter((i) => i.state === "done").length
+    : 0
+
+  const elapsed = useMemo(() => {
+    if (!data) return ""
+    const starts = data.sessions
+      .map((s) => Date.parse(s.started_at))
+      .filter((n) => !Number.isNaN(n))
+    if (starts.length === 0) return ""
+    const earliest = new Date(Math.min(...starts)).toISOString()
+    return formatDuration(earliest, data.status === "completed" ? new Date().toISOString() : null)
+  }, [data])
+
+  const selectIssue = (id: string) => {
+    void navigate({
+      to: "/runs/$runId",
+      params: { runId },
+      search: { issue: id, tab: "detail" } as SearchParams,
+      replace: true,
+    })
+  }
+
+  const selectSession = (sid: string) => {
+    if (!selectedIssueId) return
+    void navigate({
+      to: "/runs/$runId",
+      params: { runId },
+      search: { issue: selectedIssueId, session: sid, tab: "session" } as SearchParams,
+      replace: true,
+    })
+    // Boost log capture frequency for the focused session.
+    void fetch(`/api/runs/${runId}/hot-session`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ session_id: sid, hot: true }),
+    })
+  }
+
+  const setTab = (t: Tab) => {
+    void navigate({
+      to: "/runs/$runId",
+      params: { runId },
+      search: {
+        issue: selectedIssueId ?? undefined,
+        session: selectedSessionId ?? undefined,
+        tab: t,
+      } as SearchParams,
+      replace: true,
+    })
+  }
+
+  const logIssueId = selectedSession ? selectedSession.issue_id : selectedIssueId
+  const { text: logText, error: logError } = useWorkerLog(
+    runId,
+    logIssueId,
+    selectedSessionId,
+    tail,
+  )
+
+  // Result data — read from the session's matching worker_result event.
+  const resultData = useMemo(() => {
+    if (!selectedSession || !data) return null
+    const issue = data.state.issues[selectedSession.issue_id]
+    const log = issue?.event_log
+    if (!Array.isArray(log)) return null
+    const completed = data.sessions
+      .filter((s) => s.issue_id === selectedSession.issue_id && s.completed_at !== null)
+      .sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at))
+    const results = log.filter((e) => e.type === "worker_result")
+    const idx = completed.findIndex((s) => s.session_id === selectedSession.session_id)
+    if (idx === -1 || idx >= results.length) return null
+    return results[idx].data
+  }, [selectedSession, data])
+
+  if (error && data === null) {
+    return (
+      <AppShell className="flex items-center justify-center min-h-screen">
+        <div className="text-center">
+          <h1 className="text-[16px] font-semibold mb-2">Cannot reach daemon</h1>
+          <p className="text-[13px] text-[var(--fg-muted)]">{error}</p>
+        </div>
+      </AppShell>
+    )
+  }
+
+  if (data === null) {
+    return (
+      <AppShell className="flex items-center justify-center min-h-screen">
+        <p className="text-[13px] text-[var(--fg-muted)] italic">Loading…</p>
+      </AppShell>
+    )
+  }
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <div className="max-w-[1024px] mx-auto px-6 py-8">
-        <Link to="/" className="text-xs underline opacity-70">← all runs</Link>
-        <h1 className="text-xl font-semibold tracking-tight mt-2">{run.run_id}</h1>
-        <div className="text-sm text-muted-foreground mb-6">status: {run.status ?? "unknown"}</div>
-        <div className="flex flex-col gap-4">
-          {Object.entries(run.state.issues).map(([issueId, issue]) => (
-            <div key={issueId} className="border rounded p-3">
-              <div className="text-sm font-medium">
-                {issueId} <span className="opacity-50">— {issue.state}</span>
-              </div>
-              <AttemptsForIssue runId={decoded} issueId={issueId} />
+    <AppShell className="flex flex-col h-screen">
+      <AppHeader
+        breadcrumb={[
+          { label: "orca", to: "/" },
+          { label: "runs", to: "/" },
+          { label: runId, mono: true },
+        ]}
+      />
+      <RunHeader
+        runId={runId}
+        status={data.status}
+        debugMode={debugMode}
+        elapsed={elapsed}
+        issueCount={issueCount}
+        doneCount={doneCount}
+        selectedIssueId={selectedIssueId}
+        selectedIssue={selectedIssue}
+        activeTab={activeTab}
+        setTab={setTab}
+        onChange={() => void refetch()}
+      />
+      <div className="flex-1 min-h-0 grid grid-cols-[260px_1fr]">
+        <aside className="border-r border-[var(--border)] bg-[var(--canvas)] overflow-y-auto p-3 flex flex-col gap-4">
+          <div>
+            <div className="text-[10px] uppercase tracking-wider text-[var(--fg-subtle)] mb-2 px-1 font-semibold">
+              Issues
             </div>
-          ))}
-        </div>
+            <IssuesTree
+              issues={data.state.issues}
+              selectedIssueId={selectedIssueId}
+              onSelect={selectIssue}
+            />
+          </div>
+          {selectedIssueId && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-[var(--fg-subtle)] mb-2 px-1 font-semibold">
+                Phases
+              </div>
+              <PhasesPanel
+                sessions={data.sessions}
+                issueId={selectedIssueId}
+                outcomes={outcomes}
+                selectedSessionId={selectedSessionId}
+                onSelect={selectSession}
+              />
+            </div>
+          )}
+        </aside>
+
+        <section className="flex flex-col min-h-0 bg-[var(--canvas)]">
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            {activeTab === "detail" && (
+              <IssueDetailTab runId={runId} issueId={selectedIssueId} issue={selectedIssue} />
+            )}
+            {activeTab === "session" && (
+              <WorkerLogTab
+                text={logText}
+                error={logError}
+                session={selectedSession}
+                outcome={selectedSession ? outcomes[selectedSession.session_id] : undefined}
+                onIncreaseTail={() => setTail(2000)}
+                largeTail={tail >= 2000}
+              />
+            )}
+            {activeTab === "result" && (
+              <RunResultTab
+                result={resultData as Record<string, unknown> | null}
+                activeSession={selectedSession?.completed_at === null}
+              />
+            )}
+          </div>
+        </section>
       </div>
-    </main>
-  );
+    </AppShell>
+  )
 }
 
 export const Route = createFileRoute("/runs/$runId")({
-  component: RunDetailPage,
-});
+  component: RunViewerPage,
+  validateSearch: (raw: Record<string, unknown>): SearchParams => ({
+    issue: typeof raw.issue === "string" ? raw.issue : undefined,
+    session: typeof raw.session === "string" ? raw.session : undefined,
+    tab:
+      raw.tab === "detail" || raw.tab === "session" || raw.tab === "result"
+        ? raw.tab
+        : undefined,
+  }),
+})

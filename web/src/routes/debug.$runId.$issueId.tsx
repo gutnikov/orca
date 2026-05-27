@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
+import { AppShell, AppHeader } from "@/components/ui/app-shell";
 import { DebugReviewLayout, type PastReview } from "../components/review/DebugReviewLayout";
 import { PostDecisionScreen } from "../components/review/PostDecisionScreen";
 import type { DebugAction } from "../components/review/ActionButton";
@@ -85,37 +86,72 @@ function DebugReviewPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex items-center justify-center p-8 text-center">
-        <div>
-          <div className="text-red-500 text-3xl">⚠</div>
-          <h2 className="text-xl font-semibold mt-2">{error}</h2>
+      <AppShell>
+        <AppHeader breadcrumb={[{ label: "orca", to: "/" }]} />
+        <div className="flex items-center justify-center p-8 text-center" style={{ minHeight: "calc(100vh - 3rem)" }}>
+          <div>
+            <div className="text-[var(--danger)] text-3xl">⚠</div>
+            <h2 className="text-xl font-semibold mt-2">{error}</h2>
+          </div>
         </div>
-      </div>
+      </AppShell>
     );
   }
   if (submittedAction) {
     return (
-      <PostDecisionScreen
-        runId={decodeURIComponent(runId)}
-        issueId={issueId}
-        state={stateName}
-        action={submittedAction}
-      />
+      <AppShell>
+        <AppHeader
+          breadcrumb={[
+            { label: "orca", to: "/" },
+            { label: "runs", to: "/" },
+            { label: runId, mono: true, to: "/runs/$runId", params: { runId } },
+            { label: `debug · ${issueId.slice(0, 8)}`, mono: true },
+          ]}
+        />
+        <PostDecisionScreen
+          runId={decodeURIComponent(runId)}
+          issueId={issueId}
+          state={stateName}
+          action={submittedAction}
+        />
+      </AppShell>
     );
   }
   if (!snapshot) {
-    return <div className="p-8 opacity-50">Loading debug review…</div>;
+    return (
+      <AppShell>
+        <AppHeader
+          breadcrumb={[
+            { label: "orca", to: "/" },
+            { label: "runs", to: "/" },
+            { label: runId, mono: true, to: "/runs/$runId", params: { runId } },
+            { label: `debug · ${issueId.slice(0, 8)}`, mono: true },
+          ]}
+        />
+        <div className="p-8 opacity-50">Loading debug review…</div>
+      </AppShell>
+    );
   }
   return (
-    <DebugReviewLayout
-      runId={decodeURIComponent(runId)}
-      issueId={issueId}
-      state={readOnly && snapshot.past_review ? snapshot.past_review.state : stateName}
-      snapshot={snapshot}
-      onSubmit={handleSubmit}
-      readOnly={readOnly}
-      pastReview={snapshot.past_review ?? null}
-    />
+    <AppShell>
+      <AppHeader
+        breadcrumb={[
+          { label: "orca", to: "/" },
+          { label: "runs", to: "/" },
+          { label: runId, mono: true, to: "/runs/$runId", params: { runId } },
+          { label: `debug · ${issueId.slice(0, 8)}`, mono: true },
+        ]}
+      />
+      <DebugReviewLayout
+        runId={decodeURIComponent(runId)}
+        issueId={issueId}
+        state={readOnly && snapshot.past_review ? snapshot.past_review.state : stateName}
+        snapshot={snapshot}
+        onSubmit={handleSubmit}
+        readOnly={readOnly}
+        pastReview={snapshot.past_review ?? null}
+      />
+    </AppShell>
   );
 }
 

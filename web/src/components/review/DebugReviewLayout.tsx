@@ -440,9 +440,9 @@ export function DebugReviewLayout({
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div>
       {readOnly && pastReview && (
-        <div className="border-b bg-muted/30 px-4 py-2 text-xs text-muted-foreground">
+        <div className="border-b border-[var(--border)] bg-[var(--subtle)] px-4 py-2 text-[11px] text-[var(--fg-muted)]">
           Past review — {pastReview.state}, v{pastReview.state_local_index}
           {pastReview.decision_action
             ? ` · decided ${pastReview.decision_action} on ${pastReview.decided_at}`

@@ -1,6 +1,12 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
-import { Pause, ChevronRight } from "lucide-react"
+import { Plus, Pause, ChevronRight, Crosshair } from "lucide-react"
+
+import { AppShell, AppHeader } from "@/components/ui/app-shell"
+import { Button } from "@/components/ui/button"
+import { StatusPill, type StatusKind } from "@/components/ui/status-pill"
+import { EmptyState } from "@/components/ui/empty-state"
+import { NewRunDialog } from "@/components/home/NewRunDialog"
 
 interface DebugReview {
   issue_id: string
@@ -21,6 +27,15 @@ interface RunSummary {
   debug?: boolean
 }
 
+function runKind(run: RunSummary): StatusKind {
+  if ((run.debug_reviews?.length ?? 0) > 0) return "attention"
+  if (run.status === "running") return "running"
+  if (run.status === "completed") return "completed"
+  if (run.status === "stopped") return "stopped"
+  if (run.status === "errored") return "errored"
+  return "draft"
+}
+
 export const Route = createFileRoute("/")({
   component: HomePage,
 })
@@ -28,6 +43,7 @@ export const Route = createFileRoute("/")({
 function HomePage() {
   const [runs, setRuns] = useState<RunSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [newRunOpen, setNewRunOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -63,36 +79,38 @@ function HomePage() {
   }
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <div className="max-w-[1024px] mx-auto px-6 py-8 pr-32">
-        <header className="mb-6">
-          <h1 className="text-2xl font-semibold tracking-tight">orca</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Active runs on this daemon.
-          </p>
-        </header>
+    <AppShell>
+      <AppHeader
+        breadcrumb={[{ label: "orca" }]}
+        actions={
+          <Button variant="primary" onClick={() => setNewRunOpen(true)}>
+            <Plus size={14} />
+            New run
+          </Button>
+        }
+      />
 
-        {error ? (
-          <div className="rounded-lg border border-destructive/40 bg-destructive/5 text-destructive px-4 py-3 text-sm">
+      <div className="max-w-[1024px] mx-auto px-6 py-6">
+        {error && (
+          <div className="mb-4 rounded-md border border-[var(--danger)]/40 bg-[var(--danger)]/5 text-[var(--danger)] px-4 py-2.5 text-[13px]">
             Could not reach daemon API: {error}
           </div>
-        ) : null}
+        )}
 
         {/* Active debug-review pauses — most important thing on the page */}
-        {allDebugReviews.length > 0 ? (
-          <section className="mb-6">
-            <div className="flex items-center gap-2 mb-3">
-              <Pause size={16} className="text-[#d4a064]" />
-              <h2 className="text-sm font-semibold uppercase tracking-wider text-[#d4a064]">
+        {allDebugReviews.length > 0 && (
+          <section className="mb-6 rounded-md border-l-2 border-[var(--attention)] bg-[var(--surface)] border-y border-r border-[var(--border)]">
+            <div className="flex items-center gap-2 px-4 py-2.5 border-b border-[var(--border)]">
+              <Pause size={14} className="text-[var(--attention)]" />
+              <h2 className="text-[12px] font-semibold uppercase tracking-wider text-[var(--attention)]">
                 Awaiting your review
               </h2>
-              <span className="text-xs text-muted-foreground tabular-nums">
+              <span className="text-[11px] text-[var(--fg-muted)] tabular-nums ml-1">
                 {allDebugReviews.length}
               </span>
             </div>
-            <ul className="space-y-2">
-              {allDebugReviews.map(({ run, review }) => {
-                // Extract path from the review URL so we can use TanStack Link
+            <ul>
+              {allDebugReviews.map(({ run, review }, idx) => {
                 let pathname = ""
                 try {
                   pathname = new URL(review.url).pathname
@@ -100,121 +118,95 @@ function HomePage() {
                   pathname = `/debug/${run.run_id}/${review.issue_id}`
                 }
                 return (
-                  <li key={`${run.run_id}-${review.issue_id}`}>
+                  <li
+                    key={`${run.run_id}-${review.issue_id}`}
+                    className={idx > 0 ? "border-t border-[var(--border-muted)]" : ""}
+                  >
                     <Link
                       to={pathname}
-                      className="block rounded-lg border-2 border-[#d4a064]/40 bg-[#d4a064]/5 hover:bg-[#d4a064]/10 hover:border-[#d4a064]/60 transition-colors px-4 py-3"
+                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-[var(--subtle)] transition-colors"
                     >
-                      <div className="flex items-center gap-3">
-                        <div className="flex-1 min-w-0">
-                          <div className="font-mono text-sm font-semibold truncate">
-                            {run.run_id}
-                          </div>
-                          <div className="text-[12px] text-muted-foreground mt-0.5">
-                            state{" "}
-                            <span className="font-mono bg-muted px-1.5 py-0.5 rounded text-foreground">
-                              {review.state}
-                            </span>{" "}
-                            · paused for review
-                          </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="font-mono text-[13px] font-semibold text-[var(--accent-fg)] truncate">
+                          {run.run_id}
                         </div>
-                        <ChevronRight size={18} className="text-muted-foreground shrink-0" />
+                        <div className="text-[11.5px] text-[var(--fg-muted)] mt-0.5">
+                          state{" "}
+                          <span className="font-mono bg-[var(--subtle)] px-1.5 py-px rounded-sm text-[var(--fg)]">
+                            {review.state}
+                          </span>{" "}
+                          · paused for review
+                        </div>
                       </div>
+                      <ChevronRight size={16} className="text-[var(--fg-subtle)] shrink-0" />
                     </Link>
                   </li>
                 )
               })}
             </ul>
           </section>
-        ) : null}
+        )}
 
-        {/* All runs list */}
         <section>
-          <h2 className="text-sm font-semibold uppercase tracking-wider text-muted-foreground mb-3">
+          <h2 className="text-[11px] font-semibold uppercase tracking-wider text-[var(--fg-subtle)] mb-2.5">
             Runs
           </h2>
           {runs === null ? (
-            <div className="text-sm text-muted-foreground italic">Loading…</div>
+            <div className="text-[13px] text-[var(--fg-muted)] italic">Loading…</div>
           ) : runs.length === 0 ? (
-            <div className="rounded-lg border border-border bg-card px-4 py-6 text-center text-sm text-muted-foreground italic">
-              No runs on this daemon yet. Start one with{" "}
-              <code className="bg-muted px-1 py-0.5 rounded">orca flow run</code>.
-            </div>
+            <EmptyState
+              icon={<Crosshair size={24} />}
+              title="No runs on this daemon yet"
+              description={
+                <>
+                  Start your first orca run from this dashboard, or via{" "}
+                  <code className="bg-[var(--subtle)] px-1 py-px rounded-sm font-mono text-[12px]">
+                    orca flow run
+                  </code>
+                  .
+                </>
+              }
+              action={
+                <Button variant="primary" onClick={() => setNewRunOpen(true)}>
+                  <Plus size={14} />
+                  New run
+                </Button>
+              }
+            />
           ) : (
-            <ul className="space-y-2">
-              {runs.map((run) => {
+            <ul className="rounded-md border border-[var(--border)] bg-[var(--surface)]">
+              {runs.map((run, idx) => {
+                const kind = runKind(run)
                 const activeReviews = run.debug_reviews ?? []
                 return (
-                  <li key={run.run_id}>
-                    <div
-                      className={
-                        activeReviews.length > 0
-                          ? "rounded-lg border-2 border-[#d4a064]/45 bg-[#d4a064]/5 px-4 py-3 flex items-center gap-3"
-                          : "rounded-lg border border-border bg-card px-4 py-3 flex items-center gap-3"
-                      }
+                  <li
+                    key={run.run_id}
+                    className={idx > 0 ? "border-t border-[var(--border-muted)]" : ""}
+                  >
+                    <Link
+                      to="/runs/$runId"
+                      params={{ runId: run.run_id }}
+                      className="flex items-center gap-3 px-4 py-2.5 hover:bg-[var(--subtle)] transition-colors"
                     >
-                      <div className="flex-1 min-w-0">
-                        <div className="font-mono text-sm font-semibold truncate">
-                          {run.run_id}
-                        </div>
-                        <div className="text-[12px] text-muted-foreground mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1">
-                          <span>
-                            status{" "}
-                            <span
-                              className={
-                                run.status === "running"
-                                  ? "text-foreground"
-                                  : run.status === "completed"
-                                    ? "text-[oklch(0.65_0.18_150)]"
-                                    : "text-muted-foreground"
-                              }
-                            >
-                              {run.status}
-                            </span>
-                          </span>
-                          <span>
-                            {run.terminal_count}/{run.issue_count} done
-                          </span>
-                          {run.debug ? (
-                            <span className="text-[#d4a064]">debug mode</span>
-                          ) : null}
-                          {activeReviews.length > 0 ? (
-                            <span className="inline-flex items-center gap-1.5 text-[#d4a064] font-semibold">
-                              <Pause size={12} />
-                              awaiting review
-                            </span>
-                          ) : null}
-                        </div>
-                        {activeReviews.length > 0 ? (
-                          <div className="mt-2 flex flex-wrap gap-1.5">
-                            {activeReviews.map((review) => {
-                              let pathname = ""
-                              try {
-                                pathname = new URL(review.url).pathname
-                              } catch {
-                                pathname = `/debug/${run.run_id}/${review.issue_id}`
-                              }
-                              return (
-                                <Link
-                                  key={review.issue_id}
-                                  to={pathname}
-                                  className="inline-flex items-center rounded-md border border-[#d4a064]/35 bg-[#d4a064]/10 px-2 py-0.5 text-[11px] font-mono text-[#d4a064] hover:bg-[#d4a064]/15"
-                                >
-                                  {review.issue_id} · {review.state}
-                                </Link>
-                              )
-                            })}
-                          </div>
-                        ) : null}
-                      </div>
-                      <Link
-                        to="/runs/$runId"
-                        params={{ runId: run.run_id }}
-                        className="text-xs underline opacity-70 hover:opacity-100 shrink-0"
-                      >
-                        view past reviews →
-                      </Link>
-                    </div>
+                      <StatusPill kind={kind} />
+                      <span className="font-mono text-[13px] font-semibold text-[var(--accent-fg)] truncate">
+                        {run.run_id}
+                      </span>
+                      <span className="text-[11.5px] text-[var(--fg-muted)] truncate">
+                        {run.terminal_count}/{run.issue_count} done
+                      </span>
+                      {run.debug && (
+                        <StatusPill kind="attention" label="debug" pulse={false} size="sm" />
+                      )}
+                      {activeReviews.length > 0 && (
+                        <StatusPill
+                          kind="attention"
+                          label={`${activeReviews.length} awaiting review`}
+                          size="sm"
+                          className="ml-auto"
+                        />
+                      )}
+                    </Link>
                   </li>
                 )
               })}
@@ -222,6 +214,8 @@ function HomePage() {
           )}
         </section>
       </div>
-    </main>
+
+      <NewRunDialog open={newRunOpen} onOpenChange={setNewRunOpen} />
+    </AppShell>
   )
 }

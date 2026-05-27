@@ -216,7 +216,8 @@ async def _get_worker_log(request: Request) -> PlainTextResponse:
     run_id: str = request.path_params["run_id"]
     issue_id: str = request.path_params["issue_id"]
     tail = int(request.query_params.get("tail", "100"))
-    text = manager.get_worker_log(run_id, issue_id, tail)
+    session_id = request.query_params.get("session_id")
+    text = manager.get_worker_log(run_id, issue_id, tail, session_id=session_id)
     return PlainTextResponse(text)
 
 

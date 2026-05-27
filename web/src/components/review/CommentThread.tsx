@@ -78,7 +78,7 @@ export function CommentThread({
                     <div className="flex gap-0.5 opacity-0 group-hover/comment:opacity-100 transition-opacity shrink-0">
                       <Button
                         type="button"
-                        size="icon"
+                        size="md"
                         variant="ghost"
                         className="h-5 w-5"
                         onClick={() => {
@@ -91,7 +91,7 @@ export function CommentThread({
                       </Button>
                       <Button
                         type="button"
-                        size="icon"
+                        size="md"
                         variant="ghost"
                         className="h-5 w-5 text-destructive"
                         onClick={() => onDelete(idx)}
