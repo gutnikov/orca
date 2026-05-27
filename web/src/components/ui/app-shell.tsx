@@ -1,6 +1,25 @@
-import type { ReactNode } from "react"
+import { type ReactNode, useEffect, useState } from "react"
 import { Link } from "@tanstack/react-router"
 import { cn } from "@/lib/utils"
+
+let cachedVersion: string | null = null
+
+function useOrcaVersion(): string | null {
+  const [version, setVersion] = useState(cachedVersion)
+  useEffect(() => {
+    if (cachedVersion) return
+    void fetch("/api/status")
+      .then((r) => r.ok ? r.json() : null)
+      .then((d) => {
+        if (d?.version) {
+          cachedVersion = d.version
+          setVersion(d.version)
+        }
+      })
+      .catch(() => {})
+  }, [])
+  return version
+}
 
 interface AppShellProps {
   children: ReactNode
@@ -35,6 +54,7 @@ interface AppHeaderProps {
 
 /** Sticky top bar — logo dot, breadcrumb, right-aligned actions slot. */
 export function AppHeader({ breadcrumb, actions }: AppHeaderProps) {
+  const version = useOrcaVersion()
   return (
     <header
       className={cn(
@@ -76,6 +96,11 @@ export function AppHeader({ breadcrumb, actions }: AppHeaderProps) {
       </nav>
       {actions && (
         <div className="ml-auto flex items-center gap-2 shrink-0">{actions}</div>
+      )}
+      {version && (
+        <span className={cn("text-[11px] text-[var(--fg-subtle)] font-mono tabular-nums", !actions && "ml-auto")}>
+          v{version}
+        </span>
       )}
     </header>
   )
