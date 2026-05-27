@@ -1,6 +1,7 @@
 import { useMemo } from "react"
 import type { SessionState } from "@/hooks/useRunState"
 import { formatDuration } from "@/lib/duration"
+import { formatUsage } from "@/lib/usage"
 import { Stepper, type Step, type StepState } from "@/components/ui/stepper"
 
 interface Props {
@@ -29,6 +30,7 @@ export function PhasesPanel({ sessions, issueId, outcomes, selectedSessionId, on
         name: s.state,
         outcome: outcomes[s.session_id],
         duration: formatDuration(s.started_at, s.completed_at),
+        usage: formatUsage(s.usage),
         progress: s.progress,
         progressText: s.status ?? null,
         active: s.session_id === selectedSessionId,

@@ -144,6 +144,7 @@ class PhasesPanel(VerticalScroll):
             session_id = str(session.get("session_id", ""))
             outcome = self._outcomes.get(session_id, "")
             is_selected = session_id == self._selected_session_id
+            usage_text = _usage_str(session)
 
             if is_active:
                 is_waiting = bool(session.get("waiting", False))
@@ -158,8 +159,11 @@ class PhasesPanel(VerticalScroll):
                     lines.append(state_name, style="bold blue")
                     lines.append("  WAITING", style="bold blue")
                     elapsed = _elapsed_str(str(session.get("started_at", "")))
-                    if elapsed:
-                        lines.append(f"\n  paused for {elapsed}", style="dim blue")
+                    meta = [f"paused for {elapsed}"] if elapsed else []
+                    if usage_text:
+                        meta.append(usage_text)
+                    if meta:
+                        lines.append(f"\n  {'  '.join(meta)}", style="dim blue")
                 else:
                     frame = _SPINNER[self._tick % len(_SPINNER)]
                     lines.append(f"{frame} ", style="bold yellow")
@@ -178,8 +182,11 @@ class PhasesPanel(VerticalScroll):
                         _render_progress_bar(lines, progress, "yellow")
 
                     elapsed = _elapsed_str(str(session.get("started_at", "")))
-                    if elapsed:
-                        lines.append(f"\n  {elapsed}", style="dim")
+                    meta = [elapsed] if elapsed else []
+                    if usage_text:
+                        meta.append(usage_text)
+                    if meta:
+                        lines.append(f"\n  {'  '.join(meta)}", style="dim")
             else:
                 is_failed = session.get("failed", False)
                 is_interrupted = session.get("interrupted", False)
@@ -217,8 +224,11 @@ class PhasesPanel(VerticalScroll):
                     str(session.get("started_at", "")),
                     str(session.get("completed_at", "")),
                 )
-                if duration:
-                    lines.append(f"\n  {duration}", style="dim")
+                meta = [duration] if duration else []
+                if usage_text:
+                    meta.append(usage_text)
+                if meta:
+                    lines.append(f"\n  {'  '.join(meta)}", style="dim")
 
             if i < len(reversed_sessions) - 1:
                 lines.append("\n  ↑\n", style="dim")
@@ -257,3 +267,38 @@ def _duration_str(started_at: str, completed_at: str) -> str:
         return f"{seconds}s"
     except (ValueError, TypeError):
         return ""
+
+
+def _usage_str(session: dict[str, Any]) -> str:
+    usage = session.get("usage")
+    if not isinstance(usage, dict):
+        return ""
+    cost = usage.get("cost_usd")
+    if isinstance(cost, int | float) and not isinstance(cost, bool):
+        prefix = "~$" if usage.get("cost_kind") == "estimated" else "$"
+        return prefix + _format_cost(float(cost))
+    total = usage.get("total_tokens")
+    if isinstance(total, int) and not isinstance(total, bool) and total > 0:
+        return f"{_format_tokens(total)} tok"
+    tokens = usage.get("tokens")
+    if isinstance(tokens, dict):
+        token_total = sum(value for value in tokens.values() if isinstance(value, int) and not isinstance(value, bool))
+        if token_total > 0:
+            return f"{_format_tokens(token_total)} tok"
+    return ""
+
+
+def _format_cost(cost: float) -> str:
+    if cost >= 1:
+        return f"{cost:.2f}"
+    if cost >= 0.01:
+        return f"{cost:.2f}"
+    return f"{cost:.4f}"
+
+
+def _format_tokens(tokens: int) -> str:
+    if tokens >= 1_000_000:
+        return f"{tokens / 1_000_000:.1f}M"
+    if tokens >= 1_000:
+        return f"{tokens / 1_000:.1f}k"
+    return str(tokens)

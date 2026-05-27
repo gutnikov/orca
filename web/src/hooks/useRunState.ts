@@ -22,6 +22,23 @@ export interface IssueState {
   event_log?: Array<{ type: string; data: Record<string, unknown> }>
 }
 
+export interface UsageState {
+  source: string
+  model?: string
+  external_session_id?: string
+  cost_usd?: number
+  cost_kind?: "exact" | "estimated" | string
+  total_tokens?: number
+  updated_at?: string
+  tokens?: {
+    input: number
+    output: number
+    reasoning: number
+    cache_read: number
+    cache_write: number
+  }
+}
+
 export interface SessionState {
   session_id: string
   issue_id: string
@@ -32,6 +49,11 @@ export interface SessionState {
   progress?: number
   progress_updated_at?: string | null
   log_path?: string
+  worker_kind?: string
+  model?: string
+  effort?: string
+  usage_marker?: string
+  usage?: UsageState
 }
 
 export interface RunState {

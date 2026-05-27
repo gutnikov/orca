@@ -109,6 +109,7 @@ class TestCommandAssembly:
         model: str | None = None,
         extra_args: list[str] | None = None,
         effort: str | None = None,
+        session_id: str | None = None,
     ) -> tuple[str, list[str], bytes | None]:
         """Run worker with a mock pty that captures spawn args. Returns (cmd, args, stdin_data)."""
         effect = _make_effect()
@@ -128,6 +129,7 @@ class TestCommandAssembly:
             model=model,
             extra_args=extra_args,
             effort=effort,
+            session_id=session_id,
         )
         call_args = pty.spawn.call_args
         return call_args[0][0], list(call_args[0][1]), call_args[1].get("stdin_data")
@@ -197,6 +199,13 @@ class TestCommandAssembly:
         _cmd, args, _stdin = await self._spawn_and_capture(kind_config, tmp_path, effort="high")
         assert "--reasoning-effort" not in args
         assert "high" not in args
+
+    async def test_session_marker_is_added_to_prompt(self, tmp_path: Path) -> None:
+        kind_config = KIND_REGISTRY["claude-code"]
+        _cmd, _args, stdin_data = await self._spawn_and_capture(kind_config, tmp_path, session_id="sess-aaa")
+        assert stdin_data is not None
+        prompt = stdin_data.decode()
+        assert "ORCA_USAGE_SESSION:sess-aaa" in prompt
 
 
 @pytest.mark.asyncio()

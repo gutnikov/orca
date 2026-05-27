@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react"
 import { renderAnsi } from "@/lib/ansi"
 import { formatDuration } from "@/lib/duration"
+import { formatUsage } from "@/lib/usage"
 import type { SessionState } from "@/hooks/useRunState"
 import { StatusPill } from "@/components/ui/status-pill"
 import { cn } from "@/lib/utils"
@@ -17,6 +18,7 @@ interface Props {
 export function WorkerLogTab({ text, error, session, outcome, onIncreaseTail, largeTail }: Props) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [stickToBottom, setStickToBottom] = useState(true)
+  const usage = formatUsage(session?.usage)
 
   useEffect(() => {
     const el = scrollRef.current
@@ -45,6 +47,7 @@ export function WorkerLogTab({ text, error, session, outcome, onIncreaseTail, la
               {formatDuration(session.started_at, session.completed_at)}
             </span>
           )}
+          {usage && <span className="tabular-nums text-[var(--fg-subtle)]">{usage}</span>}
           {outcome && (
             <span className="italic truncate text-[var(--fg-subtle)]">{outcome}</span>
           )}

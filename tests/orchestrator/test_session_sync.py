@@ -15,6 +15,10 @@ class TestSessionManifest:
             session_id="sess-aaa",
             worktree_path="/tmp/wt/main",
             started_at="2026-03-22T10:00:00Z",
+            worker_kind="codex",
+            model="gpt-5.5",
+            effort="high",
+            usage_marker="ORCA_USAGE_SESSION:sess-aaa",
         )
 
         entries = manifest.read()
@@ -24,6 +28,10 @@ class TestSessionManifest:
         assert entries[0]["session_id"] == "sess-aaa"
         assert entries[0]["worktree_path"] == "/tmp/wt/main"
         assert entries[0]["completed_at"] is None
+        assert entries[0]["worker_kind"] == "codex"
+        assert entries[0]["model"] == "gpt-5.5"
+        assert entries[0]["effort"] == "high"
+        assert entries[0]["usage_marker"] == "ORCA_USAGE_SESSION:sess-aaa"
 
     def test_multiple_entries(self, tmp_path: Path) -> None:
         """Append two entries, read both back."""
@@ -186,3 +194,24 @@ class TestUpdateProgress:
         manifest.update_waiting("sess-zzz", waiting=True)
 
         assert "waiting" not in manifest.read()[0]
+
+    def test_update_usage_sets_usage_field(self, tmp_path: Path) -> None:
+        manifest = SessionManifest(tmp_path / "runs" / "main")
+        manifest.append(
+            issue_id="issue-1",
+            state="implementing",
+            session_id="sess-aaa",
+            worktree_path="/tmp/wt/main",
+            started_at="2026-03-22T10:00:00Z",
+        )
+
+        usage = {
+            "source": "opencode",
+            "cost_usd": 0.25,
+            "cost_kind": "exact",
+            "tokens": {"input": 10, "output": 20, "reasoning": 0, "cache_read": 0, "cache_write": 0},
+            "total_tokens": 30,
+        }
+        manifest.update_usage("sess-aaa", usage)
+
+        assert manifest.read()[0]["usage"] == usage

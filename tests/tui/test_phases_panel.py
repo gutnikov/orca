@@ -239,3 +239,25 @@ class TestProgressRendering:
             assert "⏸" not in text
             assert "WAITING" not in text
             assert "25%" in text
+
+    @pytest.mark.asyncio
+    async def test_usage_cost_is_rendered(self) -> None:
+        app = PhasesPanelApp()
+        async with app.run_test() as pilot:
+            panel = app.query_one(PhasesPanel)
+            sessions = [
+                {
+                    **_make_session("s1", state="implementing"),
+                    "usage": {
+                        "source": "opencode",
+                        "cost_usd": 0.25,
+                        "cost_kind": "exact",
+                        "tokens": {"input": 10, "output": 20, "reasoning": 0, "cache_read": 0, "cache_write": 0},
+                        "total_tokens": 30,
+                    },
+                },
+            ]
+            panel.show_phases("issue-1", sessions)
+            await pilot.pause()
+            text = _get_static_text(panel)
+            assert "$0.25" in text

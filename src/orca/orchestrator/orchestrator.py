@@ -27,6 +27,7 @@ from orca.orchestrator.branches import BranchMap
 from orca.orchestrator.persistence import Persistence
 from orca.orchestrator.pty_session import PtySession
 from orca.orchestrator.session_sync import SessionSync
+from orca.orchestrator.usage import collect_usage, usage_marker
 from orca.orchestrator.worker import Worker, WorkerFailure, WorkerOutcome, WorkerSuccess
 from orca.orchestrator.worktree import WorktreeManager
 from orca.orchestrator.worktree_helpers import current_head
@@ -89,6 +90,7 @@ class Orchestrator:
         # Internal: maps tracking_id -> TmuxSession (orchestrator only)
         self._tmux_sessions: dict[str, PtySession] = {}
         self._last_save: dict[str, float] = {}
+        self._last_usage_collect: dict[str, float] = {}
         # Maps asyncio.Task -> (issue_id, tracking_id)
         self._in_flight: dict[asyncio.Task[WorkerOutcome], tuple[str, str]] = {}
         self._progress_sessions: set[str] = set()
@@ -466,6 +468,7 @@ class Orchestrator:
 
         # Record in-flight session so the TUI can show it
         tracking_id = str(uuid4())
+        marker = usage_marker(tracking_id)
         if self._session_sync is not None:
             branch = self.branches.get(effect.issue_id) or effect.issue_id
             workdir = self.worktree_mgr.resolve(branch)
@@ -479,6 +482,10 @@ class Orchestrator:
                 session_id=tracking_id,
                 worktree_path=str(workdir),
                 started_at=self.now(),
+                worker_kind=worker_kind,
+                model=effective_model,
+                effort=effective_effort,
+                usage_marker=marker,
             )
 
         if effect.progress_enabled:
@@ -1044,9 +1051,39 @@ class Orchestrator:
                                 if progress_result is not None:
                                     percent, status = progress_result
                                     self._session_sync.manifest.update_progress(tid, percent, status)
+                            self._collect_usage_for_session(tid, now=now)
                         self._last_save[tid] = now
                 except Exception:
                     pass
+
+    def _collect_usage_for_session(self, tracking_id: str, *, now: float | None = None, force: bool = False) -> None:
+        if self._session_sync is None:
+            return
+        if not force:
+            import time
+
+            current = now if now is not None else time.monotonic()
+            last = self._last_usage_collect.get(tracking_id, 0.0)
+            if current - last < 10.0:
+                return
+            self._last_usage_collect[tracking_id] = current
+        try:
+            entry = next(
+                (item for item in self._session_sync.manifest.read() if item.get("session_id") == tracking_id),
+                None,
+            )
+            if entry is None:
+                return
+            usage = collect_usage(entry)
+            if usage is not None:
+                self._session_sync.manifest.update_usage(tracking_id, usage)
+        except Exception:
+            logger.debug(
+                "Failed to collect usage for session %s",
+                tracking_id,
+                exc_info=True,
+                extra={"event": "usage_collect_failed", "session_id": tracking_id},
+            )
 
     async def run(self, root_issue_id: str, initial_effects: list[Effect]) -> None:
         """Drive the orchestrator event loop until the root issue is terminal."""
@@ -1106,6 +1143,7 @@ class Orchestrator:
 
                 # Mark the in-flight session as completed
                 if self._session_sync is not None:
+                    self._collect_usage_for_session(tracking_id, force=True)
                     self._session_sync.manifest.mark_completed(tracking_id, ts)
                     self._progress_sessions.discard(tracking_id)
 

@@ -28,6 +28,10 @@ class SessionManifest:
         worktree_path: str,
         started_at: str,
         log_path: str = "",
+        worker_kind: str | None = None,
+        model: str | None = None,
+        effort: str | None = None,
+        usage_marker: str | None = None,
     ) -> None:
         entries = self.read()
         entry: dict[str, Any] = {
@@ -40,6 +44,14 @@ class SessionManifest:
         }
         if log_path:
             entry["log_path"] = log_path
+        if worker_kind:
+            entry["worker_kind"] = worker_kind
+        if model:
+            entry["model"] = model
+        if effort:
+            entry["effort"] = effort
+        if usage_marker:
+            entry["usage_marker"] = usage_marker
         entries.append(entry)
         self._write(entries)
 
@@ -85,6 +97,17 @@ class SessionManifest:
                 self._write(entries)
                 return
         logger.warning("update_result_error: session %s not found in manifest", session_id)
+
+    def update_usage(self, session_id: str, usage: dict[str, Any]) -> None:
+        """Store normalized token/cost usage on a session entry."""
+        entries = self.read()
+        for entry in entries:
+            if entry["session_id"] == session_id:
+                if entry.get("usage") != usage:
+                    entry["usage"] = usage
+                    self._write(entries)
+                return
+        logger.warning("update_usage: session %s not found in manifest", session_id)
 
     def update_progress(self, session_id: str, progress: int, status: str | None) -> None:
         """Update progress and status for a session."""

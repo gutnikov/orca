@@ -9,6 +9,7 @@ export interface Step {
   name: string
   outcome?: string
   duration?: string
+  usage?: string | null
   progress?: number | null
   progressText?: string | null
   active?: boolean
@@ -61,9 +62,9 @@ export function Stepper({ steps, className }: Props) {
                   {step.outcome}
                 </span>
               )}
-              {step.duration && (
+              {(step.usage || step.duration) && (
                 <span className="ml-auto text-[10.5px] text-[var(--fg-subtle)] tabular-nums shrink-0">
-                  {step.duration}
+                  {[step.usage, step.duration].filter(Boolean).join("  ")}
                 </span>
               )}
             </div>

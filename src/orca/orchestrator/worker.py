@@ -15,6 +15,7 @@ from orca.orchestrator.pty_session import PtySession
 from orca.orchestrator.session_sync import SessionManifest
 from orca.orchestrator.template import TemplateRenderError, render_prompt, render_prompt_string
 from orca.orchestrator.template_persist import persist_rendered_prompt
+from orca.orchestrator.usage import usage_marker
 from orca.orchestrator.validation import validate_result
 
 logger = logging.getLogger(__name__)
@@ -205,6 +206,12 @@ class CliAgentWorker:
                     session_id=session_id,
                     rendered_prompt=prompt,
                 )
+
+            prompt = (
+                f"{prompt.rstrip()}\n\n"
+                "Orca internal session marker for transcript correlation. "
+                f"Do not mention it in your response: {usage_marker(session_id)}\n"
+            )
 
         # c. Build command
         cmd_parts: list[str] = [self._kind_config.bin]
