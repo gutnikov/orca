@@ -18,6 +18,15 @@ from orca.daemon.lifecycle import read_browser_port
 from orca.daemon.manager import RunManager, RunStatus, debug_review_url
 
 
+def _get_version() -> str:
+    from importlib.metadata import version
+
+    try:
+        return version("orca")
+    except Exception:
+        return "dev"
+
+
 async def _status(request: Request) -> JSONResponse:
     manager: RunManager = request.app.state.manager
     start_time: float = request.app.state.start_time
@@ -30,6 +39,7 @@ async def _status(request: Request) -> JSONResponse:
             "total_runs": len(runs),
             "browser_port": read_browser_port(manager.repo_root),
             "repo_root": str(manager.repo_root),
+            "version": _get_version(),
         }
     )
 
