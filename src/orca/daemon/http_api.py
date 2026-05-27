@@ -239,6 +239,16 @@ async def _get_all_worker_logs(request: Request) -> PlainTextResponse:
     return PlainTextResponse(text)
 
 
+async def _get_session_prompt(request: Request) -> PlainTextResponse | JSONResponse:
+    manager: RunManager = request.app.state.manager
+    run_id: str = request.path_params["run_id"]
+    session_id: str = request.path_params["session_id"]
+    text = manager.get_session_prompt(run_id, session_id)
+    if text is None:
+        return JSONResponse({"error": f"prompt for session '{session_id}' not found"}, status_code=404)
+    return PlainTextResponse(text)
+
+
 async def _stop_run(request: Request) -> JSONResponse:
     manager: RunManager = request.app.state.manager
     run_id: str = request.path_params["run_id"]
@@ -545,6 +555,7 @@ def _api_routes() -> list[Route]:
         Route("/api/runs/{run_id:path}/issues/{issue_id}", _get_issue, methods=["GET"]),
         Route("/api/runs/{run_id:path}/logs/{issue_id}", _get_worker_log, methods=["GET"]),
         Route("/api/runs/{run_id:path}/logs", _get_all_worker_logs, methods=["GET"]),
+        Route("/api/runs/{run_id:path}/sessions/{session_id}/prompt", _get_session_prompt, methods=["GET"]),
         Route("/api/runs/{run_id:path}/stop", _stop_run, methods=["POST"]),
         Route("/api/runs/{run_id:path}/resume", _resume_run, methods=["POST"]),
         Route("/api/runs/{run_id:path}/drop", _drop_run, methods=["POST"]),

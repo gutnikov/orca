@@ -19,6 +19,7 @@ from orca.engine.config import parse_config
 from orca.engine.types import DispatchWorkerEffect, EventLogEntry, Issue, State
 from orca.orchestrator.persistence import Persistence
 from orca.orchestrator.session_sync import SessionManifest
+from orca.orchestrator.template_persist import persist_rendered_prompt
 from orca.orchestrator.worker import WorkerOutcome, WorkerSuccess
 
 SIMPLE_CONFIG_YAML = """\
@@ -889,6 +890,42 @@ class TestGetWorkerLogBySession:
 
         manager = RunManager(tmp_path)
         manager.get_worker_log("nonexistent:default", "issue-1", session_id=None)
+
+
+class TestGetSessionPrompt:
+    def test_returns_persisted_prompt(self, repo_root: Path) -> None:
+        manager = RunManager(repo_root)
+        run_id = "main:default"
+        worktree = repo_root / ".orca-state" / "worktrees" / "main"
+        prompt = "Rendered prompt"
+        persist_rendered_prompt(
+            workdir=worktree,
+            state_id="implementing",
+            session_id="sess-aaa",
+            rendered_prompt=prompt,
+        )
+        manifest = SessionManifest(repo_root / ".orca-state" / "runs" / "main" / "default")
+        manifest.append(
+            issue_id="issue-1",
+            state="implementing",
+            session_id="sess-aaa",
+            worktree_path=str(worktree),
+            started_at="2026-01-01T00:00:00Z",
+        )
+        manager._runs[run_id] = RunInfo(
+            run_id=run_id,
+            branch="main",
+            workflow="default",
+            status=RunStatus.STOPPED,
+            issue_count=1,
+            created_at="2026-01-01T00:00:00Z",
+        )
+
+        assert manager.get_session_prompt(run_id, "sess-aaa") == prompt
+
+    def test_unknown_session_returns_none(self, tmp_path: Path) -> None:
+        manager = RunManager(tmp_path)
+        assert manager.get_session_prompt("missing:default", "sess-aaa") is None
 
 
 class TestLastWorkerError:

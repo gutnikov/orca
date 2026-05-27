@@ -30,6 +30,7 @@ from orca.orchestrator.runner import (
     resolve_config_path,
 )
 from orca.orchestrator.session_sync import SessionManifest, SessionSync
+from orca.orchestrator.template_persist import rendered_prompt_path
 from orca.orchestrator.usage import collect_usage
 from orca.orchestrator.worker import KIND_REGISTRY, CliAgentWorker
 from orca.orchestrator.worktree import WorktreeManager
@@ -924,6 +925,26 @@ class RunManager:
         if session_id:
             return run_info.orchestrator.get_session_log(session_id, tail)
         return run_info.orchestrator.get_session_log_by_issue(issue_id, tail)
+
+    def get_session_prompt(self, run_id: str, session_id: str) -> str | None:
+        """Return the persisted rendered prompt for a worker session."""
+        run_info = self._runs.get(run_id)
+        if run_info is None:
+            return None
+        run_dir = self.repo_root / ".orca-state" / "runs" / run_info.branch / run_info.workflow
+        manifest = SessionManifest(run_dir)
+        entry = next((item for item in manifest.read() if item.get("session_id") == session_id), None)
+        if entry is None:
+            return None
+        worktree_path = entry.get("worktree_path")
+        state = entry.get("state")
+        if not isinstance(worktree_path, str) or not isinstance(state, str):
+            return None
+        path = rendered_prompt_path(Path(worktree_path), state, session_id)
+        try:
+            return path.read_text()
+        except OSError:
+            return None
 
     def get_all_worker_logs(self, run_id: str, tail: int = 100) -> str:
         """Get worker logs for all issues in a run."""

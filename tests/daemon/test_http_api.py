@@ -89,6 +89,13 @@ class TestWorkerLogBySession:
         assert resp.text == ""
 
 
+class TestSessionPrompt:
+    def test_not_found(self, client: TestClient) -> None:
+        resp = client.get("/api/runs/nonexistent:default/sessions/sess-abc/prompt")
+        assert resp.status_code == 404
+        assert "prompt" in resp.json()["error"]
+
+
 class TestRetryIssue:
     def test_not_found(self, client: TestClient) -> None:
         resp = client.post("/api/runs/nonexistent:default/retry/abc")

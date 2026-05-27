@@ -17,10 +17,11 @@ import { IssueDetailTab } from "@/components/run/IssueDetailTab"
 import { WorkerLogTab } from "@/components/run/WorkerLogTab"
 import { RunResultTab } from "@/components/run/RunResultTab"
 import { DiffTab } from "@/components/run/DiffTab"
+import { RenderedPromptTab } from "@/components/run/RenderedPromptTab"
 import { RunHeader } from "@/components/run/RunHeader"
 import { AppShell, AppHeader } from "@/components/ui/app-shell"
 
-type Tab = "session" | "result" | "diff"
+type Tab = "session" | "prompt" | "result" | "diff"
 
 const SIDEBAR_STORAGE_KEY = "orca.runSidebarWidth"
 const SIDEBAR_DEFAULT_WIDTH = 340
@@ -157,7 +158,7 @@ function RunViewerPage() {
     void navigate({
       to: "/runs/$runId",
       params: { runId },
-      search: { issue: selectedIssueId, session: sid, tab: "session" } as SearchParams,
+      search: { issue: selectedIssueId, session: sid, tab: activeTab } as SearchParams,
       replace: true,
     })
     // Boost log capture frequency for the focused session.
@@ -359,7 +360,7 @@ function RunViewerPage() {
 
           {/* Per-phase tab bar */}
           <div className="border-b border-[var(--border)] px-5 flex items-center gap-1">
-            {(["session", "diff", "result"] as const).map((t) => (
+            {(["session", "prompt", "diff", "result"] as const).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -388,6 +389,9 @@ function RunViewerPage() {
                 largeTail={tail >= 2000}
               />
             )}
+            {activeTab === "prompt" && (
+              <RenderedPromptTab runId={runId} session={selectedSession} />
+            )}
             {activeTab === "diff" && (
               <DiffTab
                 runId={runId}
@@ -414,7 +418,7 @@ export const Route = createFileRoute("/runs/$runId")({
     issue: typeof raw.issue === "string" ? raw.issue : undefined,
     session: typeof raw.session === "string" ? raw.session : undefined,
     tab:
-      raw.tab === "session" || raw.tab === "result" || raw.tab === "diff"
+      raw.tab === "session" || raw.tab === "prompt" || raw.tab === "result" || raw.tab === "diff"
         ? raw.tab
         : undefined,
   }),
