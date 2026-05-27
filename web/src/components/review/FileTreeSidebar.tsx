@@ -8,7 +8,7 @@ const STATUS_DOT: Record<FileStatus, string> = {
   added: "bg-[oklch(0.65_0.18_150)]",
   modified: "bg-[oklch(0.55_0.20_260)]",
   deleted: "bg-[oklch(0.60_0.22_30)]",
-  renamed: "bg-muted-foreground",
+  renamed: "bg-[var(--fg-muted)]",
 }
 
 export interface VirtualFileEntry {
@@ -56,7 +56,7 @@ export function FileTreeSidebar({
       <div className="relative shrink-0">
         <Search
           size={13}
-          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground/70"
+          className="absolute left-2.5 top-1/2 -translate-y-1/2 text-[var(--fg-muted)]"
         />
         <input
           type="text"
@@ -65,8 +65,8 @@ export function FileTreeSidebar({
           placeholder="Filter files…"
           className={cn(
             "w-full h-8 pl-8 pr-2 text-[13px]",
-            "bg-background border border-border rounded-md",
-            "placeholder:text-muted-foreground/70",
+            "bg-[var(--canvas)] border border-[var(--border)] rounded-md",
+            "placeholder:text-[var(--fg-muted)]",
             "outline-none focus:border-primary/50 focus-visible:ring-0 transition-colors",
           )}
         />
@@ -76,7 +76,7 @@ export function FileTreeSidebar({
         {/* Virtual review surfaces */}
         {filteredVirtual.length > 0 ? (
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80 px-2 pb-1.5 font-semibold">
+            <div className="text-[10px] uppercase tracking-wider text-[var(--fg-muted)] px-2 pb-1.5 font-semibold">
               Review surfaces
             </div>
             <ul className="space-y-0.5">
@@ -91,8 +91,8 @@ export function FileTreeSidebar({
                         "w-full text-left rounded-md px-2 py-1.5 flex items-center gap-2 cursor-pointer",
                         "transition-colors",
                         active
-                          ? "bg-primary/10 text-foreground"
-                          : "hover:bg-muted/60 text-foreground/85",
+                          ? "bg-primary/10 text-[var(--fg)]"
+                          : "hover:bg-[var(--subtle)] text-[var(--fg)]",
                       )}
                     >
                       <span
@@ -120,9 +120,9 @@ export function FileTreeSidebar({
         {/* Real changeset files */}
         {filteredReal.length > 0 ? (
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground/80 px-2 pb-1.5 font-semibold flex items-center justify-between">
+            <div className="text-[10px] uppercase tracking-wider text-[var(--fg-muted)] px-2 pb-1.5 font-semibold flex items-center justify-between">
               <span>Changes</span>
-              <span className="text-muted-foreground/60 tabular-nums">
+              <span className="text-[var(--fg-muted)] tabular-nums">
                 {filteredReal.length}
               </span>
             </div>
@@ -141,8 +141,8 @@ export function FileTreeSidebar({
                         "w-full text-left rounded-md px-2 py-1.5 flex items-center gap-2 cursor-pointer",
                         "transition-colors",
                         active
-                          ? "bg-primary/10 text-foreground"
-                          : "hover:bg-muted/60 text-foreground/85",
+                          ? "bg-primary/10 text-[var(--fg)]"
+                          : "hover:bg-[var(--subtle)] text-[var(--fg)]",
                       )}
                       title={f.path}
                     >
@@ -150,7 +150,7 @@ export function FileTreeSidebar({
                         className={cn("h-1.5 w-1.5 rounded-full shrink-0", STATUS_DOT[f.status])}
                       />
                       <span className="font-mono text-[12px] truncate min-w-0 flex-1">
-                        {dir ? <span className="text-muted-foreground/70">{dir}/</span> : null}
+                        {dir ? <span className="text-[var(--fg-muted)]">{dir}/</span> : null}
                         <span className="font-semibold">{filename}</span>
                       </span>
                       {f.commentCount > 0 ? (
@@ -167,7 +167,7 @@ export function FileTreeSidebar({
         ) : null}
 
         {filteredVirtual.length === 0 && filteredReal.length === 0 ? (
-          <div className="px-2 py-4 text-[12px] text-muted-foreground/70 italic">
+          <div className="px-2 py-4 text-[12px] text-[var(--fg-muted)] italic">
             No files match “{filter}”
           </div>
         ) : null}

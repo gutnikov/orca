@@ -15,7 +15,7 @@ const STATUS_TINT: Record<FileStatus, string> = {
   added: "bg-[oklch(0.92_0.05_150)] text-[oklch(0.35_0.15_150)] dark:bg-[oklch(0.25_0.08_150)] dark:text-[oklch(0.85_0.12_150)]",
   modified: "bg-[oklch(0.92_0.05_260)] text-[oklch(0.40_0.18_260)] dark:bg-[oklch(0.25_0.08_260)] dark:text-[oklch(0.85_0.12_260)]",
   deleted: "bg-[oklch(0.93_0.05_30)] text-[oklch(0.45_0.20_30)] dark:bg-[oklch(0.25_0.08_30)] dark:text-[oklch(0.85_0.14_30)]",
-  renamed: "bg-muted text-muted-foreground",
+  renamed: "bg-[var(--subtle)] text-[var(--fg-muted)]",
 }
 
 const MODES: { value: ViewMode; label: string }[] = [
@@ -50,14 +50,14 @@ export function FileHeader({
     <div
       className={cn(
         "sticky top-0 z-10 flex items-center gap-3 px-4 py-3",
-        "bg-card/85 backdrop-blur-sm border-b",
+        "bg-[var(--subtle)]/85 backdrop-blur-sm border-b border-[var(--border)]",
       )}
     >
       <button
         type="button"
         onClick={onToggleCollapse}
         aria-label={collapsed ? "Expand file" : "Collapse file"}
-        className="text-muted-foreground hover:text-foreground transition-colors"
+        className="text-[var(--fg-muted)] hover:text-[var(--fg)] transition-colors"
       >
         {collapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
       </button>
@@ -71,17 +71,17 @@ export function FileHeader({
         {STATUS_LABEL[file.status]}
       </span>
 
-      <div className="flex-1 min-w-0 truncate font-mono text-sm">
-        <span className="text-muted-foreground">{dirDisplay}</span>
+      <div className="flex-1 min-w-0 truncate font-mono text-sm text-[var(--fg)]">
+        <span className="text-[var(--fg-muted)]">{dirDisplay}</span>
         <span className="font-semibold">{filename}</span>
         {file.status === "renamed" && file.old_path ? (
-          <span className="text-muted-foreground text-xs ml-2">← {file.old_path}</span>
+          <span className="text-[var(--fg-muted)] text-xs ml-2">← {file.old_path}</span>
         ) : null}
       </div>
 
       <div className="flex items-center gap-3 text-xs font-mono">
-        <span className="text-[oklch(0.55_0.18_150)]">+{file.additions}</span>
-        <span className="text-[oklch(0.55_0.20_30)]">−{file.deletions}</span>
+        <span className="text-[var(--success-fg)]">+{file.additions}</span>
+        <span className="text-[var(--danger)]">−{file.deletions}</span>
       </div>
 
       {commentCount > 0 ? (
@@ -90,7 +90,7 @@ export function FileHeader({
         </span>
       ) : null}
 
-      <div className="inline-flex rounded-md border bg-muted/50 p-0.5">
+      <div className="inline-flex rounded-md border border-[var(--border)] bg-[var(--subtle)] p-0.5">
         {MODES.map((m) => {
           const disabled = m.value === "full" && !fullEnabled
           const active = viewMode === m.value
