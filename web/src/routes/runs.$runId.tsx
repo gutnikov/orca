@@ -34,7 +34,7 @@ function RunViewerPage() {
 
   const { data, error, refetch } = useRunState(runId)
   const [tail, setTail] = useState(500)
-  const [detailOpen, setDetailOpen] = useState(true)
+  const [detailOpen, setDetailOpen] = useState(false)
 
   const selectedIssueId = search.issue ?? null
   const selectedSessionId = search.session ?? null

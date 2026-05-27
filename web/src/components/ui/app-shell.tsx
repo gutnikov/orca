@@ -1,6 +1,8 @@
 import { type ReactNode, useEffect, useState } from "react"
 import { Link } from "@tanstack/react-router"
+import { Moon, Sun } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useTheme } from "@/hooks/useTheme"
 
 let cachedVersion: string | null = null
 
@@ -55,6 +57,7 @@ interface AppHeaderProps {
 /** Sticky top bar — logo dot, breadcrumb, right-aligned actions slot. */
 export function AppHeader({ breadcrumb, actions }: AppHeaderProps) {
   const version = useOrcaVersion()
+  const { theme, toggle } = useTheme()
   return (
     <header
       className={cn(
@@ -102,6 +105,19 @@ export function AppHeader({ breadcrumb, actions }: AppHeaderProps) {
           v{version}
         </span>
       )}
+      <button
+        type="button"
+        onClick={toggle}
+        className={cn(
+          "size-7 rounded-md flex items-center justify-center shrink-0",
+          "text-[var(--fg-muted)] hover:text-[var(--fg)] hover:bg-[var(--subtle)]",
+          "transition-colors",
+          !actions && !version && "ml-auto",
+        )}
+        aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
+      >
+        {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
+      </button>
     </header>
   )
 }

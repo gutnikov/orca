@@ -31,11 +31,65 @@
   --space-8: 32px;
 
   /* Overlay ring (used only on dialogs / popovers) */
+  --ring-overlay: 0 0 0 1px rgba(0, 0, 0, 0.06), 0 8px 24px rgba(0, 0, 0, 0.12);
+}
+
+.dark {
   --ring-overlay: 0 0 0 1px rgba(255, 255, 255, 0.04), 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
-/* Dark theme — the only theme for v1 */
-:root,
+/* Light theme */
+:root {
+  /* Canvas / surface */
+  --canvas: #ffffff;
+  --surface: #f6f8fa;
+  --subtle: #f0f2f5;
+  --overlay: #e4e7eb;
+  --border: #d1d9e0;
+  --border-muted: #e4e7eb;
+
+  /* Text */
+  --fg: #1f2328;
+  --fg-muted: #59636e;
+  --fg-subtle: #6e7781;
+
+  /* Accent (blue) */
+  --accent: #0969da;
+  --accent-fg: #0550ae;
+  --accent-soft: rgba(9, 105, 218, 0.08);
+
+  /* State colors */
+  --success: #1a7f37;
+  --success-fg: #1a7f37;
+  --attention: #9a6700;
+  --danger: #d1242f;
+  --done-purple: #8250df;
+  --accent-warm: #cf222e;
+
+  /* Tailwind aliases */
+  --background: var(--canvas);
+  --foreground: var(--fg);
+  --card: var(--surface);
+  --card-foreground: var(--fg);
+  --popover: var(--surface);
+  --popover-foreground: var(--fg);
+  --primary: var(--accent);
+  --primary-foreground: #ffffff;
+  --secondary: var(--subtle);
+  --secondary-foreground: var(--fg);
+  --muted: var(--subtle);
+  --muted-foreground: var(--fg-muted);
+  --accent-color: var(--accent-soft);
+  --accent-foreground: var(--accent-fg);
+  --destructive: var(--danger);
+  --destructive-foreground: #ffffff;
+  --input: var(--overlay);
+  --ring: var(--accent);
+  --sidebar: var(--surface);
+  --sidebar-foreground: var(--fg);
+}
+
+/* Dark theme */
 .dark {
   /* Canvas / surface */
   --canvas: #010409;
@@ -63,7 +117,7 @@
   --done-purple: #8957e5;
   --accent-warm: #f78166;
 
-  /* Tailwind aliases — keep existing utility classes working */
+  /* Tailwind aliases */
   --background: var(--canvas);
   --foreground: var(--fg);
   --card: var(--surface);
