@@ -227,7 +227,7 @@ class TestRunManager:
 
         assert sessions[0]["usage"]["model"] == "claude-opus-4-6"
         assert sessions[0]["usage"]["cost_kind"] == "estimated"
-        assert sessions[0]["usage"]["cost_usd"] == pytest.approx(0.000828)
+        assert sessions[0]["usage"]["cost_usd"] == pytest.approx(0.000276)
 
     @pytest.mark.asyncio()
     async def test_start_run(self, repo_root: Path) -> None:

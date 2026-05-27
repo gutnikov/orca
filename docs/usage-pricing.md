@@ -87,16 +87,34 @@ Example:
 
 ```json
 {
+  "claude-haiku-4-5": {
+    "input": 1.0,
+    "output": 5.0,
+    "cache_read": 0.1,
+    "cache_write": 1.25
+  },
+  "claude-sonnet-4-6": {
+    "input": 3.0,
+    "output": 15.0,
+    "cache_read": 0.3,
+    "cache_write": 3.75
+  },
+  "claude-opus-4-6": {
+    "input": 5.0,
+    "output": 25.0,
+    "cache_read": 0.5,
+    "cache_write": 6.25
+  },
+  "claude-opus-4-7": {
+    "input": 5.0,
+    "output": 25.0,
+    "cache_read": 0.5,
+    "cache_write": 6.25
+  },
   "gpt-5.5": {
     "input": 1.25,
     "output": 10.0,
     "cache_read": 0.125
-  },
-  "claude-opus-4-6": {
-    "input": 15.0,
-    "output": 75.0,
-    "cache_read": 1.5,
-    "cache_write": 18.75
   }
 }
 ```
@@ -104,6 +122,8 @@ Example:
 Rates are USD per 1 million tokens. `input` and `output` are required. `cache_read` and `cache_write` are optional; when omitted, Orca falls back to the input rate for those token categories.
 
 The built-in table is deliberately small and overrideable. Configure `ORCA_USAGE_PRICES_JSON` or `ORCA_USAGE_PRICES_FILE` when your provider pricing differs from Orca's fallback table.
+
+Claude Code may persist provider-specific model IDs such as `us.anthropic.claude-haiku-4-5-20251001-v1:0`. Orca normalizes common provider prefixes, dated model suffixes, and `-v1:0` revisions before price lookup, so that example resolves to `claude-haiku-4-5`.
 
 For Codex and any source where `input` includes cached tokens, the estimate formula is:
 

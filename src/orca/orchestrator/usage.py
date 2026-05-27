@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sqlite3
 from collections.abc import Iterable, Mapping
 from contextlib import suppress
@@ -14,6 +15,12 @@ UsageSnapshot = dict[str, Any]
 
 _ORCA_USAGE_MARKER_PREFIX = "ORCA_USAGE_SESSION"
 _COLLECT_WINDOW = timedelta(minutes=5)
+_DATED_MODEL_RE = re.compile(r"-20\d{6}(?=$|-)")
+_MODEL_ALIASES = {
+    "haiku": "claude-haiku-4-5",
+    "sonnet": "claude-sonnet-4-6",
+    "opus": "claude-opus-4-6",
+}
 
 
 def usage_marker(session_id: str) -> str:
@@ -412,13 +419,25 @@ def _price_table() -> dict[str, dict[str, float]]:
 
 
 def _builtin_price_table() -> dict[str, dict[str, float]]:
+    def anthropic(input_price: float, output_price: float) -> dict[str, float]:
+        return {
+            "input": input_price,
+            "output": output_price,
+            "cache_read": input_price * 0.1,
+            "cache_write": input_price * 1.25,
+        }
+
     return {
-        "claude-opus-4-6": {
-            "input": 15.0,
-            "output": 75.0,
-            "cache_read": 1.5,
-            "cache_write": 18.75,
-        },
+        "claude-haiku-4-5": anthropic(1.0, 5.0),
+        "claude-haiku-3-5": anthropic(0.8, 4.0),
+        "claude-sonnet-4": anthropic(3.0, 15.0),
+        "claude-sonnet-4-5": anthropic(3.0, 15.0),
+        "claude-sonnet-4-6": anthropic(3.0, 15.0),
+        "claude-opus-4": anthropic(15.0, 75.0),
+        "claude-opus-4-1": anthropic(15.0, 75.0),
+        "claude-opus-4-5": anthropic(5.0, 25.0),
+        "claude-opus-4-6": anthropic(5.0, 25.0),
+        "claude-opus-4-7": anthropic(5.0, 25.0),
         "gpt-5.5": {
             "input": 1.25,
             "output": 10.0,
@@ -431,21 +450,41 @@ def _model_price_candidates(model: str) -> list[str]:
     candidates: list[str] = []
 
     def add(value: str) -> None:
+        value = value.strip()
         if value and value not in candidates:
             candidates.append(value)
 
     add(model)
-    if "/" in model:
-        add(model.rsplit("/", 1)[1])
-    dotted = model.split(".")
-    for part in dotted:
-        if part.startswith(("claude-", "gpt-")):
-            add(part)
-    for candidate in list(candidates):
+    index = 0
+    while index < len(candidates):
+        candidate = candidates[index]
+        index += 1
+
+        alias = _MODEL_ALIASES.get(candidate.lower())
+        if alias:
+            add(alias)
+
+        if "/" in candidate:
+            add(candidate.rsplit("/", 1)[1])
+
+        if ":" in candidate:
+            base, _, suffix = candidate.rpartition(":")
+            if suffix.isdigit():
+                add(base)
+
+        for part in candidate.split("."):
+            if part.startswith(("claude-", "gpt-")):
+                add(part)
+
         if candidate.endswith("-v1"):
             add(candidate[:-3])
         if candidate.endswith("-v2"):
             add(candidate[:-3])
+
+        without_date = _DATED_MODEL_RE.sub("", candidate)
+        if without_date != candidate:
+            add(without_date)
+
     return candidates
 
 
