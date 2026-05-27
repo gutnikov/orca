@@ -197,11 +197,21 @@ export function DiffTab({
           return
         }
 
-        const matchingAttempt =
-          selectedState && selectedStateLocalIndex
-            ? list.find((item) => item.state === selectedState && item.state_local_index === selectedStateLocalIndex)
-            : undefined
-        const attempt = matchingAttempt?.attempt ?? list[list.length - 1].attempt
+        let attempt = list[list.length - 1].attempt
+        if (selectedState) {
+          if (!selectedStateLocalIndex) {
+            setError("No diff snapshot for this phase.")
+            return
+          }
+          const matchingAttempt = list.find(
+            (item) => item.state === selectedState && item.state_local_index === selectedStateLocalIndex,
+          )
+          if (!matchingAttempt) {
+            setError("No diff snapshot for this phase.")
+            return
+          }
+          attempt = matchingAttempt.attempt
+        }
         setSelectedAttempt(attempt)
 
         const snapRes = await fetch(`/api/runs/${decoded}/issues/${issueId}/debug?attempt=${attempt}`)

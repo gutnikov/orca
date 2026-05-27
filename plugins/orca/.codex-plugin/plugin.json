@@ -1,6 +1,6 @@
 {
   "name": "orca",
-  "version": "0.15.13",
+  "version": "0.15.14",
   "description": "Coding agent orchestrator with MCP tools, workflow setup, and run supervision for Codex.",
   "author": {
     "name": "Alex Gutnikov",

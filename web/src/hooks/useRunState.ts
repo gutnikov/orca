@@ -54,6 +54,8 @@ export interface SessionState {
   effort?: string
   usage_marker?: string
   usage?: UsageState
+  failed?: boolean
+  interrupted?: boolean
 }
 
 export interface RunState {
