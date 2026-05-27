@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router"
 import { useEffect, useState } from "react"
-import { Pause, ChevronRight } from "lucide-react"
+import { Pause, ChevronRight, Plus } from "lucide-react"
+import { NewRunDialog } from "@/components/home/NewRunDialog"
 
 interface DebugReview {
   issue_id: string
@@ -28,6 +29,7 @@ export const Route = createFileRoute("/")({
 function HomePage() {
   const [runs, setRuns] = useState<RunSummary[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [newRunOpen, setNewRunOpen] = useState(false)
 
   useEffect(() => {
     let cancelled = false
@@ -65,11 +67,21 @@ function HomePage() {
   return (
     <main className="min-h-screen bg-background text-foreground">
       <div className="max-w-[1024px] mx-auto px-6 py-8 pr-32">
-        <header className="mb-6">
-          <h1 className="text-2xl font-semibold tracking-tight">orca</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Active runs on this daemon.
-          </p>
+        <header className="mb-6 flex items-end justify-between">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">orca</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              Active runs on this daemon.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setNewRunOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary text-primary-foreground px-3 py-1.5 text-[12px] font-medium hover:opacity-90"
+          >
+            <Plus size={14} />
+            New run
+          </button>
         </header>
 
         {error ? (
@@ -222,6 +234,7 @@ function HomePage() {
           )}
         </section>
       </div>
+      <NewRunDialog open={newRunOpen} onOpenChange={setNewRunOpen} />
     </main>
   )
 }
