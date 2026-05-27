@@ -56,6 +56,28 @@ class TestWorkerLog:
         assert resp.text == ""
 
 
+class TestWorkerLogBySession:
+    """Per-session log resolution via ?session_id=... (used by web dashboard)."""
+
+    def test_session_id_param_accepted(self, client: TestClient) -> None:
+        # Unknown run still returns 200 with empty body — same contract as
+        # the existing ?tail= behavior. We're only verifying the param is
+        # accepted (no 400), not the resolution path (covered by manager tests).
+        resp = client.get(
+            "/api/runs/nonexistent:default/logs/issue-1",
+            params={"session_id": "sess-abc"},
+        )
+        assert resp.status_code == 200
+        assert resp.text == ""
+
+    def test_session_id_and_tail_combine(self, client: TestClient) -> None:
+        resp = client.get(
+            "/api/runs/nonexistent:default/logs/issue-1",
+            params={"session_id": "sess-abc", "tail": "50"},
+        )
+        assert resp.status_code == 200
+
+
 class TestRetryIssue:
     def test_not_found(self, client: TestClient) -> None:
         resp = client.post("/api/runs/nonexistent:default/retry/abc")

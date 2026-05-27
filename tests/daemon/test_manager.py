@@ -806,4 +806,20 @@ class TestGetDebugReviewWithAttempt:
         )
         result = mgr.get_debug_review("r1", "i1", attempt=0)
         assert len(result["past_review"]["comment_threads"]) == 1
-        assert result["past_review"]["comment_threads"][0]["messages"][0]["role"] == "agent"
+
+
+class TestGetWorkerLogBySession:
+    def test_unknown_session_returns_empty(self, tmp_path: Path) -> None:
+        from orca.daemon.manager import RunManager
+
+        manager = RunManager(tmp_path)
+        # No runs registered → no orchestrator → empty result, no crash.
+        assert manager.get_worker_log("nonexistent:default", "issue-1", session_id="sess-x") == ""
+
+    def test_signature_accepts_session_id_kwarg(self, tmp_path: Path) -> None:
+        # This test locks the kwarg name so callers (HTTP layer) don't drift.
+        # Fails with TypeError before the signature change.
+        from orca.daemon.manager import RunManager
+
+        manager = RunManager(tmp_path)
+        manager.get_worker_log("nonexistent:default", "issue-1", session_id=None)

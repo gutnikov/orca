@@ -728,11 +728,25 @@ class RunManager:
             return None
         return issue.to_dict()
 
-    def get_worker_log(self, run_id: str, issue_id: str, tail: int = 100) -> str:
-        """Get worker log content for the latest session of the given issue."""
+    def get_worker_log(
+        self,
+        run_id: str,
+        issue_id: str,
+        tail: int = 100,
+        session_id: str | None = None,
+    ) -> str:
+        """Return worker log content.
+
+        When *session_id* is provided, returns that session's log directly via
+        the orchestrator's tracking-id lookup (used by the web dashboard's
+        phase navigation). When *session_id* is None, returns the latest
+        session's log for the given issue (existing TUI / CLI behavior).
+        """
         run_info = self._runs.get(run_id)
         if run_info is None or run_info.orchestrator is None:
             return ""
+        if session_id is not None:
+            return run_info.orchestrator.get_session_log(session_id, tail)
         return run_info.orchestrator.get_session_log_by_issue(issue_id, tail)
 
     def get_all_worker_logs(self, run_id: str, tail: int = 100) -> str:
