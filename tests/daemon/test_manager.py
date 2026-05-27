@@ -806,6 +806,7 @@ class TestGetDebugReviewWithAttempt:
         )
         result = mgr.get_debug_review("r1", "i1", attempt=0)
         assert len(result["past_review"]["comment_threads"]) == 1
+        assert result["past_review"]["comment_threads"][0]["messages"][0]["role"] == "agent"
 
 
 class TestGetWorkerLogBySession:
