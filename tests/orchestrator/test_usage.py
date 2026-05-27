@@ -170,6 +170,61 @@ def test_collect_claude_usage_without_marker_uses_normalized_project_dir(
     assert usage["cost_usd"] == pytest.approx(0.0001656)
 
 
+def test_collect_claude_usage_uses_model_hint_and_builtin_price(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path / "home"
+    workdir = tmp_path / "repo"
+    workdir.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.delenv("ORCA_USAGE_PRICES_JSON", raising=False)
+    monkeypatch.delenv("ORCA_USAGE_PRICES_FILE", raising=False)
+    marker = usage_marker("sess-1")
+
+    project_dir = home / ".claude" / "projects" / str(workdir).replace("/", "-")
+    _jsonl(
+        project_dir / "abc.jsonl",
+        [
+            {
+                "timestamp": "2026-01-01T00:00:00Z",
+                "type": "user",
+                "sessionId": "claude-session",
+                "message": {"role": "user", "content": marker},
+            },
+            {
+                "timestamp": "2026-01-01T00:00:01Z",
+                "type": "assistant",
+                "sessionId": "claude-session",
+                "message": {
+                    "id": "msg-1",
+                    "usage": {
+                        "input_tokens": 10,
+                        "cache_creation_input_tokens": 4,
+                        "cache_read_input_tokens": 2,
+                        "output_tokens": 8,
+                    },
+                },
+            },
+        ],
+    )
+
+    usage = collect_usage(
+        {
+            "worker_kind": "claude-code",
+            "worktree_path": str(workdir),
+            "usage_marker": marker,
+            "started_at": "2026-01-01T00:00:00Z",
+            "model": "us.anthropic.claude-opus-4-6-v1",
+        }
+    )
+
+    assert usage is not None
+    assert usage["model"] == "us.anthropic.claude-opus-4-6-v1"
+    assert usage["cost_kind"] == "estimated"
+    assert usage["cost_usd"] == pytest.approx(0.000828)
+
+
 def test_collect_codex_usage_uses_token_count_delta(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home = tmp_path / "home"
     workdir = tmp_path / "repo"

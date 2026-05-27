@@ -171,6 +171,64 @@ class TestRunManager:
         assert captured["worker_kind"] == "claude-code"
         assert sessions[0]["usage"]["source"] == "claude-code"
 
+    def test_get_sessions_backfills_cost_from_existing_usage(self, repo_root: Path) -> None:
+        mgr = RunManager(repo_root)
+        config = parse_config(
+            SIMPLE_CONFIG_YAML.replace(
+                "prompt: prompts/impl.md",
+                "prompt: prompts/impl.md\n      model: claude-opus-4-6",
+            )
+        )
+        state = State(
+            issues={
+                "issue-1": Issue(
+                    type="default",
+                    fields={"title": "Test"},
+                    state="implementing",
+                    worker_active=False,
+                    decomposed_from=None,
+                    depends_on=[],
+                    event_log=[],
+                )
+            },
+            worker_queues={},
+        )
+        Persistence(repo_root, "main", "default").save(state)
+        run_id = "main:default"
+        run_dir = repo_root / ".orca-state" / "runs" / "main" / "default"
+        manifest = SessionManifest(run_dir)
+        manifest.append(
+            issue_id="issue-1",
+            state="implementing",
+            session_id="sess-aaa",
+            worktree_path=str(repo_root / ".orca-state" / "worktrees" / "main"),
+            started_at="2026-01-01T00:00:00Z",
+        )
+        manifest.update_usage(
+            "sess-aaa",
+            {
+                "source": "claude-code",
+                "tokens": {"input": 10, "output": 8, "reasoning": 0, "cache_read": 2, "cache_write": 4},
+                "total_tokens": 24,
+                "updated_at": "2026-01-01T00:00:01Z",
+            },
+        )
+        mgr._runs[run_id] = RunInfo(
+            run_id=run_id,
+            branch="main",
+            workflow="default",
+            status=RunStatus.STOPPED,
+            issue_count=1,
+            created_at="2026-01-01T00:00:00Z",
+            config=config,
+        )
+
+        sessions = mgr.get_sessions(run_id)
+
+        assert sessions[0]["usage"]["model"] == "claude-opus-4-6"
+        assert sessions[0]["usage"]["cost_kind"] == "estimated"
+        assert sessions[0]["usage"]["cost_usd"] == pytest.approx(0.000828)
+
     @pytest.mark.asyncio()
     async def test_start_run(self, repo_root: Path) -> None:
         """Starts a run, appears in list, status RUNNING."""
@@ -762,6 +820,38 @@ class TestListDebugAttempts:
         assert len(out) == 1
         assert out[0]["decision"] is None
 
+    def test_reads_persisted_state_when_orchestrator_missing(self, tmp_path: Path) -> None:
+        mgr = RunManager(tmp_path)
+        issue = Issue(
+            type="issue",
+            fields={"title": "x"},
+            state="done",
+            worker_active=False,
+            decomposed_from=None,
+            depends_on=[],
+            event_log=[
+                _entry("t1", "created", {"state": "planning"}),
+                _entry("t2", "debug_review_required", {"snapshot": {"base_commit": "abc"}}),
+                _entry("t3", "debug_decision", {"action": "accept", "comments": []}),
+            ],
+            debug_pending=False,
+        )
+        Persistence(tmp_path, "main", "default").save(State(issues={"i1": issue}, worker_queues={}))
+        mgr._runs["main:default"] = RunInfo(
+            run_id="main:default",
+            branch="main",
+            workflow="default",
+            status=RunStatus.COMPLETED,
+            issue_count=1,
+            created_at="t0",
+            orchestrator=None,
+        )
+
+        out = mgr.list_debug_attempts("main:default", "i1")
+        assert len(out) == 1
+        assert out[0]["state"] == "planning"
+        assert out[0]["decision"] == "accept"
+
 
 class TestGetDebugReviewWithAttempt:
     def _setup(self, mgr: RunManager, *, debug_pending: bool, event_log: list[EventLogEntry]) -> None:
@@ -874,6 +964,67 @@ class TestGetDebugReviewWithAttempt:
         result = mgr.get_debug_review("r1", "i1", attempt=0)
         assert len(result["past_review"]["comment_threads"]) == 1
         assert result["past_review"]["comment_threads"][0]["messages"][0]["role"] == "agent"
+
+    def test_attempt_reads_persisted_state_when_orchestrator_missing(self, tmp_path: Path) -> None:
+        mgr = RunManager(tmp_path)
+        issue = Issue(
+            type="issue",
+            fields={"title": "x"},
+            state="done",
+            worker_active=False,
+            decomposed_from=None,
+            depends_on=[],
+            event_log=[
+                _entry("t1", "created", {"state": "planning"}),
+                _entry("t2", "debug_review_required", {"snapshot": {"base_commit": "abc", "diff_files": []}}),
+                _entry("t3", "debug_decision", {"action": "accept", "comments": []}),
+            ],
+            debug_pending=False,
+        )
+        Persistence(tmp_path, "main", "default").save(State(issues={"i1": issue}, worker_queues={}))
+        mgr._runs["main:default"] = RunInfo(
+            run_id="main:default",
+            branch="main",
+            workflow="default",
+            status=RunStatus.COMPLETED,
+            issue_count=1,
+            created_at="t0",
+            orchestrator=None,
+        )
+
+        result = mgr.get_debug_review("main:default", "i1", attempt=0)
+        assert result is not None
+        assert result["base_commit"] == "abc"
+        assert result["past_review"]["decision_action"] == "accept"
+
+    def test_live_mode_reads_persisted_pending_snapshot_when_orchestrator_missing(self, tmp_path: Path) -> None:
+        mgr = RunManager(tmp_path)
+        issue = Issue(
+            type="issue",
+            fields={"title": "x"},
+            state="planning",
+            worker_active=False,
+            decomposed_from=None,
+            depends_on=[],
+            event_log=[
+                _entry("t1", "created", {"state": "planning"}),
+                _entry("t2", "debug_review_required", {"snapshot": {"base_commit": "abc", "diff_files": []}}),
+            ],
+            debug_pending=True,
+        )
+        Persistence(tmp_path, "main", "default").save(State(issues={"i1": issue}, worker_queues={}))
+        mgr._runs["main:default"] = RunInfo(
+            run_id="main:default",
+            branch="main",
+            workflow="default",
+            status=RunStatus.INTERRUPTED,
+            issue_count=1,
+            created_at="t0",
+            orchestrator=None,
+        )
+
+        result = mgr.get_debug_review("main:default", "i1", attempt=None)
+        assert result == {"base_commit": "abc", "diff_files": []}
 
 
 class TestGetWorkerLogBySession:

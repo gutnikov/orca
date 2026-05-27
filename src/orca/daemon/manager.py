@@ -31,7 +31,7 @@ from orca.orchestrator.runner import (
 )
 from orca.orchestrator.session_sync import SessionManifest, SessionSync
 from orca.orchestrator.template_persist import rendered_prompt_path
-from orca.orchestrator.usage import collect_usage
+from orca.orchestrator.usage import collect_usage, with_estimated_cost
 from orca.orchestrator.worker import KIND_REGISTRY, CliAgentWorker
 from orca.orchestrator.worktree import WorktreeManager
 
@@ -142,8 +142,6 @@ def _usage_entry_with_metadata(
     config: StateMachineConfig,
 ) -> dict[str, Any]:
     result = dict(entry)
-    if isinstance(result.get("worker_kind"), str):
-        return result
     state_name = result.get("state")
     issue_id = result.get("issue_id")
     if not isinstance(state_name, str) or not isinstance(issue_id, str):
@@ -159,12 +157,20 @@ def _usage_entry_with_metadata(
         return result
 
     worker = state_def.worker
-    result["worker_kind"] = worker.kind
-    if worker.model:
+    if not isinstance(result.get("worker_kind"), str):
+        result["worker_kind"] = worker.kind
+    if worker.model and not isinstance(result.get("model"), str):
         result["model"] = worker.model
-    if worker.effort:
+    if worker.effort and not isinstance(result.get("effort"), str):
         result["effort"] = worker.effort
     return result
+
+
+def _session_needs_usage_backfill(entry: dict[str, Any]) -> bool:
+    usage = entry.get("usage")
+    if not isinstance(usage, dict):
+        return True
+    return "cost_usd" not in usage
 
 
 def _pair_debug_attempts(
@@ -815,14 +821,17 @@ class RunManager:
         run_info = self._runs.get(run_id)
         if run_info is None:
             return None
-        if run_info.orchestrator is not None:
-            return run_info.orchestrator.state.to_dict()
-        # Fall back to persisted state on disk (e.g. interrupted runs)
-        persistence = Persistence(self.repo_root, run_info.branch, run_info.workflow)
-        state = persistence.load()
+        state = self._state_for_run(run_info)
         if state is not None:
             return state.to_dict()
         return None
+
+    def _state_for_run(self, run_info: RunInfo) -> State | None:
+        """Return live state when available, otherwise load persisted state."""
+        if run_info.orchestrator is not None:
+            return run_info.orchestrator.state
+        persistence = Persistence(self.repo_root, run_info.branch, run_info.workflow)
+        return persistence.load()
 
     def get_sessions(self, run_id: str) -> list[dict[str, Any]]:
         """Get session manifest entries for a run."""
@@ -832,7 +841,7 @@ class RunManager:
         run_dir = self.repo_root / ".orca-state" / "runs" / run_info.branch / run_info.workflow
         manifest = SessionManifest(run_dir)
         sessions = manifest.read()
-        if any(entry.get("usage") is None for entry in sessions):
+        if any(_session_needs_usage_backfill(entry) for entry in sessions):
             self._backfill_session_usage(run_info, run_dir, manifest, sessions)
             sessions = manifest.read()
         return sessions
@@ -854,8 +863,6 @@ class RunManager:
             return
 
         for entry in sessions:
-            if entry.get("usage") is not None:
-                continue
             session_id = entry.get("session_id")
             if not isinstance(session_id, str):
                 continue
@@ -866,6 +873,13 @@ class RunManager:
                 continue
             self._usage_backfill_attempted.add(key)
             usage_entry = _usage_entry_with_metadata(entry, state, config)
+            existing_usage = entry.get("usage")
+            if isinstance(existing_usage, dict):
+                model = usage_entry.get("model")
+                priced = with_estimated_cost(existing_usage, model if isinstance(model, str) else None)
+                if priced is not None:
+                    manifest.update_usage(session_id, priced)
+                continue
             usage = collect_usage(usage_entry)
             if usage is not None:
                 manifest.update_usage(session_id, usage)
@@ -1104,14 +1118,22 @@ class RunManager:
         range.
         """
         run_info = self._runs.get(run_id)
-        if run_info is None or run_info.orchestrator is None:
+        if run_info is None:
             return None
-        issue = run_info.orchestrator.state.issues.get(issue_id)
+        state = self._state_for_run(run_info)
+        if state is None:
+            return None
+        issue = state.issues.get(issue_id)
         if issue is None:
             return None
 
         if attempt is None:
-            if not run_info.orchestrator.is_debug_pending(issue_id):
+            pending = (
+                run_info.orchestrator.is_debug_pending(issue_id)
+                if run_info.orchestrator is not None
+                else bool(issue.debug_pending)
+            )
+            if not pending:
                 return None
             for entry in reversed(issue.event_log):
                 if entry.type == "debug_review_required":
@@ -1165,9 +1187,12 @@ class RunManager:
         still appear with decision=None.
         """
         run_info = self._runs.get(run_id)
-        if run_info is None or run_info.orchestrator is None:
+        if run_info is None:
             return []
-        issue = run_info.orchestrator.state.issues.get(issue_id)
+        state = self._state_for_run(run_info)
+        if state is None:
+            return []
+        issue = state.issues.get(issue_id)
         if issue is None:
             return []
         return _pair_debug_attempts(

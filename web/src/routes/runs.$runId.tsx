@@ -130,6 +130,15 @@ function RunViewerPage() {
     [data, selectedSessionId],
   )
 
+  const selectedSessionStateLocalIndex = useMemo(() => {
+    if (!data || !selectedSession) return null
+    const matching = data.sessions
+      .filter((s) => s.issue_id === selectedSession.issue_id && s.state === selectedSession.state)
+      .sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at))
+    const index = matching.findIndex((s) => s.session_id === selectedSession.session_id)
+    return index === -1 ? null : index + 1
+  }, [data, selectedSession])
+
   const debugMode = useMemo(
     () =>
       data
@@ -433,6 +442,8 @@ function RunViewerPage() {
                 runId={runId}
                 issueId={selectedIssueId}
                 debugPending={selectedIssue?.debug_pending}
+                selectedState={selectedSession?.state}
+                selectedStateLocalIndex={selectedSessionStateLocalIndex}
               />
             )}
             {activeTab === "result" && (

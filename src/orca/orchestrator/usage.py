@@ -23,6 +23,8 @@ def usage_marker(session_id: str) -> str:
 def collect_usage(entry: Mapping[str, Any]) -> UsageSnapshot | None:
     kind = entry.get("worker_kind")
     worktree_path = entry.get("worktree_path")
+    model_hint_value = entry.get("model")
+    model_hint = model_hint_value if isinstance(model_hint_value, str) and model_hint_value else None
     marker_value = entry.get("usage_marker")
     marker = marker_value if isinstance(marker_value, str) and marker_value else None
     started_at = _parse_datetime(entry.get("started_at"))
@@ -33,9 +35,9 @@ def collect_usage(entry: Mapping[str, Any]) -> UsageSnapshot | None:
         return None
 
     if kind == "claude-code":
-        return _collect_claude(Path(worktree_path), marker, started_at, completed_at)
+        return _collect_claude(Path(worktree_path), marker, started_at, completed_at, model_hint)
     if kind == "codex":
-        return _collect_codex(Path(worktree_path), marker, started_at, completed_at)
+        return _collect_codex(Path(worktree_path), marker, started_at, completed_at, model_hint)
     if kind == "opencode":
         return _collect_opencode(Path(worktree_path), marker, started_at)
     return None
@@ -46,6 +48,7 @@ def _collect_claude(
     marker: str | None,
     started_at: datetime,
     completed_at: datetime | None,
+    model_hint: str | None,
 ) -> UsageSnapshot | None:
     snapshots: list[UsageSnapshot] = []
     for project_dir in _claude_project_dirs(workdir):
@@ -53,7 +56,7 @@ def _collect_claude(
             continue
 
         for path in _recent_files(project_dir.glob("*.jsonl"), started_at):
-            result = _parse_claude_file(path, marker, started_at, completed_at)
+            result = _parse_claude_file(path, marker, started_at, completed_at, model_hint)
             if result is None:
                 continue
             if marker is not None:
@@ -69,11 +72,12 @@ def _parse_claude_file(
     marker: str | None,
     started_at: datetime,
     completed_at: datetime | None,
+    model_hint: str | None,
 ) -> UsageSnapshot | None:
     marker_ts: datetime | None = started_at if marker is None else None
     latest_ts = completed_at + _COLLECT_WINDOW if completed_at is not None else None
     external_session_id: str | None = None
-    model: str | None = None
+    model: str | None = model_hint
     usage_by_request: dict[str, UsageTokens] = {}
 
     for raw, obj in _iter_jsonl(path):
@@ -134,13 +138,14 @@ def _collect_codex(
     marker: str | None,
     started_at: datetime,
     completed_at: datetime | None,
+    model_hint: str | None,
 ) -> UsageSnapshot | None:
     sessions_dir = _home() / ".codex" / "sessions"
     if not sessions_dir.exists():
         return None
 
     for path in _recent_files(sessions_dir.rglob("*.jsonl"), started_at):
-        result = _parse_codex_file(path, marker, workdir, started_at, completed_at)
+        result = _parse_codex_file(path, marker, workdir, started_at, completed_at, model_hint)
         if result is not None:
             return result
     return None
@@ -152,11 +157,12 @@ def _parse_codex_file(
     workdir: Path,
     started_at: datetime,
     completed_at: datetime | None,
+    model_hint: str | None,
 ) -> UsageSnapshot | None:
     marker_ts: datetime | None = started_at if marker is None else None
     latest_ts = completed_at + _COLLECT_WINDOW if completed_at is not None else None
     external_session_id: str | None = None
-    model: str | None = None
+    model: str | None = model_hint
     cwd_matches = False
     before_total: UsageTokens | None = None
     after_total: UsageTokens | None = None
@@ -301,6 +307,37 @@ def _snapshot(
     return result
 
 
+def with_estimated_cost(usage: Mapping[str, Any], model_hint: str | None) -> UsageSnapshot | None:
+    """Return usage enriched with model/cost when enough data is available."""
+    tokens_value = usage.get("tokens")
+    if not isinstance(tokens_value, dict):
+        return None
+    tokens = {
+        "input": _int(tokens_value.get("input")),
+        "output": _int(tokens_value.get("output")),
+        "reasoning": _int(tokens_value.get("reasoning")),
+        "cache_read": _int(tokens_value.get("cache_read")),
+        "cache_write": _int(tokens_value.get("cache_write")),
+    }
+    model_value = usage.get("model")
+    model = model_value if isinstance(model_value, str) and model_value else model_hint
+    if not model:
+        return None
+
+    source = usage.get("source")
+    input_includes_cache = source != "claude-code"
+    cost = _estimate_cost(model, tokens, input_includes_cache=input_includes_cache)
+    if cost is None:
+        return None
+
+    result = dict(usage)
+    result["model"] = model
+    result["cost_usd"] = cost
+    result["cost_kind"] = "estimated"
+    result["updated_at"] = datetime.now(UTC).isoformat()
+    return result
+
+
 def _merge_snapshots(source: str, snapshots: list[UsageSnapshot]) -> UsageSnapshot:
     if len(snapshots) == 1:
         return snapshots[0]
@@ -348,10 +385,7 @@ def _estimate_cost(model: str | None, tokens: UsageTokens, *, input_includes_cac
 
 def _price_for_model(model: str) -> dict[str, float] | None:
     table = _price_table()
-    candidates = [model]
-    if "/" in model:
-        candidates.append(model.rsplit("/", 1)[1])
-    for candidate in candidates:
+    for candidate in _model_price_candidates(model):
         value = table.get(candidate)
         if value is not None:
             return value
@@ -374,7 +408,45 @@ def _price_table() -> dict[str, dict[str, float]]:
         if parsed:
             return parsed
 
-    return {}
+    return _builtin_price_table()
+
+
+def _builtin_price_table() -> dict[str, dict[str, float]]:
+    return {
+        "claude-opus-4-6": {
+            "input": 15.0,
+            "output": 75.0,
+            "cache_read": 1.5,
+            "cache_write": 18.75,
+        },
+        "gpt-5.5": {
+            "input": 1.25,
+            "output": 10.0,
+            "cache_read": 0.125,
+        },
+    }
+
+
+def _model_price_candidates(model: str) -> list[str]:
+    candidates: list[str] = []
+
+    def add(value: str) -> None:
+        if value and value not in candidates:
+            candidates.append(value)
+
+    add(model)
+    if "/" in model:
+        add(model.rsplit("/", 1)[1])
+    dotted = model.split(".")
+    for part in dotted:
+        if part.startswith(("claude-", "gpt-")):
+            add(part)
+    for candidate in list(candidates):
+        if candidate.endswith("-v1"):
+            add(candidate[:-3])
+        if candidate.endswith("-v2"):
+            add(candidate[:-3])
+    return candidates
 
 
 def _parse_price_table(raw: str) -> dict[str, dict[str, float]]:

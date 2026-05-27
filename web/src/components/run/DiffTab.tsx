@@ -34,6 +34,8 @@ interface Props {
   runId: string
   issueId: string | null
   debugPending?: boolean
+  selectedState?: string | null
+  selectedStateLocalIndex?: number | null
 }
 
 const STATUS_DOT: Record<FileStatus, string> = {
@@ -136,7 +138,13 @@ function FileCard({ file, collapsed, onToggle }: { file: ChangesetFile; collapse
   )
 }
 
-export function DiffTab({ runId, issueId, debugPending }: Props) {
+export function DiffTab({
+  runId,
+  issueId,
+  debugPending,
+  selectedState,
+  selectedStateLocalIndex,
+}: Props) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null)
   const [attempts, setAttempts] = useState<Attempt[]>([])
   const [selectedAttempt, setSelectedAttempt] = useState<number | null>(null)
@@ -144,13 +152,13 @@ export function DiffTab({ runId, issueId, debugPending }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set())
 
-  // Reset state when issue changes
+  // Reset state when issue/phase changes.
   useEffect(() => {
     setSnapshot(null)
     setAttempts([])
     setSelectedAttempt(null)
     setError(null)
-  }, [issueId])
+  }, [issueId, selectedState, selectedStateLocalIndex])
 
   // Load attempts list and auto-select the latest
   useEffect(() => {
@@ -189,10 +197,14 @@ export function DiffTab({ runId, issueId, debugPending }: Props) {
           return
         }
 
-        const lastAttempt = list[list.length - 1].attempt
-        setSelectedAttempt(lastAttempt)
+        const matchingAttempt =
+          selectedState && selectedStateLocalIndex
+            ? list.find((item) => item.state === selectedState && item.state_local_index === selectedStateLocalIndex)
+            : undefined
+        const attempt = matchingAttempt?.attempt ?? list[list.length - 1].attempt
+        setSelectedAttempt(attempt)
 
-        const snapRes = await fetch(`/api/runs/${decoded}/issues/${issueId}/debug?attempt=${lastAttempt}`)
+        const snapRes = await fetch(`/api/runs/${decoded}/issues/${issueId}/debug?attempt=${attempt}`)
         if (cancelled) return
         if (snapRes.ok) {
           setSnapshot(await snapRes.json())
@@ -208,7 +220,7 @@ export function DiffTab({ runId, issueId, debugPending }: Props) {
     })()
 
     return () => { cancelled = true }
-  }, [issueId, runId, debugPending])
+  }, [issueId, runId, debugPending, selectedState, selectedStateLocalIndex])
 
   // Fetch snapshot when user picks a different attempt from the dropdown
   const loadAttempt = useCallback(async (attempt: number) => {

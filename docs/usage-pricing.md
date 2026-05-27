@@ -77,10 +77,11 @@ Orca does not fetch model price rates from the internet at runtime. That is inte
 
 For `opencode`, rates are not needed. Orca reads the already-computed `cost` from opencode's local database.
 
-For `claude-code` and `codex`, Orca can estimate dollar cost from a user-provided price table. The lookup order is:
+For `claude-code` and `codex`, Orca can estimate dollar cost from a price table. The lookup order is:
 
 1. `ORCA_USAGE_PRICES_JSON`
 2. `ORCA_USAGE_PRICES_FILE`
+3. Orca's built-in fallback table for common models
 
 Example:
 
@@ -101,6 +102,8 @@ Example:
 ```
 
 Rates are USD per 1 million tokens. `input` and `output` are required. `cache_read` and `cache_write` are optional; when omitted, Orca falls back to the input rate for those token categories.
+
+The built-in table is deliberately small and overrideable. Configure `ORCA_USAGE_PRICES_JSON` or `ORCA_USAGE_PRICES_FILE` when your provider pricing differs from Orca's fallback table.
 
 For Codex and any source where `input` includes cached tokens, the estimate formula is:
 
