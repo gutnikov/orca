@@ -29,6 +29,8 @@ export function PhasesPanel({ sessions, issueId, outcomes, selectedSessionId, on
         name: s.state,
         outcome: outcomes[s.session_id],
         duration: formatDuration(s.started_at, s.completed_at),
+        progress: s.progress,
+        progressText: s.status ?? null,
         active: s.session_id === selectedSessionId,
         onClick: () => onSelect(s.session_id),
       }))
