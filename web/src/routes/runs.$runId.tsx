@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useEffect, useMemo, useState } from "react"
+import { toast } from "sonner"
 import {
   useRunState,
   type IssueState,
@@ -70,6 +71,18 @@ function RunViewerPage() {
       replace: true,
     })
   }, [data, selectedIssueId, navigate, runId])
+
+  // Surface daemon-reconnect state as an unobtrusive toast.
+  useEffect(() => {
+    if (!error || data === null) return
+    const id = toast("Reconnecting to daemon…", {
+      duration: 4000,
+      description: error,
+    })
+    return () => {
+      toast.dismiss(id)
+    }
+  }, [error, data])
 
   const selectedIssue: IssueState | null =
     selectedIssueId && data ? (data.state.issues[selectedIssueId] ?? null) : null
@@ -207,11 +220,6 @@ function RunViewerPage() {
         setTab={setTab}
         onChange={() => void refetch()}
       />
-      {error && data !== null && (
-        <div className="px-5 py-1 text-[11px] text-[var(--attention)] bg-[var(--attention)]/5">
-          reconnecting… ({error})
-        </div>
-      )}
       <div className="flex-1 min-h-0 grid grid-cols-[260px_1fr]">
         <aside className="border-r border-[var(--border)] bg-[var(--canvas)] overflow-y-auto p-3 flex flex-col gap-4">
           <div>
