@@ -7,8 +7,18 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from orca.daemon.manager import RunManager, RunStatus, _last_worker_error, _pair_debug_attempts, _project_past_comments
-from orca.engine.types import DispatchWorkerEffect, EventLogEntry
+from orca.daemon.manager import (
+    RunInfo,
+    RunManager,
+    RunStatus,
+    _last_worker_error,
+    _pair_debug_attempts,
+    _project_past_comments,
+)
+from orca.engine.config import parse_config
+from orca.engine.types import DispatchWorkerEffect, EventLogEntry, Issue, State
+from orca.orchestrator.persistence import Persistence
+from orca.orchestrator.session_sync import SessionManifest
 from orca.orchestrator.worker import WorkerOutcome, WorkerSuccess
 
 SIMPLE_CONFIG_YAML = """\
@@ -103,6 +113,61 @@ class TestRunManager:
         """Run ID has format 'branch:workflow'."""
         assert RunManager.make_run_id("feat/auth", "default") == "feat/auth:default"
         assert RunManager.make_run_id("main", "develop") == "main:develop"
+
+    def test_get_sessions_backfills_legacy_usage(self, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        mgr = RunManager(repo_root)
+        config = parse_config(SIMPLE_CONFIG_YAML)
+        state = State(
+            issues={
+                "issue-1": Issue(
+                    type="default",
+                    fields={"title": "Test"},
+                    state="implementing",
+                    worker_active=False,
+                    decomposed_from=None,
+                    depends_on=[],
+                    event_log=[],
+                )
+            },
+            worker_queues={},
+        )
+        Persistence(repo_root, "main", "default").save(state)
+        run_id = "main:default"
+        run_dir = repo_root / ".orca-state" / "runs" / "main" / "default"
+        manifest = SessionManifest(run_dir)
+        manifest.append(
+            issue_id="issue-1",
+            state="implementing",
+            session_id="sess-aaa",
+            worktree_path=str(repo_root / ".orca-state" / "worktrees" / "main"),
+            started_at="2026-01-01T00:00:00Z",
+        )
+        mgr._runs[run_id] = RunInfo(
+            run_id=run_id,
+            branch="main",
+            workflow="default",
+            status=RunStatus.STOPPED,
+            issue_count=1,
+            created_at="2026-01-01T00:00:00Z",
+            config=config,
+        )
+        captured: dict[str, Any] = {}
+
+        def fake_collect_usage(entry: dict[str, Any]) -> dict[str, Any]:
+            captured.update(entry)
+            return {
+                "source": "claude-code",
+                "tokens": {"input": 1, "output": 2, "reasoning": 0, "cache_read": 0, "cache_write": 0},
+                "total_tokens": 3,
+                "updated_at": "2026-01-01T00:00:01Z",
+            }
+
+        monkeypatch.setattr("orca.daemon.manager.collect_usage", fake_collect_usage)
+
+        sessions = mgr.get_sessions(run_id)
+
+        assert captured["worker_kind"] == "claude-code"
+        assert sessions[0]["usage"]["source"] == "claude-code"
 
     @pytest.mark.asyncio()
     async def test_start_run(self, repo_root: Path) -> None:

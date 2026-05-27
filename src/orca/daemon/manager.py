@@ -30,6 +30,7 @@ from orca.orchestrator.runner import (
     resolve_config_path,
 )
 from orca.orchestrator.session_sync import SessionManifest, SessionSync
+from orca.orchestrator.usage import collect_usage
 from orca.orchestrator.worker import KIND_REGISTRY, CliAgentWorker
 from orca.orchestrator.worktree import WorktreeManager
 
@@ -132,6 +133,37 @@ def _last_worker_error(state: Any) -> str | None:
                     latest = entry.data.get("error", "unknown error")
                 break
     return latest
+
+
+def _usage_entry_with_metadata(
+    entry: dict[str, Any],
+    state: State,
+    config: StateMachineConfig,
+) -> dict[str, Any]:
+    result = dict(entry)
+    if isinstance(result.get("worker_kind"), str):
+        return result
+    state_name = result.get("state")
+    issue_id = result.get("issue_id")
+    if not isinstance(state_name, str) or not isinstance(issue_id, str):
+        return result
+    issue = state.issues.get(issue_id)
+    if issue is None:
+        return result
+    type_def = config.types.get(issue.type)
+    if type_def is None:
+        return result
+    state_def = type_def.states.get(state_name)
+    if state_def is None or state_def.worker is None:
+        return result
+
+    worker = state_def.worker
+    result["worker_kind"] = worker.kind
+    if worker.model:
+        result["model"] = worker.model
+    if worker.effort:
+        result["effort"] = worker.effort
+    return result
 
 
 def _pair_debug_attempts(
@@ -282,6 +314,7 @@ class RunManager:
     def __init__(self, repo_root: Path) -> None:
         self.repo_root = repo_root
         self._runs: dict[str, RunInfo] = {}
+        self._usage_backfill_attempted: set[tuple[str, str]] = set()
 
     @staticmethod
     def make_run_id(branch: str, workflow: str) -> str:
@@ -797,7 +830,61 @@ class RunManager:
             return []
         run_dir = self.repo_root / ".orca-state" / "runs" / run_info.branch / run_info.workflow
         manifest = SessionManifest(run_dir)
-        return manifest.read()
+        sessions = manifest.read()
+        if any(entry.get("usage") is None for entry in sessions):
+            self._backfill_session_usage(run_info, run_dir, manifest, sessions)
+            sessions = manifest.read()
+        return sessions
+
+    def _backfill_session_usage(
+        self,
+        run_info: RunInfo,
+        run_dir: Path,
+        manifest: SessionManifest,
+        sessions: list[dict[str, Any]],
+    ) -> None:
+        state = run_info.orchestrator.state if run_info.orchestrator is not None else None
+        if state is None:
+            state = Persistence(self.repo_root, run_info.branch, run_info.workflow).load()
+        if state is None:
+            return
+        config = run_info.config or self._load_run_config(run_info, run_dir)
+        if config is None:
+            return
+
+        for entry in sessions:
+            if entry.get("usage") is not None:
+                continue
+            session_id = entry.get("session_id")
+            if not isinstance(session_id, str):
+                continue
+            key = (run_info.run_id, session_id)
+            if key in self._usage_backfill_attempted:
+                continue
+            if run_info.status == RunStatus.RUNNING and entry.get("completed_at") is None:
+                continue
+            self._usage_backfill_attempted.add(key)
+            usage_entry = _usage_entry_with_metadata(entry, state, config)
+            usage = collect_usage(usage_entry)
+            if usage is not None:
+                manifest.update_usage(session_id, usage)
+
+    def _load_run_config(self, run_info: RunInfo, run_dir: Path) -> StateMachineConfig | None:
+        try:
+            source_file = run_dir / "config_source.json"
+            if source_file.exists():
+                config_path = Path(_json.loads(source_file.read_text())["config_path"])
+            else:
+                config_path = resolve_config_path(
+                    self.repo_root,
+                    run_info.workflow if run_info.workflow != "default" else None,
+                )
+            config = parse_config(config_path.read_text())
+            run_info.config = config
+            return config
+        except Exception:
+            logger.debug("Could not load config for usage backfill %s", run_info.run_id, exc_info=True)
+            return None
 
     def get_issue(self, run_id: str, issue_id: str) -> dict[str, Any] | None:
         """Get a specific issue from a run."""
