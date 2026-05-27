@@ -83,6 +83,16 @@ orca tui
 orca tui <run_id>  # attach to a specific run from `orca runs`
 ```
 
+### Upgrading
+
+The plugin marketplace handles updates for Claude Code and Codex automatically. For the `orca` CLI itself (installed via pipx from a git URL), use `--force` to reinstall:
+
+```bash
+pipx install --force "git+ssh://git@github.com/gutnikov/orca.git"
+```
+
+> **Note:** `pipx upgrade` does not work with git+ssh URLs — it only supports PyPI package names. `--force` reinstalls from HEAD, picking up the latest version.
+
 ## How It Works
 
 A YAML config defines states. Each state has a worker (an AI agent) and transition rules. Workers do their job, return a result, and the result determines the next state. That's it.

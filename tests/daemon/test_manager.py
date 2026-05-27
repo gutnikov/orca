@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from orca.daemon.manager import RunManager, RunStatus, _pair_debug_attempts, _project_past_comments
+from orca.daemon.manager import RunManager, RunStatus, _last_worker_error, _pair_debug_attempts, _project_past_comments
 from orca.engine.types import DispatchWorkerEffect, EventLogEntry
 from orca.orchestrator.worker import WorkerOutcome, WorkerSuccess
 
@@ -824,3 +824,49 @@ class TestGetWorkerLogBySession:
 
         manager = RunManager(tmp_path)
         manager.get_worker_log("nonexistent:default", "issue-1", session_id=None)
+
+
+class TestLastWorkerError:
+    def test_returns_none_when_no_failures(self) -> None:
+        state = MagicMock()
+        state.issues = {
+            "i1": MagicMock(
+                event_log=[
+                    EventLogEntry(type="created", timestamp="2026-01-01T00:00:00Z", data={}),
+                ]
+            ),
+        }
+        assert _last_worker_error(state) is None
+
+    def test_returns_most_recent_error(self) -> None:
+        state = MagicMock()
+        state.issues = {
+            "i1": MagicMock(
+                event_log=[
+                    EventLogEntry(type="worker_failed", timestamp="2026-01-01T00:01:00Z", data={"error": "old error"}),
+                ]
+            ),
+            "i2": MagicMock(
+                event_log=[
+                    EventLogEntry(
+                        type="worker_failed",
+                        timestamp="2026-01-01T00:02:00Z",
+                        data={"error": "model 'claude-opus-4-7' is invalid"},
+                    ),
+                ]
+            ),
+        }
+        assert _last_worker_error(state) == "model 'claude-opus-4-7' is invalid"
+
+    def test_ignores_succeeded_issues(self) -> None:
+        state = MagicMock()
+        state.issues = {
+            "i1": MagicMock(
+                event_log=[
+                    EventLogEntry(type="worker_failed", timestamp="2026-01-01T00:01:00Z", data={"error": "first fail"}),
+                    EventLogEntry(type="worker_result", timestamp="2026-01-01T00:03:00Z", data={"outcome": "ok"}),
+                ]
+            ),
+        }
+        # worker_result after worker_failed — the reverse scan hits worker_result first
+        assert _last_worker_error(state) is None

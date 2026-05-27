@@ -55,6 +55,7 @@ class WorkerSuccess:
 @dataclass(frozen=True)
 class WorkerFailure:
     error: str
+    startup: bool = False
 
 
 WorkerOutcome = WorkerSuccess | WorkerFailure
@@ -427,7 +428,15 @@ class CliAgentWorker:
                         return WorkerFailure(error=error)
                     except (json.JSONDecodeError, OSError) as e:
                         return WorkerFailure(error=f"failed to parse result file: {e}")
-                return WorkerFailure(error="result file not found after session exited")
+                # Session exited with no result — likely a startup failure
+                # (invalid model, missing binary, auth error). Flag as startup
+                # failure if it happened quickly (< 30s) so orchestrator can
+                # skip retries for config errors.
+                is_startup = elapsed < 30.0
+                return WorkerFailure(
+                    error="result file not found after session exited",
+                    startup=is_startup,
+                )
 
             # Timeout — no result produced in time
             if result_detected_at is None and elapsed >= effective_timeout:

@@ -138,6 +138,20 @@ def daemon_command(action: str, root: Path | None = None, *, foreground: bool = 
             print("Daemon is not running.", file=sys.stderr)
             raise SystemExit(1)
 
+        # Warn if active runs will be interrupted
+        try:
+            from orca.daemon.client import DaemonClient
+
+            client = DaemonClient(repo)
+            runs = asyncio.run(client.list_runs())
+            active = [r for r in runs if r.get("status") == "running"]
+            if active:
+                names = ", ".join(r["run_id"] for r in active[:3])
+                extra = f" (+{len(active) - 3} more)" if len(active) > 3 else ""
+                print(f"Warning: {len(active)} active run(s) will be interrupted: {names}{extra}")
+        except Exception:
+            pass
+
         if send_stop_signal(repo):
             print("Stop signal sent to daemon.")
         else:

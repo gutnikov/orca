@@ -1116,6 +1116,13 @@ class Orchestrator:
                         timestamp=ts,
                     )
                 else:
+                    # Startup failures (e.g. invalid model ID, missing binary)
+                    # should not burn through retries silently. Exhaust the
+                    # retry budget immediately so the error surfaces at once.
+                    if outcome.startup and self._config.max_worker_retries is not None:
+                        issue_obj = self._state.issues.get(issue_id)
+                        if issue_obj is not None:
+                            issue_obj.failure_count = self._config.max_worker_retries - 1
                     event = WorkerFailedEvent(
                         issue_id=issue_id,
                         error=outcome.error,

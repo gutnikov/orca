@@ -15,13 +15,17 @@ from orca.engine.config import parse_config
 from orca.engine.reducer import reduce
 from orca.engine.types import CreateEvent, Effect, EventLogEntry, State, StateMachineConfig, WorkerFailedEvent
 from orca.orchestrator.branches import BranchMap
+from orca.orchestrator.config_types import parse_orchestrator_config
 from orca.orchestrator.log import setup_logging
 from orca.orchestrator.orchestrator import Orchestrator
 from orca.orchestrator.persistence import Persistence
 from orca.orchestrator.runner import (
     _find_root_issue,
+    _git_branch_exists,
+    _git_create_branch,
     _recover_effects,
     parse_task_file,
+    resolve_base_ref,
     resolve_branch,
     resolve_config_path,
 )
@@ -105,6 +109,29 @@ def _collect_debug_reviews(
             record["url"] = url
         result.append(record)
     return result
+
+
+def _last_worker_error(state: Any) -> str | None:
+    """Return the most recent worker_failed error message across all issues.
+
+    Only reports errors from issues whose last worker event is a failure (not
+    followed by a success). Surfaced in run summaries so polling agents/UIs can
+    detect startup failures (e.g. invalid model ID) without diving into
+    get_worker_log.
+    """
+    latest: str | None = None
+    latest_ts: str = ""
+    for issue in state.issues.values():
+        for entry in reversed(issue.event_log):
+            if entry.type == "worker_result":
+                break
+            if entry.type == "worker_failed":
+                ts = entry.timestamp or ""
+                if ts >= latest_ts:
+                    latest_ts = ts
+                    latest = entry.data.get("error", "unknown error")
+                break
+    return latest
 
 
 def _pair_debug_attempts(
@@ -224,15 +251,17 @@ class RunInfo:
         terminal_count = 0
         waiting_issues: list[dict[str, Any]] = []
         debug_reviews: list[dict[str, Any]] = []
+        last_worker_error: str | None = None
         if self.orchestrator is not None:
             terminal_count = sum(1 for issue in self.orchestrator.state.issues.values() if issue.state == "done")
             waiting_issues = _collect_waiting_issues(self.orchestrator.state)
             debug_reviews = _collect_debug_reviews(self.orchestrator.state, self.run_id, browser_port)
+            last_worker_error = _last_worker_error(self.orchestrator.state)
         # Update issue_count from live state if available
         issue_count = self.issue_count
         if self.orchestrator is not None:
             issue_count = len(self.orchestrator.state.issues)
-        return {
+        summary: dict[str, Any] = {
             "run_id": self.run_id,
             "branch": self.branch,
             "workflow": self.workflow,
@@ -244,6 +273,9 @@ class RunInfo:
             "debug_reviews": debug_reviews,
             "debug": self.debug,
         }
+        if last_worker_error is not None:
+            summary["last_worker_error"] = last_worker_error
+        return summary
 
 
 class RunManager:
@@ -281,7 +313,11 @@ class RunManager:
         """
         # Resolve config
         config_path = resolve_config_path(self.repo_root, workflow)
+        import yaml as _yaml
+
+        raw_yaml: dict[str, Any] = _yaml.safe_load(config_path.read_text()) or {}
         config = parse_config(config_path.read_text())
+        orch_config = parse_orchestrator_config(raw_yaml)
         flow_root = config_path.parent
 
         # Validate worker overrides: every state name must exist in the
@@ -375,6 +411,36 @@ class RunManager:
             # Fresh start — clear stale session manifest
             (run_dir / "sessions.json").unlink(missing_ok=True)
             root_issue_id = _generate_id()
+
+            # Ensure a worktree exists when the requested branch differs from
+            # the main directory's HEAD — prevents silent wrong-branch execution.
+            current_branch = resolve_branch()
+            if base is not None:
+                # Explicit base: always create worktree (integration branch mode)
+                if not await _git_branch_exists(branch, self.repo_root):
+                    await _git_create_branch(branch, base, self.repo_root)
+                await worktree_mgr.create(
+                    issue_id=root_issue_id,
+                    branch_name=branch,
+                    parent_branch=base,
+                )
+            elif branch != current_branch:
+                # Branch differs from HEAD: isolate via worktree
+                if await _git_branch_exists(branch, self.repo_root):
+                    await worktree_mgr.create(
+                        issue_id=root_issue_id,
+                        branch_name=branch,
+                        parent_branch=branch,
+                    )
+                else:
+                    base_ref = resolve_base_ref(None, orch_config.base_branch)
+                    await _git_create_branch(branch, base_ref, self.repo_root)
+                    await worktree_mgr.create(
+                        issue_id=root_issue_id,
+                        branch_name=branch,
+                        parent_branch=base_ref,
+                    )
+
             state = State(issues={}, worker_queues={})
             create_event = CreateEvent(
                 issue_id=root_issue_id,
@@ -455,10 +521,33 @@ class RunManager:
         return run_id
 
     def _restart_run(self, run_info: RunInfo) -> None:
-        """Restart the orchestrator loop for a finished run (e.g. after retry)."""
+        """Restart the orchestrator loop for a finished run (e.g. after retry).
+
+        Re-reads the workflow YAML so that mutable fields (model, args,
+        inactivity_timeout) reflect any edits made between stop and resume.
+        """
         orchestrator = run_info.orchestrator
         if orchestrator is None:
             return
+
+        # Re-read workflow config to pick up YAML edits (e.g. fixed model ID)
+        run_dir = self.repo_root / ".orca-state" / "runs" / run_info.branch / run_info.workflow
+        source_file = run_dir / "config_source.json"
+        try:
+            if source_file.exists():
+                config_path = Path(_json.loads(source_file.read_text())["config_path"])
+            else:
+                config_path = resolve_config_path(
+                    self.repo_root,
+                    run_info.workflow if run_info.workflow != "default" else None,
+                )
+            if config_path.exists():
+                fresh_config = parse_config(config_path.read_text())
+                orchestrator._config = fresh_config
+                run_info.config = fresh_config
+        except Exception:
+            logger.debug("Could not refresh config on restart for %s", run_info.run_id, exc_info=True)
+
         root_issue_id = _find_root_issue(orchestrator.state)
         run_info.status = RunStatus.RUNNING
 
@@ -1040,12 +1129,21 @@ class RunManager:
                 if state is None:
                     continue
 
-                # Check if the root issue is terminal
-                all_terminal = True
+                # Check if all issues are terminal (completed run)
                 all_terminal = all(issue.state == "done" for issue in state.issues.values())
 
                 if all_terminal:
-                    continue  # Run was completed, skip
+                    # Completed runs are preserved in the listing (not invisible)
+                    self._runs[run_id] = RunInfo(
+                        run_id=run_id,
+                        branch=branch,
+                        workflow=workflow_name,
+                        status=RunStatus.COMPLETED,
+                        issue_count=len(state.issues),
+                        created_at=_now(),
+                        config=config,
+                    )
+                    continue
 
                 # Mark orphan sessions as completed+interrupted so TUI shows them distinctly
                 manifest = SessionManifest(workflow_dir)
