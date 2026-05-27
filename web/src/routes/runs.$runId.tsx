@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
+import { ChevronDown, ChevronRight } from "lucide-react"
 import {
   useRunState,
   type IssueState,
@@ -8,6 +9,7 @@ import {
 } from "@/hooks/useRunState"
 import { useWorkerLog } from "@/hooks/useWorkerLog"
 import { formatDuration } from "@/lib/duration"
+import { cn } from "@/lib/utils"
 import { IssuesTree } from "@/components/run/IssuesTree"
 import { PhasesPanel } from "@/components/run/PhasesPanel"
 import { IssueDetailTab } from "@/components/run/IssueDetailTab"
@@ -17,7 +19,7 @@ import { DiffTab } from "@/components/run/DiffTab"
 import { RunHeader } from "@/components/run/RunHeader"
 import { AppShell, AppHeader } from "@/components/ui/app-shell"
 
-type Tab = "detail" | "session" | "result" | "diff"
+type Tab = "session" | "result" | "diff"
 
 interface SearchParams {
   issue?: string
@@ -32,10 +34,11 @@ function RunViewerPage() {
 
   const { data, error, refetch } = useRunState(runId)
   const [tail, setTail] = useState(500)
+  const [detailOpen, setDetailOpen] = useState(true)
 
   const selectedIssueId = search.issue ?? null
   const selectedSessionId = search.session ?? null
-  const activeTab: Tab = search.tab ?? "detail"
+  const activeTab: Tab = (search.tab as Tab) ?? "session"
 
   // Build outcomes map by pairing completed sessions with worker_result events
   // (mirrors tui/app.py:_session_result_map — zip-by-order matching).
@@ -68,7 +71,7 @@ function RunViewerPage() {
     void navigate({
       to: "/runs/$runId",
       params: { runId },
-      search: { issue: running ?? ids[0], tab: "detail" } as SearchParams,
+      search: { issue: running ?? ids[0], tab: "session" } as SearchParams,
       replace: true,
     })
   }, [data, selectedIssueId, navigate, runId])
@@ -123,7 +126,7 @@ function RunViewerPage() {
     void navigate({
       to: "/runs/$runId",
       params: { runId },
-      search: { issue: id, tab: "detail" } as SearchParams,
+      search: { issue: id, tab: activeTab } as SearchParams,
       replace: true,
     })
   }
@@ -217,8 +220,6 @@ function RunViewerPage() {
         doneCount={doneCount}
         selectedIssueId={selectedIssueId}
         selectedIssue={selectedIssue}
-        activeTab={activeTab}
-        setTab={setTab}
         onChange={() => void refetch()}
       />
       <div className="flex-1 min-h-0 grid grid-cols-[260px_1fr]">
@@ -250,10 +251,52 @@ function RunViewerPage() {
         </aside>
 
         <section className="flex flex-col min-h-0 bg-[var(--canvas)]">
+          {/* Collapsible issue detail */}
+          {selectedIssueId && selectedIssue && (
+            <div className="border-b border-[var(--border)]">
+              <button
+                type="button"
+                onClick={() => setDetailOpen((v) => !v)}
+                className="w-full flex items-center gap-2 px-5 py-2 text-left hover:bg-[var(--subtle)] transition-colors"
+              >
+                {detailOpen
+                  ? <ChevronDown size={14} className="text-[var(--fg-subtle)] shrink-0" />
+                  : <ChevronRight size={14} className="text-[var(--fg-subtle)] shrink-0" />
+                }
+                <span className="text-[12px] font-semibold text-[var(--fg-muted)] uppercase tracking-wider">
+                  Issue
+                </span>
+                <span className="text-[12px] text-[var(--fg)] truncate">
+                  {selectedIssue.fields?.title || selectedIssueId}
+                </span>
+              </button>
+              {detailOpen && (
+                <IssueDetailTab runId={runId} issueId={selectedIssueId} issue={selectedIssue} />
+              )}
+            </div>
+          )}
+
+          {/* Per-phase tab bar */}
+          <div className="border-b border-[var(--border)] px-5 flex items-center gap-1">
+            {(["session", "diff", "result"] as const).map((t) => (
+              <button
+                key={t}
+                type="button"
+                onClick={() => setTab(t)}
+                className={cn(
+                  "px-3 py-2 text-[13px] capitalize border-b-2 -mb-px transition-colors",
+                  activeTab === t
+                    ? "border-[var(--accent-warm)] text-[var(--fg)] font-medium"
+                    : "border-transparent text-[var(--fg-muted)] hover:text-[var(--fg)]",
+                )}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+
+          {/* Per-phase tab content */}
           <div className="flex-1 min-h-0 overflow-y-auto">
-            {activeTab === "detail" && (
-              <IssueDetailTab runId={runId} issueId={selectedIssueId} issue={selectedIssue} />
-            )}
             {activeTab === "session" && (
               <WorkerLogTab
                 text={logText}
@@ -290,7 +333,7 @@ export const Route = createFileRoute("/runs/$runId")({
     issue: typeof raw.issue === "string" ? raw.issue : undefined,
     session: typeof raw.session === "string" ? raw.session : undefined,
     tab:
-      raw.tab === "detail" || raw.tab === "session" || raw.tab === "result" || raw.tab === "diff"
+      raw.tab === "session" || raw.tab === "result" || raw.tab === "diff"
         ? raw.tab
         : undefined,
   }),

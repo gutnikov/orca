@@ -5,9 +5,6 @@ import { Button } from "@/components/ui/button"
 import { StatusPill, type StatusKind } from "@/components/ui/status-pill"
 import { UnblockDialog } from "./UnblockDialog"
 import { StopResumeDropButtons } from "./StopResumeDropButtons"
-import { cn } from "@/lib/utils"
-
-type Tab = "detail" | "session" | "result" | "diff"
 
 interface Props {
   runId: string
@@ -18,8 +15,6 @@ interface Props {
   doneCount: number
   selectedIssueId: string | null
   selectedIssue: IssueState | null
-  activeTab: Tab
-  setTab: (t: Tab) => void
   onChange: () => void
 }
 
@@ -40,8 +35,6 @@ export function RunHeader({
   doneCount,
   selectedIssueId,
   selectedIssue,
-  activeTab,
-  setTab,
   onChange,
 }: Props) {
   const [unblockOpen, setUnblockOpen] = useState(false)
@@ -69,37 +62,22 @@ export function RunHeader({
 
   return (
     <div className="border-b border-[var(--border)] bg-[var(--canvas)]">
-      <div className="px-5 pt-4 pb-2">
-        <div className="flex items-baseline gap-3 flex-wrap">
-          <h1 className="font-mono text-[20px] font-semibold text-[var(--fg)]">{runId}</h1>
-          <StatusPill kind={statusToKind(status)} />
-          {debugMode && <StatusPill kind="attention" label="debug" pulse={false} size="sm" />}
+      <div className="px-5 py-3 flex items-center gap-4 flex-wrap">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-baseline gap-3 flex-wrap">
+            <h1 className="font-mono text-[20px] font-semibold text-[var(--fg)]">{runId}</h1>
+            <StatusPill kind={statusToKind(status)} />
+            {debugMode && <StatusPill kind="attention" label="debug" pulse={false} size="sm" />}
+          </div>
+          <div className="mt-1 flex items-center gap-3 text-[12px] text-[var(--fg-muted)] flex-wrap">
+            {elapsed && <span className="tabular-nums">started {elapsed} ago</span>}
+            <span className="text-[var(--border)]">·</span>
+            <span>
+              {doneCount} of {issueCount} done
+            </span>
+          </div>
         </div>
-        <div className="mt-1.5 flex items-center gap-3 text-[12px] text-[var(--fg-muted)] flex-wrap">
-          {elapsed && <span className="tabular-nums">started {elapsed} ago</span>}
-          <span className="text-[var(--border)]">·</span>
-          <span>
-            {doneCount} of {issueCount} done
-          </span>
-        </div>
-      </div>
-      <nav className="px-5 flex items-center gap-1">
-        {(["detail", "session", "diff", "result"] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTab(t)}
-            className={cn(
-              "px-3 py-2 text-[13px] capitalize border-b-2 -mb-px transition-colors",
-              activeTab === t
-                ? "border-[var(--accent-warm)] text-[var(--fg)] font-medium"
-                : "border-transparent text-[var(--fg-muted)] hover:text-[var(--fg)]",
-            )}
-          >
-            {t}
-          </button>
-        ))}
-        <div className="ml-auto flex items-center gap-1.5 py-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
           <Button size="sm" onClick={() => void retry()} disabled={!retryEnabled}>
             Retry
           </Button>
@@ -108,7 +86,7 @@ export function RunHeader({
           </Button>
           <StopResumeDropButtons runId={runId} status={status} onChange={onChange} />
         </div>
-      </nav>
+      </div>
 
       {selectedIssueId && (
         <UnblockDialog
