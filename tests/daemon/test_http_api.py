@@ -76,6 +76,17 @@ class TestWorkerLogBySession:
             params={"session_id": "sess-abc", "tail": "50"},
         )
         assert resp.status_code == 200
+        assert resp.text == ""
+
+    def test_empty_session_id_falls_back_to_issue_lookup(self, client: TestClient) -> None:
+        # ?session_id= (empty string) is treated as "not provided" so issue-level
+        # lookup still happens. Locks the manager's truthy check, not just `is not None`.
+        resp = client.get(
+            "/api/runs/nonexistent:default/logs/issue-1",
+            params={"session_id": "", "tail": "100"},
+        )
+        assert resp.status_code == 200
+        assert resp.text == ""
 
 
 class TestRetryIssue:

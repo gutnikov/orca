@@ -745,7 +745,7 @@ class RunManager:
         run_info = self._runs.get(run_id)
         if run_info is None or run_info.orchestrator is None:
             return ""
-        if session_id is not None:
+        if session_id:
             return run_info.orchestrator.get_session_log(session_id, tail)
         return run_info.orchestrator.get_session_log_by_issue(issue_id, tail)
 
