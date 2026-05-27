@@ -1043,6 +1043,71 @@ class TestGetWorkerLogBySession:
         manager = RunManager(tmp_path)
         manager.get_worker_log("nonexistent:default", "issue-1", session_id=None)
 
+    def test_reads_session_log_path_without_live_orchestrator(self, tmp_path: Path) -> None:
+        manager = RunManager(tmp_path)
+        run_id = "main:default"
+        run_dir = tmp_path / ".orca-state" / "runs" / "main" / "default"
+        log_path = tmp_path / ".orca-state" / "worktrees" / "main" / ".orca-state" / "sessions" / "s.log"
+        log_path.parent.mkdir(parents=True)
+        log_path.write_text("one\ntwo\nthree\n")
+        manifest = SessionManifest(run_dir)
+        manifest.append(
+            issue_id="issue-1",
+            state="implementing",
+            session_id="sess-aaa",
+            worktree_path=str(tmp_path),
+            started_at="2026-01-01T00:00:00Z",
+            log_path=str(log_path),
+        )
+        manager._runs[run_id] = RunInfo(
+            run_id=run_id,
+            branch="main",
+            workflow="default",
+            status=RunStatus.COMPLETED,
+            issue_count=1,
+            created_at="2026-01-01T00:00:00Z",
+            orchestrator=None,
+        )
+
+        assert manager.get_worker_log(run_id, "issue-1", session_id="sess-aaa", tail=2) == "two\nthree\n"
+
+    def test_reads_latest_issue_log_path_without_live_orchestrator(self, tmp_path: Path) -> None:
+        manager = RunManager(tmp_path)
+        run_id = "main:default"
+        run_dir = tmp_path / ".orca-state" / "runs" / "main" / "default"
+        old_log = tmp_path / "old.log"
+        new_log = tmp_path / "new.log"
+        old_log.write_text("old\n")
+        new_log.write_text("new\n")
+        manifest = SessionManifest(run_dir)
+        manifest.append(
+            issue_id="issue-1",
+            state="preflight",
+            session_id="sess-old",
+            worktree_path=str(tmp_path),
+            started_at="2026-01-01T00:00:00Z",
+            log_path=str(old_log),
+        )
+        manifest.append(
+            issue_id="issue-1",
+            state="implementing",
+            session_id="sess-new",
+            worktree_path=str(tmp_path),
+            started_at="2026-01-01T00:01:00Z",
+            log_path=str(new_log),
+        )
+        manager._runs[run_id] = RunInfo(
+            run_id=run_id,
+            branch="main",
+            workflow="default",
+            status=RunStatus.COMPLETED,
+            issue_count=1,
+            created_at="2026-01-01T00:00:00Z",
+            orchestrator=None,
+        )
+
+        assert manager.get_worker_log(run_id, "issue-1") == "new\n"
+
 
 class TestGetSessionPrompt:
     def test_returns_persisted_prompt(self, repo_root: Path) -> None:

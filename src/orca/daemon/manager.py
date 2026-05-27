@@ -173,6 +173,17 @@ def _session_needs_usage_backfill(entry: dict[str, Any]) -> bool:
     return "cost_usd" not in usage
 
 
+def _read_log_path(path: Path, tail: int) -> str:
+    try:
+        text = path.read_text()
+    except OSError:
+        return ""
+    lines = text.splitlines()
+    if tail and len(lines) > tail:
+        lines = lines[-tail:]
+    return "\n".join(lines) + ("\n" if lines else "")
+
+
 def _pair_debug_attempts(
     event_log: list[EventLogEntry],
     *,
@@ -934,11 +945,44 @@ class RunManager:
         session's log for the given issue (existing TUI / CLI behavior).
         """
         run_info = self._runs.get(run_id)
-        if run_info is None or run_info.orchestrator is None:
+        if run_info is None:
             return ""
         if session_id:
-            return run_info.orchestrator.get_session_log(session_id, tail)
-        return run_info.orchestrator.get_session_log_by_issue(issue_id, tail)
+            if run_info.orchestrator is not None:
+                text = run_info.orchestrator.get_session_log(session_id, tail)
+                if text:
+                    return text
+            return self._get_manifest_worker_log(run_info, issue_id, tail, session_id=session_id)
+        if run_info.orchestrator is not None:
+            text = run_info.orchestrator.get_session_log_by_issue(issue_id, tail)
+            if text:
+                return text
+        return self._get_manifest_worker_log(run_info, issue_id, tail)
+
+    def _get_manifest_worker_log(
+        self,
+        run_info: RunInfo,
+        issue_id: str,
+        tail: int,
+        *,
+        session_id: str | None = None,
+    ) -> str:
+        run_dir = self.repo_root / ".orca-state" / "runs" / run_info.branch / run_info.workflow
+        manifest = SessionManifest(run_dir)
+        entries = manifest.read()
+        target: dict[str, Any] | None = None
+        if session_id:
+            target = next((entry for entry in entries if entry.get("session_id") == session_id), None)
+        else:
+            for entry in entries:
+                if entry.get("issue_id") == issue_id:
+                    target = entry
+        if target is None:
+            return ""
+        log_path = target.get("log_path")
+        if not isinstance(log_path, str) or not log_path:
+            return ""
+        return _read_log_path(Path(log_path), tail)
 
     def get_session_prompt(self, run_id: str, session_id: str) -> str | None:
         """Return the persisted rendered prompt for a worker session."""
@@ -979,7 +1023,7 @@ class RunManager:
             if run_info.orchestrator is not None:
                 log = run_info.orchestrator.get_session_log_by_issue(issue_id, tail)
             else:
-                log = ""
+                log = self._get_manifest_worker_log(run_info, issue_id, tail)
             if log:
                 parts.append(f"{header}\n{log}")
             else:
