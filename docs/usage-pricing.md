@@ -26,8 +26,8 @@ Each session entry may include:
 
 The UI renders:
 
-- `$0.42` when `cost_kind` is `exact`.
-- `~$0.42` when `cost_kind` is `estimated`.
+- `$0.42 · 42 tok` when `cost_kind` is `exact` and tokens are available.
+- `~$0.42 · 42 tok` when `cost_kind` is `estimated` and tokens are available.
 - `42 tok`, `1.2k tok`, or similar when no cost is available but tokens are available.
 
 ## Source Data

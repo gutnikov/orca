@@ -55,19 +55,22 @@ export function Stepper({ steps, className }: Props) {
             <StepIcon state={step.state} />
           </span>
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 text-[12px]">
-              <span className="font-mono text-[var(--fg)] truncate">{step.name}</span>
+            <div className="flex items-center gap-2 text-[12px] min-w-0">
+              <span className="font-mono text-[var(--fg)] truncate shrink-0 max-w-[8rem]">
+                {step.name}
+              </span>
               {step.outcome && (
-                <span className="font-mono text-[10.5px] text-[var(--fg-subtle)] bg-[var(--overlay)] px-1.5 py-px rounded-[var(--radius-pill)] truncate">
+                <span className="font-mono text-[10.5px] text-[var(--fg-subtle)] bg-[var(--overlay)] px-1.5 py-px rounded-[var(--radius-pill)] truncate min-w-0">
                   {step.outcome}
                 </span>
               )}
-              {(step.usage || step.duration) && (
-                <span className="ml-auto text-[10.5px] text-[var(--fg-subtle)] tabular-nums shrink-0">
-                  {[step.usage, step.duration].filter(Boolean).join("  ")}
-                </span>
-              )}
             </div>
+            {(step.usage || step.duration) && (
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10.5px] text-[var(--fg-subtle)] tabular-nums">
+                {step.usage && <span>{step.usage}</span>}
+                {step.duration && <span>{step.duration}</span>}
+              </div>
+            )}
             {step.state === "running" && step.progress != null && step.progress > 0 && (
               <div className="mt-1 flex items-center gap-2">
                 <div className="flex-1 h-[3px] rounded-full bg-[var(--overlay)] overflow-hidden">

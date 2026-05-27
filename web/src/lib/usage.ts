@@ -2,13 +2,15 @@ import type { UsageState } from "@/hooks/useRunState"
 
 export function formatUsage(usage: UsageState | null | undefined): string | null {
   if (!usage) return null
+  const total = usage.total_tokens ?? tokenTotal(usage.tokens)
+  const tokenText = total && total > 0 ? `${formatTokens(total)} tok` : null
+
   if (typeof usage.cost_usd === "number") {
     const prefix = usage.cost_kind === "estimated" ? "~$" : "$"
-    return `${prefix}${formatCost(usage.cost_usd)}`
+    const costText = `${prefix}${formatCost(usage.cost_usd)}`
+    return tokenText ? `${costText} · ${tokenText}` : costText
   }
-  const total = usage.total_tokens ?? tokenTotal(usage.tokens)
-  if (total && total > 0) return `${formatTokens(total)} tok`
-  return null
+  return tokenText
 }
 
 function formatCost(value: number): string {

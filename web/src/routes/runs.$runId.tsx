@@ -1,5 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router"
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import type { PointerEvent as ReactPointerEvent } from "react"
 import { toast } from "sonner"
 import { ChevronDown, ChevronRight } from "lucide-react"
 import {
@@ -21,6 +22,25 @@ import { AppShell, AppHeader } from "@/components/ui/app-shell"
 
 type Tab = "session" | "result" | "diff"
 
+const SIDEBAR_STORAGE_KEY = "orca.runSidebarWidth"
+const SIDEBAR_DEFAULT_WIDTH = 340
+const SIDEBAR_MIN_WIDTH = 260
+const SIDEBAR_MAX_WIDTH = 560
+
+function clampSidebarWidth(value: number): number {
+  const viewportMax =
+    typeof window === "undefined"
+      ? SIDEBAR_MAX_WIDTH
+      : Math.max(SIDEBAR_MIN_WIDTH, Math.min(SIDEBAR_MAX_WIDTH, window.innerWidth - 420))
+  return Math.min(Math.max(value, SIDEBAR_MIN_WIDTH), viewportMax)
+}
+
+function initialSidebarWidth(): number {
+  if (typeof window === "undefined") return SIDEBAR_DEFAULT_WIDTH
+  const stored = Number(window.localStorage.getItem(SIDEBAR_STORAGE_KEY))
+  return clampSidebarWidth(Number.isFinite(stored) && stored > 0 ? stored : SIDEBAR_DEFAULT_WIDTH)
+}
+
 interface SearchParams {
   issue?: string
   session?: string
@@ -35,6 +55,7 @@ function RunViewerPage() {
   const { data, error, refetch } = useRunState(runId)
   const [tail, setTail] = useState(500)
   const [detailOpen, setDetailOpen] = useState(false)
+  const [sidebarWidth, setSidebarWidth] = useState(initialSidebarWidth)
 
   const selectedIssueId = search.issue ?? null
   const selectedSessionId = search.session ?? null
@@ -160,6 +181,40 @@ function RunViewerPage() {
     })
   }
 
+  const startSidebarResize = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const startX = event.clientX
+    const startWidth = sidebarWidth
+    let latestWidth = startWidth
+    const previousCursor = document.body.style.cursor
+    const previousUserSelect = document.body.style.userSelect
+    document.body.style.cursor = "col-resize"
+    document.body.style.userSelect = "none"
+
+    const onMove = (moveEvent: PointerEvent) => {
+      latestWidth = clampSidebarWidth(startWidth + moveEvent.clientX - startX)
+      setSidebarWidth(latestWidth)
+    }
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove)
+      window.removeEventListener("pointerup", onUp)
+      document.body.style.cursor = previousCursor
+      document.body.style.userSelect = previousUserSelect
+      window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(latestWidth))
+    }
+
+    window.addEventListener("pointermove", onMove)
+    window.addEventListener("pointerup", onUp)
+  }, [sidebarWidth])
+
+  const resizeSidebarBy = useCallback((delta: number) => {
+    setSidebarWidth((current) => {
+      const next = clampSidebarWidth(current + delta)
+      window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next))
+      return next
+    })
+  }, [])
+
   const logIssueId = selectedSession ? selectedSession.issue_id : selectedIssueId
   const { text: logText, error: logError } = useWorkerLog(
     runId,
@@ -222,8 +277,11 @@ function RunViewerPage() {
         selectedIssue={selectedIssue}
         onChange={() => void refetch()}
       />
-      <div className="flex-1 min-h-0 grid grid-cols-[260px_1fr]">
-        <aside className="border-r border-[var(--border)] bg-[var(--canvas)] overflow-y-auto p-3 flex flex-col gap-4">
+      <div
+        className="flex-1 min-h-0 grid"
+        style={{ gridTemplateColumns: `${sidebarWidth}px 6px minmax(0,1fr)` }}
+      >
+        <aside className="bg-[var(--canvas)] overflow-y-auto p-3 flex flex-col gap-4 min-w-0">
           <div>
             <div className="text-[10px] uppercase tracking-wider text-[var(--fg-subtle)] mb-2 px-1 font-semibold">
               Issues
@@ -249,6 +307,29 @@ function RunViewerPage() {
             </div>
           )}
         </aside>
+
+        <div
+          role="separator"
+          aria-label="Resize sidebar"
+          aria-orientation="vertical"
+          aria-valuemin={SIDEBAR_MIN_WIDTH}
+          aria-valuemax={SIDEBAR_MAX_WIDTH}
+          aria-valuenow={sidebarWidth}
+          tabIndex={0}
+          onPointerDown={startSidebarResize}
+          onKeyDown={(event) => {
+            if (event.key === "ArrowLeft") {
+              event.preventDefault()
+              resizeSidebarBy(-20)
+            } else if (event.key === "ArrowRight") {
+              event.preventDefault()
+              resizeSidebarBy(20)
+            }
+          }}
+          className="group cursor-col-resize bg-[var(--canvas)] border-x border-[var(--border)] flex justify-center touch-none outline-none focus:bg-[var(--subtle)]"
+        >
+          <div className="w-px h-full bg-transparent group-hover:bg-[var(--accent)] transition-colors" />
+        </div>
 
         <section className="flex flex-col min-h-0 bg-[var(--canvas)]">
           {/* Collapsible issue detail */}

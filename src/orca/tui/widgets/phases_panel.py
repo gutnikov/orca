@@ -273,19 +273,25 @@ def _usage_str(session: dict[str, Any]) -> str:
     usage = session.get("usage")
     if not isinstance(usage, dict):
         return ""
+    token_text = ""
+    total = usage.get("total_tokens")
+    if isinstance(total, int) and not isinstance(total, bool) and total > 0:
+        token_text = f"{_format_tokens(total)} tok"
+    else:
+        tokens = usage.get("tokens")
+        if isinstance(tokens, dict):
+            token_total = sum(
+                value for value in tokens.values() if isinstance(value, int) and not isinstance(value, bool)
+            )
+            if token_total > 0:
+                token_text = f"{_format_tokens(token_total)} tok"
+
     cost = usage.get("cost_usd")
     if isinstance(cost, int | float) and not isinstance(cost, bool):
         prefix = "~$" if usage.get("cost_kind") == "estimated" else "$"
-        return prefix + _format_cost(float(cost))
-    total = usage.get("total_tokens")
-    if isinstance(total, int) and not isinstance(total, bool) and total > 0:
-        return f"{_format_tokens(total)} tok"
-    tokens = usage.get("tokens")
-    if isinstance(tokens, dict):
-        token_total = sum(value for value in tokens.values() if isinstance(value, int) and not isinstance(value, bool))
-        if token_total > 0:
-            return f"{_format_tokens(token_total)} tok"
-    return ""
+        cost_text = prefix + _format_cost(float(cost))
+        return f"{cost_text} · {token_text}" if token_text else cost_text
+    return token_text
 
 
 def _format_cost(cost: float) -> str:

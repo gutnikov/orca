@@ -261,3 +261,4 @@ class TestProgressRendering:
             await pilot.pause()
             text = _get_static_text(panel)
             assert "$0.25" in text
+            assert "30 tok" in text
