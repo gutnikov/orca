@@ -18,11 +18,14 @@ function buildTree(issues: Record<string, IssueState>): TreeNode[] {
   const childrenByParent: Record<string, string[]> = {}
   const roots: string[] = []
   for (const [iid, iss] of Object.entries(issues)) {
-    if (iss.decomposed_from === null) {
+    const parent = iss.decomposed_from
+    // Treat orphans (parent missing from this snapshot) as roots rather than
+    // silently dropping them — defensive against partial / stale state.
+    if (parent === null || !(parent in issues)) {
       roots.push(iid)
     } else {
-      childrenByParent[iss.decomposed_from] ??= []
-      childrenByParent[iss.decomposed_from].push(iid)
+      childrenByParent[parent] ??= []
+      childrenByParent[parent].push(iid)
     }
   }
   const toNode = (iid: string): TreeNode => ({
