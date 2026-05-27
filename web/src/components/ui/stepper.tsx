@@ -9,6 +9,8 @@ export interface Step {
   name: string
   outcome?: string
   duration?: string
+  progress?: number | null
+  progressText?: string | null
   active?: boolean
   onClick?: () => void
 }
@@ -65,6 +67,24 @@ export function Stepper({ steps, className }: Props) {
                 </span>
               )}
             </div>
+            {step.state === "running" && step.progress != null && step.progress > 0 && (
+              <div className="mt-1 flex items-center gap-2">
+                <div className="flex-1 h-[3px] rounded-full bg-[var(--overlay)] overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-[var(--accent-fg)] transition-[width] duration-500"
+                    style={{ width: `${Math.min(step.progress, 100)}%` }}
+                  />
+                </div>
+                <span className="text-[10px] text-[var(--fg-subtle)] tabular-nums shrink-0">
+                  {step.progress}%
+                </span>
+              </div>
+            )}
+            {step.state === "running" && step.progressText && (
+              <div className="mt-0.5 text-[10px] text-[var(--fg-muted)] truncate">
+                {step.progressText}
+              </div>
+            )}
           </div>
         </button>
       ))}
