@@ -93,7 +93,7 @@ export function RunHeader({
         </RunActionButton>
         <StopResumeDropButtons runId={runId} status={status} onChange={onChange} />
       </div>
-      {selectedIssueId && unblockEnabled && (
+      {selectedIssueId && (
         <UnblockDialog
           runId={runId}
           issueId={selectedIssueId}

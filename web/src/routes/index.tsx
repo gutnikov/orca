@@ -224,7 +224,7 @@ function HomePage() {
                         params={{ runId: run.run_id }}
                         className="text-xs underline opacity-70 hover:opacity-100 shrink-0"
                       >
-                        view past reviews →
+                        open →
                       </Link>
                     </div>
                   </li>

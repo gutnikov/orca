@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import { usePollInterval } from "./usePollInterval"
 
 export interface UseWorkerLogResult {
@@ -16,6 +16,13 @@ export function useWorkerLog(
 ): UseWorkerLogResult {
   const [text, setText] = useState<string>("")
   const [error, setError] = useState<string | null>(null)
+
+  // Clear stale text immediately when the user switches issue/session so the
+  // viewer doesn't keep showing the old log for up to one poll interval.
+  useEffect(() => {
+    setText("")
+    setError(null)
+  }, [issueId, sessionId])
 
   const fetcher = useCallback(async () => {
     if (!issueId) {
