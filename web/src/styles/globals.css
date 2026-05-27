@@ -1,4 +1,3 @@
-@import url("https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;500;600;700&display=swap");
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -6,122 +5,93 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ===================================================================== *
+ * Orca web tokens — GitHub-premium, dark theme only for now.            *
+ * See docs/superpowers/specs/2026-05-27-orca-web-github-style-design.md *
+ * ===================================================================== */
+
 :root {
-  --radius: 1.3rem;
-  --background: oklch(0.9911 0 0);
-  --foreground: oklch(0.1994 0.0470 270.6494);
-  --card: oklch(0.9851 0 0);
-  --card-foreground: oklch(0.1994 0.0470 270.6494);
-  --popover: oklch(1.0000 0 0);
-  --popover-foreground: oklch(0.1994 0.0470 270.6494);
-  --primary: oklch(0.5729 0.2337 264.3664);
-  --primary-foreground: oklch(1.0000 0 0);
-  --secondary: oklch(0.1994 0.0470 270.6494);
-  --secondary-foreground: oklch(1.0000 0 0);
-  --muted: oklch(1.0000 0 0);
-  --muted-foreground: oklch(0.1994 0.0470 270.6494);
-  --accent: oklch(1.0000 0 0);
-  --accent-foreground: oklch(0.5729 0.2337 264.3664);
-  --destructive: oklch(0.7058 0.1918 39.5760);
-  --border: oklch(0.9212 0.0033 17.2170);
-  --input: oklch(0.8452 0 0);
-  --ring: oklch(0.5784 0.2303 263.8862);
-  --destructive-foreground: oklch(1.0000 0 0);
-  --chart-1: oklch(0.5729 0.2337 264.3664);
-  --chart-2: oklch(0.7677 0.1312 194.1427);
-  --chart-3: oklch(0.9649 0.1962 111.4216);
-  --chart-4: oklch(0.8439 0.1679 169.5646);
-  --chart-5: oklch(0.6411 0.2446 28.5713);
-  --sidebar: oklch(0.9851 0 0);
-  --sidebar-foreground: oklch(0.1994 0.0470 270.6494);
-  --sidebar-primary: oklch(0.5729 0.2337 264.3664);
-  --sidebar-primary-foreground: oklch(1.0000 0 0);
-  --sidebar-accent: oklch(1.0000 0 0);
-  --sidebar-accent-foreground: oklch(0.5729 0.2337 264.3664);
-  --sidebar-border: oklch(1.0000 0 0);
-  --sidebar-ring: oklch(0.5784 0.2303 263.8862);
-  --font-sans: Open Sans, sans-serif;
+  /* Radius: tight. Pills are the only round shape. */
+  --radius-sm: 3px;
+  --radius: 6px;
+  --radius-lg: 12px;
+  --radius-pill: 2em;
+
+  /* Typography — codified scale, no arbitrary text-[Npx] */
+  --font-sans: -apple-system, "system-ui", "Segoe UI", Inter, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   --font-serif: Georgia, serif;
-  --font-mono: Menlo, monospace;
-  --shadow-color: #2e6aff;
-  --shadow-opacity: 0;
-  --shadow-blur: 0px;
-  --shadow-spread: -50px;
-  --shadow-offset-x: -50px;
-  --shadow-offset-y: 2px;
-  --letter-spacing: 0em;
-  --spacing: 0.25rem;
-  --shadow-2xs: -50px 2px 0px -50px hsl(222.7751 100% 59.0196% / 0.00);
-  --shadow-xs: -50px 2px 0px -50px hsl(222.7751 100% 59.0196% / 0.00);
-  --shadow-sm: -50px 2px 0px -50px hsl(222.7751 100% 59.0196% / 0.00), -50px 1px 2px -51px hsl(222.7751 100% 59.0196% / 0.00);
-  --shadow: -50px 2px 0px -50px hsl(222.7751 100% 59.0196% / 0.00), -50px 1px 2px -51px hsl(222.7751 100% 59.0196% / 0.00);
-  --shadow-md: -50px 2px 0px -50px hsl(222.7751 100% 59.0196% / 0.00), -50px 2px 4px -51px hsl(222.7751 100% 59.0196% / 0.00);
-  --shadow-lg: -50px 2px 0px -50px hsl(222.7751 100% 59.0196% / 0.00), -50px 4px 6px -51px hsl(222.7751 100% 59.0196% / 0.00);
-  --shadow-xl: -50px 2px 0px -50px hsl(222.7751 100% 59.0196% / 0.00), -50px 8px 10px -51px hsl(222.7751 100% 59.0196% / 0.00);
-  --shadow-2xl: -50px 2px 0px -50px hsl(222.7751 100% 59.0196% / 0.00);
-  --tracking-normal: 0em;
+
+  /* Spacing — multiples of 4 */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Overlay ring (used only on dialogs / popovers) */
+  --ring-overlay: 0 0 0 1px rgba(255, 255, 255, 0.04), 0 8px 24px rgba(0, 0, 0, 0.5);
 }
 
+/* Dark theme — the only theme for v1 */
+:root,
 .dark {
-  --background: oklch(0 0 0);
-  --foreground: oklch(1.0000 0 0);
-  --card: oklch(0.1684 0 0);
-  --card-foreground: oklch(0.8853 0 0);
-  --popover: oklch(0 0 0);
-  --popover-foreground: oklch(1.0000 0 0);
-  --primary: oklch(0.5683 0.2366 264.2478);
-  --primary-foreground: oklch(1.0000 0 0);
-  --secondary: oklch(1.0000 0 0);
-  --secondary-foreground: oklch(0.1994 0.0470 270.6494);
-  --muted: oklch(0.2090 0 0);
-  --muted-foreground: oklch(0.5953 0.0215 276.1101);
-  --accent: oklch(0.1880 0.0868 261.9799);
-  --accent-foreground: oklch(0.5683 0.2366 264.2478);
-  --destructive: oklch(0.7058 0.1918 39.5760);
-  --border: oklch(0.2746 0.0130 279.0717);
-  --input: oklch(0.2697 0.0888 269.7716);
-  --ring: oklch(0.5784 0.2303 263.8862);
-  --destructive-foreground: oklch(1.0000 0 0);
-  --chart-1: oklch(0.5729 0.2337 264.3664);
-  --chart-2: oklch(0.7677 0.1312 194.1427);
-  --chart-3: oklch(0.9649 0.1962 111.4216);
-  --chart-4: oklch(0.8439 0.1679 169.5646);
-  --chart-5: oklch(0.6411 0.2446 28.5713);
-  --radius: 1.3rem;
-  --sidebar: oklch(0.1684 0 0);
-  --sidebar-foreground: oklch(0.8853 0 0);
-  --sidebar-primary: oklch(0.5784 0.2303 263.8862);
-  --sidebar-primary-foreground: oklch(1.0000 0 0);
-  --sidebar-accent: oklch(0.1880 0.0868 261.9799);
-  --sidebar-accent-foreground: oklch(0.5683 0.2366 264.2478);
-  --sidebar-border: oklch(0.3706 0.0642 269.1117);
-  --sidebar-ring: oklch(0.5784 0.2303 263.8862);
-  --font-sans: Open Sans, sans-serif;
-  --font-serif: Georgia, serif;
-  --font-mono: Menlo, monospace;
-  --shadow-color: #2e6aff;
-  --shadow-opacity: 0;
-  --shadow-blur: 0px;
-  --shadow-spread: -50px;
-  --shadow-offset-x: -50px;
-  --shadow-offset-y: 2px;
-  --letter-spacing: 0em;
-  --spacing: 0.25rem;
-  --shadow-2xs: -50px 2px 0px -50px hsl(222.7751 100% 59.0196% / 0.00);
-  --shadow-xs: -50px 2px 0px -50px hsl(222.7751 100% 59.0196% / 0.00);
-  --shadow-sm: -50px 2px 0px -50px hsl(222.7751 100% 59.0196% / 0.00), -50px 1px 2px -51px hsl(222.7751 100% 59.0196% / 0.00);
-  --shadow: -50px 2px 0px -50px hsl(222.7751 100% 59.0196% / 0.00), -50px 1px 2px -51px hsl(222.7751 100% 59.0196% / 0.00);
-  --shadow-md: -50px 2px 0px -50px hsl(222.7751 100% 59.0196% / 0.00), -50px 2px 4px -51px hsl(222.7751 100% 59.0196% / 0.00);
-  --shadow-lg: -50px 2px 0px -50px hsl(222.7751 100% 59.0196% / 0.00), -50px 4px 6px -51px hsl(222.7751 100% 59.0196% / 0.00);
-  --shadow-xl: -50px 2px 0px -50px hsl(222.7751 100% 59.0196% / 0.00), -50px 8px 10px -51px hsl(222.7751 100% 59.0196% / 0.00);
-  --shadow-2xl: -50px 2px 0px -50px hsl(222.7751 100% 59.0196% / 0.00);
+  /* Canvas / surface */
+  --canvas: #010409;
+  --surface: #0d1117;
+  --subtle: #161b22;
+  --overlay: #21262d;
+  --border: #30363d;
+  --border-muted: #21262d;
+
+  /* Text */
+  --fg: #e6edf3;
+  --fg-muted: #8d96a0;
+  --fg-subtle: #7d8590;
+
+  /* Accent (blue) */
+  --accent: #1f6feb;
+  --accent-fg: #58a6ff;
+  --accent-soft: rgba(31, 111, 235, 0.10);
+
+  /* State colors */
+  --success: #238636;
+  --success-fg: #3fb950;
+  --attention: #d29922;
+  --danger: #f85149;
+  --done-purple: #8957e5;
+  --accent-warm: #f78166;
+
+  /* Tailwind aliases — keep existing utility classes working */
+  --background: var(--canvas);
+  --foreground: var(--fg);
+  --card: var(--surface);
+  --card-foreground: var(--fg);
+  --popover: var(--surface);
+  --popover-foreground: var(--fg);
+  --primary: var(--accent);
+  --primary-foreground: #ffffff;
+  --secondary: var(--subtle);
+  --secondary-foreground: var(--fg);
+  --muted: var(--subtle);
+  --muted-foreground: var(--fg-muted);
+  --accent-color: var(--accent-soft);
+  --accent-foreground: var(--accent-fg);
+  --destructive: var(--danger);
+  --destructive-foreground: #ffffff;
+  --input: var(--overlay);
+  --ring: var(--accent);
+  --sidebar: var(--surface);
+  --sidebar-foreground: var(--fg);
 }
 
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-lg);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -134,63 +104,36 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
+  --color-accent: var(--accent-color);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --font-sans: Open Sans, sans-serif;
-  --font-mono: Menlo, monospace;
-  --font-serif: Georgia, serif;
-  --radius: 1.3rem;
-  --tracking-tighter: calc(var(--tracking-normal) - 0.05em);
-  --tracking-tight: calc(var(--tracking-normal) - 0.025em);
-  --tracking-wide: calc(var(--tracking-normal) + 0.025em);
-  --tracking-wider: calc(var(--tracking-normal) + 0.05em);
-  --tracking-widest: calc(var(--tracking-normal) + 0.1em);
-  --tracking-normal: var(--tracking-normal);
-  --shadow-2xl: var(--shadow-2xl);
-  --shadow-xl: var(--shadow-xl);
-  --shadow-lg: var(--shadow-lg);
-  --shadow-md: var(--shadow-md);
-  --shadow: var(--shadow);
-  --shadow-sm: var(--shadow-sm);
-  --shadow-xs: var(--shadow-xs);
-  --shadow-2xs: var(--shadow-2xs);
-  --spacing: var(--spacing);
-  --letter-spacing: var(--letter-spacing);
-  --shadow-offset-y: var(--shadow-offset-y);
-  --shadow-offset-x: var(--shadow-offset-x);
-  --shadow-spread: var(--shadow-spread);
-  --shadow-blur: var(--shadow-blur);
-  --shadow-opacity: var(--shadow-opacity);
-  --color-shadow-color: var(--shadow-color);
-  --color-sidebar-ring: var(--sidebar-ring);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-foreground: var(--sidebar-foreground);
   --color-sidebar: var(--sidebar);
-  --color-chart-5: var(--chart-5);
-  --color-chart-4: var(--chart-4);
-  --color-chart-3: var(--chart-3);
-  --color-chart-2: var(--chart-2);
-  --color-chart-1: var(--chart-1);
-  --color-destructive-foreground: var(--destructive-foreground);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+  --font-serif: var(--font-serif);
 }
 
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-  }
-  body {
-    @apply bg-background text-foreground;
-    letter-spacing: var(--tracking-normal);
-  }
+body {
+  background: var(--canvas);
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-feature-settings: "cv11", "ss03";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* The single pulse animation used across the product — running status pill. */
+@keyframes orca-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+
+.animate-orca-pulse {
+  animation: orca-pulse 2s ease-in-out infinite;
 }
