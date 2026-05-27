@@ -46,7 +46,7 @@ Because opencode calculates and persists the dollar cost itself, Orca treats thi
 
 `claude-code`
 
-Orca scans Claude Code JSONL transcripts under `~/.claude/projects/<sanitized-cwd>/*.jsonl`. Assistant messages include `message.model` and `message.usage`, so Orca can collect exact token counts. Claude interactive transcripts do not provide a final `total_cost_usd` field in the same way `claude -p --output-format json` does, and Orca is intentionally not using print mode. Therefore dollar cost is estimated only when a local price table is configured.
+Orca scans Claude Code JSONL transcripts under `~/.claude/projects/<sanitized-cwd>/*.jsonl`. Claude's sanitized cwd can replace punctuation such as `/`, `.`, and `_` with `-`, so Orca checks both the simple slash replacement and the fully normalized variant. Assistant messages include `message.model` and `message.usage`, so Orca can collect exact token counts. Claude interactive transcripts do not provide a final `total_cost_usd` field in the same way `claude -p --output-format json` does, and Orca is intentionally not using print mode. Therefore dollar cost is estimated only when a local price table is configured.
 
 `codex`
 
@@ -68,6 +68,8 @@ ORCA_USAGE_SESSION:<orca-session-id>
 ```
 
 Collectors use that marker, plus the worktree path and start time, to match an Orca workflow step to the agent's external session artifact. This avoids relying only on timestamps, which can be ambiguous when multiple workers run in parallel.
+
+For runs created before Orca wrote usage markers and worker metadata into `sessions.json`, Orca can still attempt a best-effort fallback: it infers the worker kind from the workflow config and matches transcripts by worktree path plus the session start/completion window. Marker-based matching remains preferred.
 
 ## Price Rates
 
@@ -100,7 +102,7 @@ Example:
 
 Rates are USD per 1 million tokens. `input` and `output` are required. `cache_read` and `cache_write` are optional; when omitted, Orca falls back to the input rate for those token categories.
 
-The estimate formula is:
+For Codex and any source where `input` includes cached tokens, the estimate formula is:
 
 ```text
 billable_input = max(input - cache_read - cache_write, 0)
@@ -112,6 +114,12 @@ cost_usd = (
   + cache_read * cache_read_rate
   + cache_write * cache_write_rate
 ) / 1_000_000
+```
+
+For Claude Code, `message.usage.input_tokens` is already the non-cache input count, with cache creation/read reported in separate fields, so Orca uses:
+
+```text
+billable_input = input
 ```
 
 Because these costs depend on locally configured rates, the UI prefixes estimated values with `~$`.

@@ -82,6 +82,94 @@ def test_collect_claude_usage_from_project_jsonl(tmp_path: Path, monkeypatch: py
     assert usage["tokens"] == {"input": 10, "output": 8, "reasoning": 0, "cache_read": 2, "cache_write": 4}
 
 
+def test_collect_claude_usage_without_marker_uses_normalized_project_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    workdir = tmp_path / "repo.with_underscore"
+    workdir.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv(
+        "ORCA_USAGE_PRICES_JSON",
+        json.dumps({"claude-test": {"input": 3.0, "output": 15.0, "cache_read": 0.3, "cache_write": 3.75}}),
+    )
+
+    project_name = "".join(ch if ch.isalnum() else "-" for ch in str(workdir))
+    project_dir = home / ".claude" / "projects" / project_name
+    _jsonl(
+        project_dir / "abc.jsonl",
+        [
+            {
+                "timestamp": "2026-01-01T00:00:00Z",
+                "type": "user",
+                "sessionId": "claude-session",
+                "message": {"role": "user", "content": "worker prompt"},
+            },
+            {
+                "timestamp": "2026-01-01T00:00:01Z",
+                "type": "assistant",
+                "sessionId": "claude-session",
+                "message": {
+                    "id": "msg-1",
+                    "model": "claude-test",
+                    "usage": {
+                        "input_tokens": 10,
+                        "cache_creation_input_tokens": 4,
+                        "cache_read_input_tokens": 2,
+                        "output_tokens": 8,
+                    },
+                },
+            },
+            {
+                "timestamp": "2026-01-01T00:00:02Z",
+                "type": "assistant",
+                "sessionId": "claude-session",
+                "message": {
+                    "id": "msg-1",
+                    "model": "claude-test",
+                    "usage": {
+                        "input_tokens": 10,
+                        "cache_creation_input_tokens": 4,
+                        "cache_read_input_tokens": 2,
+                        "output_tokens": 8,
+                    },
+                },
+            },
+        ],
+    )
+    _jsonl(
+        project_dir / "future.jsonl",
+        [
+            {
+                "timestamp": "2026-01-01T00:10:00Z",
+                "type": "assistant",
+                "sessionId": "future-session",
+                "message": {
+                    "id": "msg-future",
+                    "model": "claude-test",
+                    "usage": {"input_tokens": 100, "output_tokens": 100},
+                },
+            }
+        ],
+    )
+
+    usage = collect_usage(
+        {
+            "worker_kind": "claude-code",
+            "worktree_path": str(workdir),
+            "started_at": "2026-01-01T00:00:00Z",
+            "completed_at": "2026-01-01T00:00:05Z",
+        }
+    )
+
+    assert usage is not None
+    assert usage["source"] == "claude-code"
+    assert usage["external_session_id"] == "claude-session"
+    assert usage["tokens"] == {"input": 10, "output": 8, "reasoning": 0, "cache_read": 2, "cache_write": 4}
+    assert usage["cost_kind"] == "estimated"
+    assert usage["cost_usd"] == pytest.approx(0.0001656)
+
+
 def test_collect_codex_usage_uses_token_count_delta(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     home = tmp_path / "home"
     workdir = tmp_path / "repo"

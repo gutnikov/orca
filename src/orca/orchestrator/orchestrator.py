@@ -91,6 +91,7 @@ class Orchestrator:
         self._tmux_sessions: dict[str, PtySession] = {}
         self._last_save: dict[str, float] = {}
         self._last_usage_collect: dict[str, float] = {}
+        self._last_usage_backfill: float = 0.0
         # Maps asyncio.Task -> (issue_id, tracking_id)
         self._in_flight: dict[asyncio.Task[WorkerOutcome], tuple[str, str]] = {}
         self._progress_sessions: set[str] = set()
@@ -1032,6 +1033,9 @@ class Orchestrator:
         while True:
             await asyncio.sleep(1.0)
             now = time.monotonic()
+            if self._session_sync is not None and now - self._last_usage_backfill >= 30.0:
+                self._last_usage_backfill = now
+                self._collect_usage_for_manifest(now=now)
             for tid, tmux in list(self._tmux_sessions.items()):
                 is_hot = tid in self._hot_sessions
                 interval = 0.5 if is_hot else 10.0
@@ -1074,6 +1078,7 @@ class Orchestrator:
             )
             if entry is None:
                 return
+            entry = self._usage_entry_with_metadata(entry)
             usage = collect_usage(entry)
             if usage is not None:
                 self._session_sync.manifest.update_usage(tracking_id, usage)
@@ -1084,6 +1089,47 @@ class Orchestrator:
                 exc_info=True,
                 extra={"event": "usage_collect_failed", "session_id": tracking_id},
             )
+
+    def _collect_usage_for_manifest(self, *, now: float) -> None:
+        if self._session_sync is None:
+            return
+        for entry in self._session_sync.manifest.read():
+            session_id = entry.get("session_id")
+            if not isinstance(session_id, str):
+                continue
+            if entry.get("usage") is not None and entry.get("completed_at") is not None:
+                continue
+            self._collect_usage_for_session(session_id, now=now)
+
+    def _usage_entry_with_metadata(self, entry: Mapping[str, Any]) -> dict[str, Any]:
+        result = dict(entry)
+        state_name = result.get("state")
+        issue_id = result.get("issue_id")
+        if not isinstance(state_name, str) or not isinstance(issue_id, str):
+            return result
+        issue = self._state.issues.get(issue_id)
+        if issue is None:
+            return result
+        type_def = self._config.types.get(issue.type)
+        if type_def is None:
+            return result
+        state_def = type_def.states.get(state_name)
+        if state_def is None or state_def.worker is None:
+            return result
+
+        worker = state_def.worker
+        override = self._worker_overrides.get(state_name, {})
+        if not isinstance(result.get("worker_kind"), str):
+            result["worker_kind"] = override.get("kind") or worker.kind
+        if not isinstance(result.get("model"), str):
+            model = override.get("model") or worker.model
+            if model:
+                result["model"] = model
+        if not isinstance(result.get("effort"), str):
+            effort = override.get("effort") or worker.effort
+            if effort:
+                result["effort"] = effort
+        return result
 
     async def run(self, root_issue_id: str, initial_effects: list[Effect]) -> None:
         """Drive the orchestrator event loop until the root issue is terminal."""

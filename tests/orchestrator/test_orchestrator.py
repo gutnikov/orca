@@ -10,6 +10,7 @@ from orca.engine.types import CreateEvent, DispatchWorkerEffect, State, StateMac
 from orca.orchestrator.branches import BranchMap
 from orca.orchestrator.orchestrator import Orchestrator
 from orca.orchestrator.persistence import Persistence
+from orca.orchestrator.session_sync import SessionSync
 from orca.orchestrator.worker import WorkerFailure, WorkerOutcome, WorkerSuccess
 from orca.orchestrator.worktree import WorktreeManager
 
@@ -193,6 +194,55 @@ class TestOrchestrator:
 
         await orchestrator.run("issue-1", initial_effects)
         assert orchestrator.state.issues["issue-1"].state == "done"
+
+    async def test_collect_usage_for_session_infers_legacy_metadata(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        config = parse_config(SIMPLE_CONFIG)
+        state = State(issues={}, worker_queues={})
+        create_event = CreateEvent(issue_id="issue-1", fields={"title": "Test"}, timestamp=_now())
+        state, _ = reduce(config, state, create_event, _counter(), _now)
+
+        session_sync = SessionSync(tmp_path / "run")
+        session_sync.manifest.append(
+            issue_id="issue-1",
+            state="implementing",
+            session_id="sess-aaa",
+            worktree_path=str(tmp_path / "worktree"),
+            started_at="2026-01-01T00:00:00Z",
+        )
+        captured: dict[str, Any] = {}
+
+        def fake_collect_usage(entry: dict[str, Any]) -> dict[str, Any]:
+            captured.update(entry)
+            return {
+                "source": "codex",
+                "tokens": {"input": 1, "output": 2, "reasoning": 0, "cache_read": 0, "cache_write": 0},
+                "total_tokens": 3,
+                "updated_at": "2026-01-01T00:00:01Z",
+            }
+
+        monkeypatch.setattr("orca.orchestrator.orchestrator.collect_usage", fake_collect_usage)
+        orchestrator = Orchestrator(
+            config=config,
+            state=state,
+            root_branch="main",
+            persistence=Persistence(tmp_path, "main"),
+            branches=BranchMap(tmp_path, "main"),
+            workers={},
+            generate_id=_counter(),
+            now=_now,
+            worktree_mgr=FakeWorktreeManager(tmp_path),
+            session_sync=session_sync,
+            worker_overrides={"implementing": {"kind": "codex", "model": "gpt-test", "effort": "high"}},
+        )
+
+        orchestrator._collect_usage_for_session("sess-aaa", force=True)
+
+        assert captured["worker_kind"] == "codex"
+        assert captured["model"] == "gpt-test"
+        assert captured["effort"] == "high"
+        assert session_sync.manifest.read()[0]["usage"]["source"] == "codex"
 
     async def test_worker_failure_retries(self, tmp_path: Path) -> None:
         """Mock worker that fails first time on 'todo' then succeeds,

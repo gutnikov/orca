@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 from collections.abc import Iterable, Mapping
+from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -22,44 +23,65 @@ def usage_marker(session_id: str) -> str:
 def collect_usage(entry: Mapping[str, Any]) -> UsageSnapshot | None:
     kind = entry.get("worker_kind")
     worktree_path = entry.get("worktree_path")
-    marker = entry.get("usage_marker")
+    marker_value = entry.get("usage_marker")
+    marker = marker_value if isinstance(marker_value, str) and marker_value else None
     started_at = _parse_datetime(entry.get("started_at"))
-    if not isinstance(kind, str) or not isinstance(worktree_path, str) or not isinstance(marker, str):
+    completed_at = _parse_datetime(entry.get("completed_at"))
+    if not isinstance(kind, str) or not isinstance(worktree_path, str):
         return None
     if started_at is None:
         return None
 
     if kind == "claude-code":
-        return _collect_claude(Path(worktree_path), marker, started_at)
+        return _collect_claude(Path(worktree_path), marker, started_at, completed_at)
     if kind == "codex":
-        return _collect_codex(Path(worktree_path), marker, started_at)
+        return _collect_codex(Path(worktree_path), marker, started_at, completed_at)
     if kind == "opencode":
         return _collect_opencode(Path(worktree_path), marker, started_at)
     return None
 
 
-def _collect_claude(workdir: Path, marker: str, started_at: datetime) -> UsageSnapshot | None:
-    project_dir = _home() / ".claude" / "projects" / _claude_project_name(workdir)
-    if not project_dir.exists():
-        return None
+def _collect_claude(
+    workdir: Path,
+    marker: str | None,
+    started_at: datetime,
+    completed_at: datetime | None,
+) -> UsageSnapshot | None:
+    snapshots: list[UsageSnapshot] = []
+    for project_dir in _claude_project_dirs(workdir):
+        if not project_dir.exists():
+            continue
 
-    for path in _recent_files(project_dir.rglob("*.jsonl"), started_at):
-        result = _parse_claude_file(path, marker)
-        if result is not None:
-            return result
+        for path in _recent_files(project_dir.glob("*.jsonl"), started_at):
+            result = _parse_claude_file(path, marker, started_at, completed_at)
+            if result is None:
+                continue
+            if marker is not None:
+                return result
+            snapshots.append(result)
+    if snapshots:
+        return _merge_snapshots("claude-code", snapshots)
     return None
 
 
-def _parse_claude_file(path: Path, marker: str) -> UsageSnapshot | None:
-    marker_ts: datetime | None = None
+def _parse_claude_file(
+    path: Path,
+    marker: str | None,
+    started_at: datetime,
+    completed_at: datetime | None,
+) -> UsageSnapshot | None:
+    marker_ts: datetime | None = started_at if marker is None else None
+    latest_ts = completed_at + _COLLECT_WINDOW if completed_at is not None else None
     external_session_id: str | None = None
     model: str | None = None
     usage_by_request: dict[str, UsageTokens] = {}
 
     for raw, obj in _iter_jsonl(path):
-        if marker_ts is None and marker in raw:
+        session_id = obj.get("sessionId")
+        if external_session_id is None and marker is None and isinstance(session_id, str):
+            external_session_id = session_id
+        if marker_ts is None and marker is not None and marker in raw:
             marker_ts = _parse_datetime(obj.get("timestamp")) or datetime.fromtimestamp(path.stat().st_mtime, UTC)
-            session_id = obj.get("sessionId")
             external_session_id = session_id if isinstance(session_id, str) else None
             continue
 
@@ -67,6 +89,8 @@ def _parse_claude_file(path: Path, marker: str) -> UsageSnapshot | None:
             continue
         timestamp = _parse_datetime(obj.get("timestamp"))
         if timestamp is not None and timestamp < marker_ts:
+            continue
+        if timestamp is not None and latest_ts is not None and timestamp > latest_ts:
             continue
         if external_session_id is not None and obj.get("sessionId") != external_session_id:
             continue
@@ -84,8 +108,7 @@ def _parse_claude_file(path: Path, marker: str) -> UsageSnapshot | None:
         request_id = obj.get("requestId")
         if not isinstance(request_id, str):
             message_id = message.get("id")
-            timestamp = obj.get("timestamp")
-            request_id = f"{message_id}:{timestamp}" if isinstance(message_id, str) else raw
+            request_id = message_id if isinstance(message_id, str) else raw
         usage_by_request[request_id] = {
             "input": _int(usage.get("input_tokens")),
             "output": _int(usage.get("output_tokens")),
@@ -102,24 +125,36 @@ def _parse_claude_file(path: Path, marker: str) -> UsageSnapshot | None:
         tokens=tokens,
         model=model,
         external_session_id=external_session_id,
-        cost_usd=_estimate_cost(model, tokens),
+        cost_usd=_estimate_cost(model, tokens, input_includes_cache=False),
     )
 
 
-def _collect_codex(workdir: Path, marker: str, started_at: datetime) -> UsageSnapshot | None:
+def _collect_codex(
+    workdir: Path,
+    marker: str | None,
+    started_at: datetime,
+    completed_at: datetime | None,
+) -> UsageSnapshot | None:
     sessions_dir = _home() / ".codex" / "sessions"
     if not sessions_dir.exists():
         return None
 
     for path in _recent_files(sessions_dir.rglob("*.jsonl"), started_at):
-        result = _parse_codex_file(path, marker, workdir)
+        result = _parse_codex_file(path, marker, workdir, started_at, completed_at)
         if result is not None:
             return result
     return None
 
 
-def _parse_codex_file(path: Path, marker: str, workdir: Path) -> UsageSnapshot | None:
-    marker_ts: datetime | None = None
+def _parse_codex_file(
+    path: Path,
+    marker: str | None,
+    workdir: Path,
+    started_at: datetime,
+    completed_at: datetime | None,
+) -> UsageSnapshot | None:
+    marker_ts: datetime | None = started_at if marker is None else None
+    latest_ts = completed_at + _COLLECT_WINDOW if completed_at is not None else None
     external_session_id: str | None = None
     model: str | None = None
     cwd_matches = False
@@ -143,7 +178,7 @@ def _parse_codex_file(path: Path, marker: str, workdir: Path) -> UsageSnapshot |
             if isinstance(raw_model, str):
                 model = raw_model
 
-        if marker_ts is None and marker in raw:
+        if marker_ts is None and marker is not None and marker in raw:
             marker_ts = timestamp or datetime.fromtimestamp(path.stat().st_mtime, UTC)
             continue
 
@@ -154,6 +189,8 @@ def _parse_codex_file(path: Path, marker: str, workdir: Path) -> UsageSnapshot |
             continue
         total = _codex_tokens(info.get("total_token_usage"))
         if total is None:
+            continue
+        if latest_ts is not None and timestamp is not None and timestamp > latest_ts:
             continue
         if marker_ts is None:
             before_total = total
@@ -174,7 +211,7 @@ def _parse_codex_file(path: Path, marker: str, workdir: Path) -> UsageSnapshot |
     )
 
 
-def _collect_opencode(workdir: Path, marker: str, started_at: datetime) -> UsageSnapshot | None:
+def _collect_opencode(workdir: Path, marker: str | None, started_at: datetime) -> UsageSnapshot | None:
     db_path = _opencode_db_path()
     if not db_path.exists():
         return None
@@ -186,23 +223,25 @@ def _collect_opencode(workdir: Path, marker: str, started_at: datetime) -> Usage
         return None
     try:
         conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            """
-            select s.*
-            from session s
-            where exists (
-                select 1 from message m
-                where m.session_id = s.id and m.data like ?
-            )
-            or exists (
-                select 1 from part p
-                where p.session_id = s.id and p.data like ?
-            )
-            order by s.time_created desc
-            limit 1
-            """,
-            (f"%{marker}%", f"%{marker}%"),
-        ).fetchone()
+        row = None
+        if marker is not None:
+            row = conn.execute(
+                """
+                select s.*
+                from session s
+                where exists (
+                    select 1 from message m
+                    where m.session_id = s.id and m.data like ?
+                )
+                or exists (
+                    select 1 from part p
+                    where p.session_id = s.id and p.data like ?
+                )
+                order by s.time_created desc
+                limit 1
+                """,
+                (f"%{marker}%", f"%{marker}%"),
+            ).fetchone()
         if row is None:
             row = conn.execute(
                 """
@@ -262,13 +301,41 @@ def _snapshot(
     return result
 
 
-def _estimate_cost(model: str | None, tokens: UsageTokens) -> float | None:
+def _merge_snapshots(source: str, snapshots: list[UsageSnapshot]) -> UsageSnapshot:
+    if len(snapshots) == 1:
+        return snapshots[0]
+
+    tokens = _sum_tokens(snapshot["tokens"] for snapshot in snapshots if isinstance(snapshot.get("tokens"), dict))
+    models = {snapshot.get("model") for snapshot in snapshots if isinstance(snapshot.get("model"), str)}
+    session_ids = {
+        snapshot.get("external_session_id")
+        for snapshot in snapshots
+        if isinstance(snapshot.get("external_session_id"), str)
+    }
+    costs = [snapshot.get("cost_usd") for snapshot in snapshots]
+    result = _snapshot(
+        source=source,
+        tokens=tokens,
+        model=next(iter(models)) if len(models) == 1 else None,
+        external_session_id=next(iter(session_ids)) if len(session_ids) == 1 else None,
+        cost_usd=sum(cost for cost in costs if isinstance(cost, int | float))
+        if costs and all(isinstance(cost, int | float) for cost in costs)
+        else None,
+    )
+    return result
+
+
+def _estimate_cost(model: str | None, tokens: UsageTokens, *, input_includes_cache: bool = True) -> float | None:
     if not model:
         return None
     price = _price_for_model(model)
     if price is None:
         return None
-    input_tokens = max(tokens["input"] - tokens["cache_read"] - tokens["cache_write"], 0)
+    input_tokens = (
+        max(tokens["input"] - tokens["cache_read"] - tokens["cache_write"], 0)
+        if input_includes_cache
+        else tokens["input"]
+    )
     output_tokens = tokens["output"] + tokens["reasoning"]
     total = (
         input_tokens * price["input"]
@@ -433,8 +500,17 @@ def _opencode_db_path() -> Path:
     return _home() / ".local" / "share" / "opencode" / "opencode.db"
 
 
-def _claude_project_name(workdir: Path) -> str:
-    return str(workdir).replace("/", "-")
+def _claude_project_dirs(workdir: Path) -> list[Path]:
+    projects_dir = _home() / ".claude" / "projects"
+    names: list[str] = []
+    raw_paths = [str(workdir)]
+    with suppress(OSError):
+        raw_paths.append(str(workdir.resolve()))
+    for raw_path in raw_paths:
+        for name in (raw_path.replace("/", "-"), "".join(ch if ch.isalnum() else "-" for ch in raw_path)):
+            if name not in names:
+                names.append(name)
+    return [projects_dir / name for name in names]
 
 
 def _same_path(left: str, right: Path) -> bool:
