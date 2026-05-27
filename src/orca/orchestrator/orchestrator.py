@@ -621,6 +621,7 @@ class Orchestrator:
         inactivity_timeout = (
             state_def.worker.inactivity_timeout or state_def.worker.timeout if state_def and state_def.worker else None
         )
+        max_prompt_chars = state_def.worker.max_prompt_chars if state_def and state_def.worker else None
 
         # Create TmuxSession and register log path for TUI
         tmux_session = PtySession(session_name=tracking_id, cols=120, rows=40)
@@ -708,6 +709,7 @@ class Orchestrator:
                 on_unblocked=_on_unblocked,
                 prompt_text=prompt_text,
                 effort=effort,
+                max_prompt_chars=max_prompt_chars,
             )
         finally:
             self._waiting_workers.pop(effect.issue_id, None)

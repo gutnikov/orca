@@ -53,6 +53,7 @@ class WorkerDef:
     # kinds that don't expose an effort flag. Typical values: low / medium /
     # high / xhigh.
     effort: str | None = None
+    max_prompt_chars: int = 400_000
 
 
 @dataclass(frozen=True)

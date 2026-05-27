@@ -53,6 +53,7 @@ class ScriptedWorker:
         on_unblocked: Any = None,
         prompt_text: str | None = None,
         effort: str | None = None,
+        max_prompt_chars: int | None = None,
     ) -> WorkerOutcome:
         key = (effect.issue_id, effect.state)
         self.calls.append(key)

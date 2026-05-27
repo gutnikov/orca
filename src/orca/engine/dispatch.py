@@ -43,6 +43,14 @@ def is_blocked(state: State, config: StateMachineConfig, issue_id: str) -> bool:
     return False
 
 
+_HEAVY_EVENT_TYPES = frozenset({"debug_review_required", "debug_decision", "debug_modify_request"})
+
+
+def _lightweight_log(entries: list[EventLogEntry]) -> list[dict[str, Any]]:
+    """Serialize event_log for worker prompts, stripping snapshot-heavy debug events."""
+    return [entry.to_dict() for entry in entries if entry.type not in _HEAVY_EVENT_TYPES]
+
+
 def build_issue_context(state: State, issue_id: str) -> dict[str, Any]:
     """Builds the issue context dict for DispatchWorkerEffect."""
     issue = state.issues[issue_id]
@@ -55,12 +63,12 @@ def build_issue_context(state: State, issue_id: str) -> dict[str, Any]:
                 "issue_id": child_id,
                 "fields": child.fields,
                 "state": child.state,
-                "event_log": [entry.to_dict() for entry in child.event_log],
+                "event_log": _lightweight_log(child.event_log),
             }
         )
     return {
         "fields": issue.fields,
-        "event_log": [entry.to_dict() for entry in issue.event_log],
+        "event_log": _lightweight_log(issue.event_log),
         "decomposed_from": issue.decomposed_from,
         "depends_on": issue.depends_on,
         "children": children,

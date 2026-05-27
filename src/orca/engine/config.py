@@ -144,6 +144,7 @@ def _parse_state(name: str, raw_data: dict[str, Any] | None) -> StateDef:
         progress: bool = bool(worker_data.get("progress", False))
         effort_raw = worker_data.get("effort")
         effort: str | None = str(effort_raw) if effort_raw is not None else None
+        max_prompt_chars: int = int(worker_data.get("max_prompt_chars", 400_000))
         worker = WorkerDef(
             kind=kind,
             prompt=prompt,
@@ -155,6 +156,7 @@ def _parse_state(name: str, raw_data: dict[str, Any] | None) -> StateDef:
             progress=progress,
             prompt_inline=prompt_inline,
             effort=effort,
+            max_prompt_chars=max_prompt_chars,
         )
 
     on: dict[str, OnRule] = {}

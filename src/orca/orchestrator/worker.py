@@ -83,6 +83,7 @@ class Worker(Protocol):
         on_unblocked: Callable[[str], None] | None = None,
         prompt_text: str | None = None,
         effort: str | None = None,
+        max_prompt_chars: int | None = None,
     ) -> WorkerOutcome: ...
 
 
@@ -165,6 +166,7 @@ class CliAgentWorker:
         on_unblocked: Callable[[str], None] | None = None,
         prompt_text: str | None = None,
         effort: str | None = None,
+        max_prompt_chars: int | None = None,
     ) -> WorkerOutcome:
         assert pty_session is not None, "pty_session is required"
 
@@ -196,6 +198,16 @@ class CliAgentWorker:
                 prompt = ""
         except TemplateRenderError as exc:
             return WorkerFailure(error=str(exc))
+
+        if max_prompt_chars is not None and len(prompt) > max_prompt_chars:
+            return WorkerFailure(
+                error=(
+                    f"Rendered prompt exceeds max_prompt_chars limit "
+                    f"({len(prompt):,} > {max_prompt_chars:,} chars). "
+                    f"The event_log or template context is too large for the model's context window."
+                ),
+                startup=True,
+            )
 
         # b2. Persist rendered prompt for debug review (best effort)
         if session_id:

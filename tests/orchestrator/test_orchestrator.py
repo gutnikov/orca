@@ -54,6 +54,7 @@ class MockWorker:
         on_unblocked: Any = None,
         prompt_text: str | None = None,
         effort: str | None = None,
+        max_prompt_chars: int | None = None,
     ) -> WorkerOutcome:
         self.calls.append((effect.issue_id, effect.state))
         return self.outcomes.get(effect.state, WorkerFailure(error="no mock"))
@@ -284,6 +285,7 @@ class TestOrchestrator:
                 on_unblocked: Any = None,
                 prompt_text: str | None = None,
                 effort: str | None = None,
+                max_prompt_chars: int | None = None,
             ) -> WorkerOutcome:
                 self.calls.append((effect.issue_id, effect.state))
                 count = call_count.get(effect.state, 0)
