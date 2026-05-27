@@ -99,7 +99,7 @@ export function FileHeader({
               key={m.value}
               type="button"
               size="sm"
-              variant={active ? "secondary" : "ghost"}
+              variant={active ? "default" : "ghost"}
               disabled={disabled}
               onClick={() => onSetMode(m.value)}
               className="h-6 px-2 text-[11px]"
