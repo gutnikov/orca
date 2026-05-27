@@ -8,12 +8,13 @@ interface Props {
 }
 
 export function RenderedPromptTab({ runId, session }: Props) {
+  const sessionId = session?.session_id ?? null
   const [prompt, setPrompt] = useState("")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!session) {
+    if (!sessionId) {
       setPrompt("")
       setError(null)
       setLoading(false)
@@ -21,9 +22,10 @@ export function RenderedPromptTab({ runId, session }: Props) {
     }
 
     const controller = new AbortController()
+    setPrompt("")
     setLoading(true)
     setError(null)
-    fetch(`/api/runs/${runId}/sessions/${encodeURIComponent(session.session_id)}/prompt`, {
+    fetch(`/api/runs/${runId}/sessions/${encodeURIComponent(sessionId)}/prompt`, {
       signal: controller.signal,
     })
       .then(async (response) => {
@@ -46,7 +48,7 @@ export function RenderedPromptTab({ runId, session }: Props) {
     return () => {
       controller.abort()
     }
-  }, [runId, session])
+  }, [runId, sessionId])
 
   if (!session) {
     return (
@@ -56,7 +58,7 @@ export function RenderedPromptTab({ runId, session }: Props) {
     )
   }
 
-  if (loading) {
+  if (loading && !prompt) {
     return (
       <div className="px-6 py-8 text-center text-sm text-muted-foreground italic">
         Loading prompt…
