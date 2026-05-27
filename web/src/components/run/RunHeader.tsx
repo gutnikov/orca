@@ -7,7 +7,7 @@ import { UnblockDialog } from "./UnblockDialog"
 import { StopResumeDropButtons } from "./StopResumeDropButtons"
 import { cn } from "@/lib/utils"
 
-type Tab = "detail" | "session" | "result"
+type Tab = "detail" | "session" | "result" | "diff"
 
 interface Props {
   runId: string
@@ -84,7 +84,7 @@ export function RunHeader({
         </div>
       </div>
       <nav className="px-5 flex items-center gap-1">
-        {(["detail", "session", "result"] as const).map((t) => (
+        {(["detail", "session", "diff", "result"] as const).map((t) => (
           <button
             key={t}
             type="button"
