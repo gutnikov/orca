@@ -56,6 +56,80 @@ interface SearchParams {
   tab?: Tab
 }
 
+interface ReviewResult {
+  state: string | null
+  stateLocalIndex: number
+  result: Record<string, unknown> | null
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+function sessionStateLocalIndex(sessions: SessionState[], session: SessionState): number | null {
+  if (session.failed || session.interrupted) return null
+  const matching = sessions
+    .filter(
+      (s) =>
+        s.issue_id === session.issue_id &&
+        s.state === session.state &&
+        !s.failed &&
+        !s.interrupted,
+    )
+    .sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at))
+  const index = matching.findIndex((s) => s.session_id === session.session_id)
+  return index === -1 ? null : index + 1
+}
+
+function collectReviewResults(issue: IssueState | null): ReviewResult[] {
+  const log = issue?.event_log
+  if (!Array.isArray(log)) return []
+
+  const stateCounts: Record<string, number> = {}
+  const results: ReviewResult[] = []
+  let currentState: string | null = null
+  let pending: { state: string | null; result: Record<string, unknown> | null } | null = null
+
+  const finalizePending = () => {
+    if (!pending) return
+    const key = pending.state ?? ""
+    stateCounts[key] = (stateCounts[key] ?? 0) + 1
+    results.push({
+      state: pending.state,
+      stateLocalIndex: stateCounts[key],
+      result: pending.result,
+    })
+    pending = null
+  }
+
+  for (const entry of log) {
+    if (entry.type === "created") {
+      const state = entry.data.state
+      if (typeof state === "string") currentState = state
+    } else if (entry.type === "advanced" || entry.type === "transitioned") {
+      const state = entry.data.to
+      if (typeof state === "string") currentState = state
+    } else if (entry.type === "debug_review_required") {
+      finalizePending()
+      const snapshot = asRecord(entry.data.snapshot)
+      pending = {
+        state: currentState,
+        result: asRecord(snapshot?.worker_result),
+      }
+    } else if (entry.type === "debug_decision") {
+      finalizePending()
+    }
+  }
+  finalizePending()
+  return results
+}
+
+function outcomeFromResult(result: Record<string, unknown> | null | undefined): string | null {
+  const outcome = result?.outcome
+  return typeof outcome === "string" ? outcome : null
+}
+
 function RunViewerPage() {
   const { runId } = Route.useParams()
   const search = Route.useSearch() as SearchParams
@@ -71,22 +145,40 @@ function RunViewerPage() {
   const selectedSessionId = search.session ?? null
   const activeTab: Tab = (search.tab as Tab) ?? "session"
 
-  // Build outcomes map by pairing completed sessions with worker_result events
-  // (mirrors tui/app.py:_session_result_map — zip-by-order matching).
   const outcomes: Record<string, string> = useMemo(() => {
     if (!data) return {}
     const out: Record<string, string> = {}
     for (const [iid, issue] of Object.entries(data.state.issues)) {
+      const reviewResults = collectReviewResults(issue)
+      if (reviewResults.length > 0) {
+        for (const session of data.sessions.filter((s) => s.issue_id === iid)) {
+          const localIndex = sessionStateLocalIndex(data.sessions, session)
+          if (localIndex === null) continue
+          const matched = reviewResults.find(
+            (item) => item.state === session.state && item.stateLocalIndex === localIndex,
+          )
+          const outcome = outcomeFromResult(matched?.result)
+          if (outcome) out[session.session_id] = outcome
+        }
+        continue
+      }
+
       const completed = data.sessions
-        .filter((s) => s.issue_id === iid && s.completed_at !== null)
+        .filter(
+          (s) =>
+            s.issue_id === iid &&
+            s.completed_at !== null &&
+            !s.failed &&
+            !s.interrupted,
+        )
         .sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at))
       const log = issue.event_log
       if (!Array.isArray(log)) continue
       const resultEvents = log.filter((e) => e.type === "worker_result")
       for (let i = 0; i < completed.length && i < resultEvents.length; i++) {
         const sid = completed[i].session_id
-        const outcome = resultEvents[i].data.outcome
-        if (typeof outcome === "string") out[sid] = outcome
+        const outcome = outcomeFromResult(resultEvents[i].data)
+        if (outcome) out[sid] = outcome
       }
     }
     return out
@@ -132,18 +224,13 @@ function RunViewerPage() {
 
   const selectedSessionStateLocalIndex = useMemo(() => {
     if (!data || !selectedSession) return null
-    const matching = data.sessions
-      .filter(
-        (s) =>
-          s.issue_id === selectedSession.issue_id &&
-          s.state === selectedSession.state &&
-          !s.failed &&
-          !s.interrupted,
-      )
-      .sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at))
-    const index = matching.findIndex((s) => s.session_id === selectedSession.session_id)
-    return index === -1 ? null : index + 1
+    return sessionStateLocalIndex(data.sessions, selectedSession)
   }, [data, selectedSession])
+
+  const selectedIssueReviewResults = useMemo(
+    () => collectReviewResults(selectedIssue),
+    [selectedIssue],
+  )
 
   const debugMode = useMemo(
     () =>
@@ -261,20 +348,40 @@ function RunViewerPage() {
     tail,
   )
 
-  // Result data — read from the session's matching worker_result event.
+  // Debug-mode logs contain both the paused result and the accepted result.
+  // Prefer review snapshots so repeated states line up with the selected phase.
   const resultData = useMemo(() => {
     if (!selectedSession || !data) return null
+    if (selectedSessionStateLocalIndex !== null) {
+      const matched = selectedIssueReviewResults.find(
+        (item) =>
+          item.state === selectedSession.state &&
+          item.stateLocalIndex === selectedSessionStateLocalIndex,
+      )
+      if (matched || selectedIssueReviewResults.length > 0) {
+        return matched?.result ?? null
+      }
+    } else if (selectedIssueReviewResults.length > 0) {
+      return null
+    }
+
     const issue = data.state.issues[selectedSession.issue_id]
     const log = issue?.event_log
     if (!Array.isArray(log)) return null
     const completed = data.sessions
-      .filter((s) => s.issue_id === selectedSession.issue_id && s.completed_at !== null)
+      .filter(
+        (s) =>
+          s.issue_id === selectedSession.issue_id &&
+          s.completed_at !== null &&
+          !s.failed &&
+          !s.interrupted,
+      )
       .sort((a, b) => Date.parse(a.started_at) - Date.parse(b.started_at))
     const results = log.filter((e) => e.type === "worker_result")
     const idx = completed.findIndex((s) => s.session_id === selectedSession.session_id)
     if (idx === -1 || idx >= results.length) return null
     return results[idx].data
-  }, [selectedSession, data])
+  }, [selectedSession, data, selectedSessionStateLocalIndex, selectedIssueReviewResults])
 
   if (error && data === null) {
     return (

@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import aiohttp
 from textual.app import App, ComposeResult
@@ -43,6 +44,79 @@ def _select_daemon_run_id(runs: list[dict[str, object]], requested_run_id: str |
     if runs:
         return str(runs[0].get("run_id", ""))
     return ""
+
+
+def _as_dict(value: Any) -> dict[str, object] | None:
+    return value if isinstance(value, dict) else None
+
+
+def _session_state_local_index(sessions: list[dict[str, object]], session: dict[str, object]) -> int | None:
+    if session.get("failed") or session.get("interrupted"):
+        return None
+    issue_id = session.get("issue_id")
+    state = session.get("state")
+    session_id = session.get("session_id")
+    if not isinstance(issue_id, str) or not isinstance(state, str) or not isinstance(session_id, str):
+        return None
+
+    matching = sorted(
+        (
+            s
+            for s in sessions
+            if s.get("issue_id") == issue_id
+            and s.get("state") == state
+            and not s.get("failed")
+            and not s.get("interrupted")
+        ),
+        key=lambda s: str(s.get("started_at", "")),
+    )
+    for index, candidate in enumerate(matching, start=1):
+        if candidate.get("session_id") == session_id:
+            return index
+    return None
+
+
+def _review_results(issue: Any) -> list[tuple[str | None, int, dict[str, object] | None]]:
+    event_log = getattr(issue, "event_log", None)
+    if not isinstance(event_log, list):
+        return []
+
+    results: list[tuple[str | None, int, dict[str, object] | None]] = []
+    state_counts: dict[str, int] = {}
+    current_state: str | None = None
+    pending: tuple[str | None, dict[str, object] | None] | None = None
+
+    def finalize_pending() -> None:
+        nonlocal pending
+        if pending is None:
+            return
+        state, worker_result = pending
+        key = state or ""
+        state_counts[key] = state_counts.get(key, 0) + 1
+        results.append((state, state_counts[key], worker_result))
+        pending = None
+
+    for entry in event_log:
+        if entry.type == "created":
+            state = entry.data.get("state")
+            if isinstance(state, str):
+                current_state = state
+        elif entry.type in {"advanced", "transitioned"}:
+            state = entry.data.get("to")
+            if isinstance(state, str):
+                current_state = state
+        elif entry.type == "debug_review_required":
+            finalize_pending()
+            snapshot = _as_dict(entry.data.get("snapshot"))
+            pending = (
+                current_state,
+                _as_dict(snapshot.get("worker_result") if snapshot else None),
+            )
+        elif entry.type == "debug_decision":
+            finalize_pending()
+
+    finalize_pending()
+    return results
 
 
 class OrcaApp(App[None]):
@@ -367,18 +441,46 @@ class OrcaApp(App[None]):
             self._selected_session_id = None
 
     def _session_result_map(self, issue_id: str) -> dict[str, dict[str, object]]:
-        """Build a mapping from session_id to its worker_result event data.
-
-        Matches completed sessions to worker_result events by order (zip).
-        """
+        """Build a mapping from session_id to its worker_result event data."""
         if not self._state:
             return {}
         issue = self._state.issues.get(issue_id)
         if not issue:
             return {}
-        issue_sessions = [s for s in self._sessions if s.get("issue_id") == issue_id and s.get("completed_at")]
-        result_events = [e for e in issue.event_log if e.type == "worker_result"]
         result_map: dict[str, dict[str, object]] = {}
+
+        reviews = _review_results(issue)
+        if reviews:
+            for session in (s for s in self._sessions if s.get("issue_id") == issue_id):
+                local_index = _session_state_local_index(self._sessions, session)
+                state = session.get("state")
+                if local_index is None or not isinstance(state, str):
+                    continue
+                result = next(
+                    (
+                        worker_result
+                        for review_state, review_index, worker_result in reviews
+                        if review_state == state and review_index == local_index
+                    ),
+                    None,
+                )
+                sid = str(session.get("session_id", ""))
+                if sid and result is not None:
+                    result_map[sid] = result
+            return result_map
+
+        issue_sessions = sorted(
+            (
+                s
+                for s in self._sessions
+                if s.get("issue_id") == issue_id
+                and s.get("completed_at")
+                and not s.get("failed")
+                and not s.get("interrupted")
+            ),
+            key=lambda s: str(s.get("started_at", "")),
+        )
+        result_events = [e for e in issue.event_log if e.type == "worker_result"]
         for session, event in zip(issue_sessions, result_events, strict=False):
             sid = str(session.get("session_id", ""))
             if sid:

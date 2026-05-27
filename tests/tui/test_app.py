@@ -74,6 +74,63 @@ class TestOrcaApp:
         async with app.run_test() as pilot:
             await pilot.press("q")
 
+    def test_session_result_map_uses_debug_review_snapshots(self, tmp_path: Path) -> None:
+        issue = Issue(
+            type="default",
+            fields={"title": "Root"},
+            state="done",
+            worker_active=False,
+            decomposed_from=None,
+            depends_on=[],
+            event_log=[
+                EventLogEntry("2026-01-01T00:00:00+00:00", "created", {"state": "preflight"}),
+                EventLogEntry("2026-01-01T00:00:01+00:00", "worker_result", {"outcome": "ready"}),
+                EventLogEntry(
+                    "2026-01-01T00:00:02+00:00",
+                    "debug_review_required",
+                    {"snapshot": {"worker_result": {"outcome": "ready", "summary": "preflight"}}},
+                ),
+                EventLogEntry("2026-01-01T00:00:03+00:00", "debug_decision", {"action": "accept"}),
+                EventLogEntry("2026-01-01T00:00:04+00:00", "worker_result", {"outcome": "ready"}),
+                EventLogEntry(
+                    "2026-01-01T00:00:05+00:00",
+                    "transitioned",
+                    {"from": "preflight", "to": "implementing"},
+                ),
+                EventLogEntry("2026-01-01T00:00:06+00:00", "worker_result", {"outcome": "done"}),
+                EventLogEntry(
+                    "2026-01-01T00:00:07+00:00",
+                    "debug_review_required",
+                    {"snapshot": {"worker_result": {"outcome": "done", "summary": "implementing"}}},
+                ),
+                EventLogEntry("2026-01-01T00:00:08+00:00", "debug_decision", {"action": "accept"}),
+                EventLogEntry("2026-01-01T00:00:09+00:00", "worker_result", {"outcome": "done"}),
+            ],
+        )
+        app = OrcaApp(run_dir=tmp_path / "run", branch_name="test-branch")
+        app._state = State(issues={"root-1": issue}, worker_queues={})
+        app._sessions = [
+            {
+                "session_id": "session-preflight",
+                "issue_id": "root-1",
+                "state": "preflight",
+                "started_at": "2026-01-01T00:00:00+00:00",
+                "completed_at": "2026-01-01T00:00:04+00:00",
+            },
+            {
+                "session_id": "session-implementing",
+                "issue_id": "root-1",
+                "state": "implementing",
+                "started_at": "2026-01-01T00:00:05+00:00",
+                "completed_at": "2026-01-01T00:00:09+00:00",
+            },
+        ]
+
+        result_map = app._session_result_map("root-1")
+
+        assert result_map["session-preflight"]["summary"] == "preflight"
+        assert result_map["session-implementing"]["summary"] == "implementing"
+
 
 class TestDaemonRunSelection:
     def test_selects_requested_run_id(self) -> None:
