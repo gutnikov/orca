@@ -13,7 +13,7 @@ import { IssueDetailTab } from "@/components/run/IssueDetailTab"
 import { WorkerLogTab } from "@/components/run/WorkerLogTab"
 import { RunResultTab } from "@/components/run/RunResultTab"
 import { RunHeader } from "@/components/run/RunHeader"
-import { cn } from "@/lib/utils"
+import { AppShell, AppHeader } from "@/components/ui/app-shell"
 
 type Tab = "detail" | "session" | "result"
 
@@ -90,6 +90,11 @@ function RunViewerPage() {
     [data],
   )
 
+  const issueCount = data ? Object.keys(data.state.issues).length : 0
+  const doneCount = data
+    ? Object.values(data.state.issues).filter((i) => i.state === "done").length
+    : 0
+
   const elapsed = useMemo(() => {
     if (!data) return ""
     const starts = data.sessions
@@ -163,44 +168,54 @@ function RunViewerPage() {
 
   if (error && data === null) {
     return (
-      <main className="min-h-screen bg-background text-foreground flex items-center justify-center">
+      <AppShell className="flex items-center justify-center min-h-screen">
         <div className="text-center">
-          <h1 className="text-lg font-semibold mb-2">Cannot reach daemon</h1>
-          <p className="text-sm text-muted-foreground">{error}</p>
+          <h1 className="text-[16px] font-semibold mb-2">Cannot reach daemon</h1>
+          <p className="text-[13px] text-[var(--fg-muted)]">{error}</p>
         </div>
-      </main>
+      </AppShell>
     )
   }
 
   if (data === null) {
     return (
-      <main className="min-h-screen bg-background text-foreground flex items-center justify-center">
-        <p className="text-sm text-muted-foreground italic">Loading…</p>
-      </main>
+      <AppShell className="flex items-center justify-center min-h-screen">
+        <p className="text-[13px] text-[var(--fg-muted)] italic">Loading…</p>
+      </AppShell>
     )
   }
 
   return (
-    <main className="h-screen flex flex-col bg-background text-foreground">
+    <AppShell className="flex flex-col h-screen">
+      <AppHeader
+        breadcrumb={[
+          { label: "orca", to: "/" },
+          { label: "runs", to: "/" },
+          { label: runId, mono: true },
+        ]}
+      />
       <RunHeader
         runId={runId}
         status={data.status}
         debugMode={debugMode}
         elapsed={elapsed}
+        issueCount={issueCount}
+        doneCount={doneCount}
         selectedIssueId={selectedIssueId}
         selectedIssue={selectedIssue}
+        activeTab={activeTab}
+        setTab={setTab}
         onChange={() => void refetch()}
       />
       {error && data !== null && (
-        <div className="px-5 py-1 text-[11px] text-amber-500 bg-amber-500/5">
+        <div className="px-5 py-1 text-[11px] text-[var(--attention)] bg-[var(--attention)]/5">
           reconnecting… ({error})
         </div>
       )}
       <div className="flex-1 min-h-0 grid grid-cols-[260px_1fr]">
-        {/* Left rail */}
-        <aside className="border-r border-border bg-background overflow-y-auto p-3 flex flex-col gap-4">
+        <aside className="border-r border-[var(--border)] bg-[var(--canvas)] overflow-y-auto p-3 flex flex-col gap-4">
           <div>
-            <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 px-1">
+            <div className="text-[10px] uppercase tracking-wider text-[var(--fg-subtle)] mb-2 px-1 font-semibold">
               Issues
             </div>
             <IssuesTree
@@ -211,7 +226,7 @@ function RunViewerPage() {
           </div>
           {selectedIssueId && (
             <div>
-              <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-2 px-1">
+              <div className="text-[10px] uppercase tracking-wider text-[var(--fg-subtle)] mb-2 px-1 font-semibold">
                 Phases
               </div>
               <PhasesPanel
@@ -225,25 +240,7 @@ function RunViewerPage() {
           )}
         </aside>
 
-        {/* Right area */}
-        <section className="flex flex-col min-h-0">
-          <nav className="border-b border-border px-5 flex items-center gap-1">
-            {(["detail", "session", "result"] as const).map((t) => (
-              <button
-                key={t}
-                type="button"
-                onClick={() => setTab(t)}
-                className={cn(
-                  "px-3 py-2 text-[12px] capitalize border-b-2 -mb-[2px] transition-colors",
-                  activeTab === t
-                    ? "border-primary text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground",
-                )}
-              >
-                {t}
-              </button>
-            ))}
-          </nav>
+        <section className="flex flex-col min-h-0 bg-[var(--canvas)]">
           <div className="flex-1 min-h-0 overflow-y-auto">
             {activeTab === "detail" && (
               <IssueDetailTab runId={runId} issueId={selectedIssueId} issue={selectedIssue} />
@@ -267,7 +264,7 @@ function RunViewerPage() {
           </div>
         </section>
       </div>
-    </main>
+    </AppShell>
   )
 }
 

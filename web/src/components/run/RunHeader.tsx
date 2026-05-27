@@ -1,20 +1,34 @@
 import { useState } from "react"
-import { Link } from "@tanstack/react-router"
 import { toast } from "sonner"
-import { ArrowLeft } from "lucide-react"
 import type { IssueState } from "@/hooks/useRunState"
-import { RunActionButton } from "./RunActionButton"
-import { StopResumeDropButtons } from "./StopResumeDropButtons"
+import { Button } from "@/components/ui/button"
+import { StatusPill, type StatusKind } from "@/components/ui/status-pill"
 import { UnblockDialog } from "./UnblockDialog"
+import { StopResumeDropButtons } from "./StopResumeDropButtons"
+import { cn } from "@/lib/utils"
+
+type Tab = "detail" | "session" | "result"
 
 interface Props {
   runId: string
   status: string | undefined
   debugMode: boolean
   elapsed: string
+  issueCount: number
+  doneCount: number
   selectedIssueId: string | null
   selectedIssue: IssueState | null
+  activeTab: Tab
+  setTab: (t: Tab) => void
   onChange: () => void
+}
+
+function statusToKind(status: string | undefined): StatusKind {
+  if (status === "running") return "running"
+  if (status === "completed") return "completed"
+  if (status === "stopped") return "stopped"
+  if (status === "errored") return "errored"
+  return "draft"
 }
 
 export function RunHeader({
@@ -22,8 +36,12 @@ export function RunHeader({
   status,
   debugMode,
   elapsed,
+  issueCount,
+  doneCount,
   selectedIssueId,
   selectedIssue,
+  activeTab,
+  setTab,
   onChange,
 }: Props) {
   const [unblockOpen, setUnblockOpen] = useState(false)
@@ -49,50 +67,49 @@ export function RunHeader({
     onChange()
   }
 
-  const statusColor =
-    status === "running"
-      ? "text-foreground"
-      : status === "completed"
-        ? "text-emerald-500"
-        : status === "stopped"
-          ? "text-muted-foreground"
-          : status === "errored"
-            ? "text-destructive"
-            : "text-muted-foreground"
-
   return (
-    <header className="border-b border-border bg-background px-5 py-3 flex items-center gap-4">
-      <Link to="/" className="text-[12px] text-muted-foreground hover:text-foreground flex items-center gap-1">
-        <ArrowLeft size={14} />
-        all runs
-      </Link>
-      <button
-        type="button"
-        onClick={() => {
-          void navigator.clipboard?.writeText(runId)
-          toast.success("Copied run id")
-        }}
-        className="font-mono text-sm font-semibold text-foreground hover:underline"
-      >
-        {runId}
-      </button>
-      <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
-        <span className={statusColor}>● {status ?? "unknown"}</span>
-        {debugMode && <span className="text-[#d4a064]">debug</span>}
-        {elapsed && <span className="tabular-nums">{elapsed}</span>}
+    <div className="border-b border-[var(--border)] bg-[var(--canvas)]">
+      <div className="px-5 pt-4 pb-2">
+        <div className="flex items-baseline gap-3 flex-wrap">
+          <h1 className="font-mono text-[20px] font-semibold text-[var(--fg)]">{runId}</h1>
+          <StatusPill kind={statusToKind(status)} />
+          {debugMode && <StatusPill kind="attention" label="debug" pulse={false} size="sm" />}
+        </div>
+        <div className="mt-1.5 flex items-center gap-3 text-[12px] text-[var(--fg-muted)] flex-wrap">
+          {elapsed && <span className="tabular-nums">started {elapsed} ago</span>}
+          <span className="text-[var(--border)]">·</span>
+          <span>
+            {doneCount} of {issueCount} done
+          </span>
+        </div>
       </div>
-      <div className="ml-auto flex items-center gap-2">
-        <RunActionButton onClick={() => void retry()} disabled={!retryEnabled}>
-          Retry
-        </RunActionButton>
-        <RunActionButton
-          onClick={() => setUnblockOpen(true)}
-          disabled={!unblockEnabled}
-        >
-          Unblock…
-        </RunActionButton>
-        <StopResumeDropButtons runId={runId} status={status} onChange={onChange} />
-      </div>
+      <nav className="px-5 flex items-center gap-1">
+        {(["detail", "session", "result"] as const).map((t) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={cn(
+              "px-3 py-2 text-[13px] capitalize border-b-2 -mb-px transition-colors",
+              activeTab === t
+                ? "border-[var(--accent-warm)] text-[var(--fg)] font-medium"
+                : "border-transparent text-[var(--fg-muted)] hover:text-[var(--fg)]",
+            )}
+          >
+            {t}
+          </button>
+        ))}
+        <div className="ml-auto flex items-center gap-1.5 py-1.5">
+          <Button size="sm" onClick={() => void retry()} disabled={!retryEnabled}>
+            Retry
+          </Button>
+          <Button size="sm" onClick={() => setUnblockOpen(true)} disabled={!unblockEnabled}>
+            Unblock…
+          </Button>
+          <StopResumeDropButtons runId={runId} status={status} onChange={onChange} />
+        </div>
+      </nav>
+
       {selectedIssueId && (
         <UnblockDialog
           runId={runId}
@@ -102,6 +119,6 @@ export function RunHeader({
           onSent={onChange}
         />
       )}
-    </header>
+    </div>
   )
 }
