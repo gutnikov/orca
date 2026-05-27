@@ -36,11 +36,11 @@ function buildTree(issues: Record<string, IssueState>): TreeNode[] {
 }
 
 function IssueIcon({ issue }: { issue: IssueState }) {
-  if (issue.debug_pending) return <Pause size={12} className="text-[#d4a064]" />
-  if (issue.worker_active) return <Loader2 size={12} className="animate-spin text-foreground/70" />
-  if (issue.state === "done") return <CheckCircle2 size={12} className="text-emerald-500" />
-  if (issue.failure_count > 0) return <AlertTriangle size={12} className="text-amber-500" />
-  return <ChevronRight size={12} className="text-muted-foreground" />
+  if (issue.debug_pending) return <Pause size={12} className="text-[var(--attention)]" />
+  if (issue.worker_active) return <Loader2 size={12} className="animate-spin text-[var(--accent-fg)]" />
+  if (issue.state === "done") return <CheckCircle2 size={12} className="text-[var(--success-fg)]" />
+  if (issue.failure_count > 0) return <AlertTriangle size={12} className="text-[var(--attention)]" />
+  return <ChevronRight size={12} className="text-[var(--fg-subtle)]" />
 }
 
 function Row({
@@ -69,15 +69,15 @@ function Row({
           "w-full text-left flex items-center gap-1.5 rounded-md px-2 py-1 text-[12px]",
           "transition-colors",
           isSelected
-            ? "bg-accent/15 border-l-2 border-primary text-foreground"
-            : "hover:bg-muted text-muted-foreground",
+            ? "bg-[var(--accent-soft)] border-l-2 border-[var(--accent)] text-[var(--fg)]"
+            : "hover:bg-[var(--subtle)] text-[var(--fg-muted)]",
         )}
         style={{ paddingLeft: 8 + depth * 14 }}
       >
         <IssueIcon issue={issue} />
         <span className="truncate flex-1">{title}</span>
         {issue.failure_count > 0 && (
-          <span className="text-[10px] text-amber-500 font-mono">×{issue.failure_count}</span>
+          <span className="text-[10px] text-[var(--attention)] font-mono">×{issue.failure_count}</span>
         )}
       </button>
       {node.children.map((child) => (
