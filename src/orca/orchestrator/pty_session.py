@@ -20,10 +20,17 @@ class TmuxSession:
     capture the visible pane content (with ANSI colours) for TUI rendering.
     """
 
-    def __init__(self, session_name: str, cols: int = 120, rows: int = 40) -> None:
+    def __init__(
+        self,
+        session_name: str,
+        cols: int = 120,
+        rows: int = 40,
+        cast_path: str | Path | None = None,
+    ) -> None:
         self._session_name = f"{_TMUX_PREFIX}{session_name}"
         self._cols = cols
         self._rows = rows
+        self._cast_path = str(cast_path) if cast_path is not None else None
         self._alive = False
 
     @property
@@ -41,6 +48,39 @@ class TmuxSession:
     @property
     def session_name(self) -> str:
         return self._session_name
+
+    def _build_tmux_args(self, full_cmd: str) -> list[str]:
+        """Build the `tmux new-session` argv for `full_cmd`.
+
+        Without a cast path, the command is passed as a single string (tmux runs
+        it via `sh -c`). With a cast path, asciinema wraps the command in normal
+        (non-headless) mode so the pane still mirrors output for capture-pane and
+        send-keys, while a timed asciicast-v2 .cast is written to disk.
+        """
+        base = [
+            "tmux",
+            "new-session",
+            "-d",
+            "-s",
+            self._session_name,
+            "-x",
+            str(self._cols),
+            "-y",
+            str(self._rows),
+        ]
+        if self._cast_path is None:
+            return [*base, full_cmd]
+        return [
+            *base,
+            "asciinema",
+            "rec",
+            "-q",
+            "--output-format",
+            "asciicast-v2",
+            "--command",
+            full_cmd,
+            self._cast_path,
+        ]
 
     async def spawn(
         self,
@@ -65,18 +105,7 @@ class TmuxSession:
             exports = " ".join(f"{k}={shlex.quote(v)}" for k, v in env.items())
             full_cmd = f"export {exports}; {full_cmd}"
 
-        tmux_args = [
-            "tmux",
-            "new-session",
-            "-d",
-            "-s",
-            self._session_name,
-            "-x",
-            str(self._cols),
-            "-y",
-            str(self._rows),
-            full_cmd,
-        ]
+        tmux_args = self._build_tmux_args(full_cmd)
 
         proc = await asyncio.create_subprocess_exec(
             *tmux_args,
