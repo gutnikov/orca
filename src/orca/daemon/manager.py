@@ -5,6 +5,7 @@ import contextlib
 import enum
 import json as _json
 import logging
+import shutil
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -356,12 +357,20 @@ class RunManager:
         *,
         debug: bool = False,
         worker_overrides: dict[str, dict[str, str]] | None = None,
+        cast: bool = False,
     ) -> str:
         """Start a new orchestrator run. Returns run_id.
 
         Resolves config, sets up persistence/branches/worktrees/orchestrator,
         then launches orchestrator.run() as an asyncio task.
         """
+        if cast and shutil.which("asciinema") is None:
+            msg = (
+                "--cast requires asciinema on PATH, but it was not found. "
+                "Install it (e.g. `brew install asciinema`) or omit --cast."
+            )
+            raise ValueError(msg)
+
         # Resolve config
         config_path = resolve_config_path(self.repo_root, workflow)
         import yaml as _yaml
@@ -526,6 +535,7 @@ class RunManager:
             flow_root=flow_root,
             session_sync=session_sync,
             worker_overrides=worker_overrides,
+            cast=cast,
         )
         orchestrator.debug = debug
 
@@ -783,6 +793,7 @@ class RunManager:
             repo_root=self.repo_root,
             flow_root=flow_root,
             session_sync=session_sync,
+            cast=False,  # resume does not re-record; cast only applies to fresh --cast runs
         )
         run_info.orchestrator = orchestrator
         run_info.issue_count = len(state.issues)
