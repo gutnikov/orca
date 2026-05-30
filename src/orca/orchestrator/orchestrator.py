@@ -70,6 +70,7 @@ class Orchestrator:
         hot_sessions: set[str] | None = None,
         session_log_paths: dict[str, str] | None = None,
         worker_overrides: dict[str, dict[str, str]] | None = None,
+        cast: bool = False,
     ) -> None:
         self._config = config
         self._state = state
@@ -113,6 +114,8 @@ class Orchestrator:
         # by state name; each entry may carry `kind` / `model` / `effort`.
         # State names not present here keep their workflow-config defaults.
         self._worker_overrides: dict[str, dict[str, str]] = worker_overrides or {}
+        # When True, each worker tmux session is recorded to an asciinema .cast.
+        self._cast_enabled: bool = cast
 
     async def stop(self) -> None:
         """Cancel in-flight workers and kill all tmux sessions."""
@@ -624,16 +627,25 @@ class Orchestrator:
         max_prompt_chars = state_def.worker.max_prompt_chars if state_def and state_def.worker else None
 
         # Create TmuxSession and register log path for TUI
-        tmux_session = PtySession(session_name=tracking_id, cols=120, rows=40)
         timestamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
         log_dir = workdir / ".orca-state" / "sessions"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"{enriched_effect.state}-{timestamp}.log"
+        cast_path = log_dir / f"{enriched_effect.state}-{timestamp}.cast" if self._cast_enabled else None
+
+        tmux_session = PtySession(
+            session_name=tracking_id,
+            cols=120,
+            rows=40,
+            cast_path=cast_path,
+        )
 
         self._tmux_sessions[tracking_id] = tmux_session
         self._session_log_paths[tracking_id] = str(log_path)
         if self._session_sync is not None:
             self._session_sync.manifest.update_log_path(tracking_id, str(log_path))
+            if cast_path is not None:
+                self._session_sync.manifest.update_cast_path(tracking_id, str(cast_path))
 
         # Build run context for prompt templates
         run_context: dict[str, Any] | None = None
