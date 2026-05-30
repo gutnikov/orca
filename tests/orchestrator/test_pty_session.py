@@ -85,3 +85,19 @@ def test_build_tmux_args_with_cast_wraps_in_asciinema():
     assert "asciicast-v2" in args
     # never headless — would blank out capture-pane
     assert "--headless" not in args
+
+
+def test_update_cast_path_sets_field(tmp_path):
+    from orca.orchestrator.session_sync import SessionManifest
+
+    manifest = SessionManifest(run_dir=tmp_path)
+    manifest.append(
+        issue_id="i1",
+        state="plan",
+        session_id="s1",
+        worktree_path="/wt",
+        started_at="2026-05-30T00:00:00Z",
+    )
+    manifest.update_cast_path("s1", "/wt/.orca-state/sessions/plan-x.cast")
+    entry = manifest.read()[0]
+    assert entry["cast_path"] == "/wt/.orca-state/sessions/plan-x.cast"

@@ -64,6 +64,15 @@ class SessionManifest:
                 self._write(entries)
                 return
 
+    def update_cast_path(self, session_id: str, cast_path: str) -> None:
+        """Store the asciinema .cast file path for a session."""
+        entries = self.read()
+        for entry in entries:
+            if entry["session_id"] == session_id:
+                entry["cast_path"] = cast_path
+                self._write(entries)
+                return
+
     def update_worktree_path(self, session_id: str, worktree_path: str) -> None:
         """Update the worktree_path for a session (e.g. after worktree creation resolves the real path)."""
         entries = self.read()
