@@ -70,6 +70,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Pause after every worker completion for review (debug mode).",
     )
+    run_parser.add_argument(
+        "--cast",
+        action="store_true",
+        help="Record each run session's tmux session to an asciinema .cast file (requires asciinema on PATH)",
+    )
     run_parser.add_argument("--run-id", type=str, default=None)
     run_parser.add_argument("--max-hops", type=int, default=10)
     run_parser.add_argument("--max-retries", type=int, default=3)

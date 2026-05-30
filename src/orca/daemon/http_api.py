@@ -93,6 +93,7 @@ async def _start_run(request: Request) -> JSONResponse:
             max_retries=body.get("max_retries"),
             debug=bool(body.get("debug", False)),
             worker_overrides=worker_overrides,
+            cast=bool(body.get("cast", False)),
         )
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=400)

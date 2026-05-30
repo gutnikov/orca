@@ -75,6 +75,7 @@ def run_command(args: Namespace) -> None:
             "max_hops": args.max_hops,
             "max_retries": args.max_retries,
             "debug": args.debug,
+            "cast": args.cast,
         }
         if worker_overrides:
             payload["worker_overrides"] = worker_overrides
