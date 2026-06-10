@@ -168,12 +168,11 @@ class Orchestrator:
             lines = lines[-tail:]
         return "\n".join(lines) + "\n"
 
-    def get_session_log_by_issue(self, issue_id: str, tail: int = 100) -> str:
-        """Read session log for the latest session of the given issue_id.
+    def _latest_tracking_id(self, issue_id: str) -> str:
+        """Return the tracking_id of the most recent session for an issue.
 
-        Looks up the issue's most recent session in the manifest, then
-        delegates to ``get_session_log`` with the session's tracking_id.
-        Returns empty string if no session is found.
+        Reads the manifest and returns the last (newest) session_id recorded
+        for the issue. Returns "" if there is no manifest or no session.
         """
         if self._session_sync is None:
             return ""
@@ -183,6 +182,16 @@ class Orchestrator:
         for entry in entries:
             if entry.get("issue_id") == issue_id:
                 tracking_id = entry.get("session_id", "")
+        return tracking_id
+
+    def get_session_log_by_issue(self, issue_id: str, tail: int = 100) -> str:
+        """Read session log for the latest session of the given issue_id.
+
+        Looks up the issue's most recent session in the manifest, then
+        delegates to ``get_session_log`` with the session's tracking_id.
+        Returns empty string if no session is found.
+        """
+        tracking_id = self._latest_tracking_id(issue_id)
         if not tracking_id:
             return ""
         return self.get_session_log(tracking_id, tail)
@@ -208,6 +217,33 @@ class Orchestrator:
         msg_box.append(message)
         event.set()
         return True
+
+    def post_to_session(self, issue_id: str, message: str) -> bool:
+        """Post a message to a worker's live session.
+
+        If the worker formally reported ``outcome: waiting`` it is resumed
+        through the unblock channel, so the state machine records a
+        ``WorkerResumedEvent`` and clears the waiting flag. Otherwise the
+        message is typed directly into the live tmux session via
+        ``send-keys`` — this lets you nudge a worker stalled at an interactive
+        prompt (e.g. after a transient API error) even though it never entered
+        the ``waiting`` state.
+
+        Returns False if there is no live session for the issue.
+        """
+        # Formal waiting worker: route through the unblock channel so the
+        # orchestrator records the resume and re-arms the inactivity timer.
+        if issue_id in self._waiting_workers:
+            return self.unblock_worker(issue_id, message)
+
+        # Otherwise type directly into the live session, if one exists.
+        tracking_id = self._latest_tracking_id(issue_id)
+        if not tracking_id:
+            return False
+        session = self._tmux_sessions.get(tracking_id)
+        if session is None:
+            return False
+        return session.send_keys(message)
 
     def is_waiting(self, issue_id: str) -> bool:
         """True if a worker for this issue is currently blocked awaiting unblock."""

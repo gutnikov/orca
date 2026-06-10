@@ -29,7 +29,7 @@ export function UnblockDialog({ runId, issueId, open, onOpenChange, onSent }: Pr
         toast.error(body.error ?? `HTTP ${r.status}`)
         return
       }
-      toast.success("Unblock message sent")
+      toast.success("Message posted to session")
       setMessage("")
       onOpenChange(false)
       onSent()
@@ -45,7 +45,7 @@ export function UnblockDialog({ runId, issueId, open, onOpenChange, onSent }: Pr
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 -translate-x-1/2 -translate-y-1/2 w-[480px] max-w-[90vw] rounded-lg border border-border bg-card p-5 shadow-lg">
           <div className="flex items-center justify-between mb-3">
             <Dialog.Title className="text-sm font-semibold">
-              Unblock worker
+              Post to session
             </Dialog.Title>
             <Dialog.Close asChild>
               <button type="button" className="text-muted-foreground hover:text-foreground">
@@ -54,7 +54,9 @@ export function UnblockDialog({ runId, issueId, open, onOpenChange, onSent }: Pr
             </Dialog.Close>
           </div>
           <Dialog.Description className="text-[12px] text-muted-foreground mb-3">
-            Send a message to the worker. Useful when the worker is stuck waiting on input.
+            Type a message into the worker's live session. Resumes a worker that is formally
+            waiting, or nudges one stalled at an interactive prompt (e.g. after a transient API
+            error).
           </Dialog.Description>
           <textarea
             value={message}

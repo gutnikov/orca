@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { toast } from "sonner"
 import { useNavigate } from "@tanstack/react-router"
-import { RunActionButton } from "./RunActionButton"
+import { Button } from "@/components/ui/button"
 
 interface Props {
   runId: string
@@ -38,17 +38,18 @@ export function StopResumeDropButtons({ runId, status, onChange }: Props) {
   return (
     <>
       {isRunning && (
-        <RunActionButton onClick={() => void post("stop", "stop")} disabled={busy !== null}>
+        <Button size="sm" onClick={() => void post("stop", "stop")} disabled={busy !== null}>
           {busy === "stop" ? "Stopping…" : "Stop"}
-        </RunActionButton>
+        </Button>
       )}
       {isStopped && (
-        <RunActionButton onClick={() => void post("resume", "resume")} disabled={busy !== null}>
+        <Button size="sm" onClick={() => void post("resume", "resume")} disabled={busy !== null}>
           {busy === "resume" ? "Resuming…" : "Resume"}
-        </RunActionButton>
+        </Button>
       )}
-      <RunActionButton
-        variant="destructive"
+      <Button
+        size="sm"
+        variant="danger"
         onClick={() => {
           if (window.confirm("Drop this run? This cannot be undone.")) {
             void post("drop", "drop")
@@ -57,7 +58,7 @@ export function StopResumeDropButtons({ runId, status, onChange }: Props) {
         disabled={busy !== null}
       >
         {busy === "drop" ? "Dropping…" : "Drop"}
-      </RunActionButton>
+      </Button>
     </>
   )
 }

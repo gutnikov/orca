@@ -325,7 +325,7 @@ class TestOrchestrator:
 class TestOrchestratorAccessors:
     """Tests for Orchestrator public accessors and session control methods."""
 
-    def _make_orchestrator(self, tmp_path: Path) -> Orchestrator:
+    def _make_orchestrator(self, tmp_path: Path, session_sync: SessionSync | None = None) -> Orchestrator:
         config = parse_config(SIMPLE_CONFIG)
         state = State(issues={}, worker_queues={})
         persistence = Persistence(tmp_path, "main")
@@ -341,6 +341,7 @@ class TestOrchestratorAccessors:
             generate_id=_counter(),
             now=_now,
             worktree_mgr=FakeWorktreeManager(tmp_path),
+            session_sync=session_sync,
         )
 
     def test_state_property(self, tmp_path: Path) -> None:
@@ -386,3 +387,49 @@ class TestOrchestratorAccessors:
         assert "s1" in orchestrator.hot_sessions
         orchestrator.set_cold_session("s1")
         assert "s1" not in orchestrator.hot_sessions
+
+    def test_post_to_session_routes_waiting_through_unblock(self, tmp_path: Path) -> None:
+        """A formally-waiting worker is resumed via the unblock channel."""
+        import asyncio
+
+        orchestrator = self._make_orchestrator(tmp_path)
+        event = asyncio.Event()
+        box: list[str] = []
+        orchestrator._waiting_workers["issue-1"] = (event, box)
+
+        assert orchestrator.post_to_session("issue-1", "go ahead") is True
+        # The unblock channel was populated and the worker's event set.
+        assert event.is_set()
+        assert box == ["go ahead"]
+
+    def test_post_to_session_types_into_live_session(self, tmp_path: Path) -> None:
+        """A non-waiting worker gets the message typed into its live session."""
+
+        class FakeSession:
+            def __init__(self) -> None:
+                self.sent: list[str] = []
+
+            def send_keys(self, text: str) -> bool:
+                self.sent.append(text)
+                return True
+
+        session_sync = SessionSync(tmp_path)
+        orchestrator = self._make_orchestrator(tmp_path, session_sync=session_sync)
+        # Map the issue to a tracking_id via the manifest, then register a session.
+        session_sync.manifest.append(
+            issue_id="issue-1",
+            state="todo",
+            session_id="tid-1",
+            worktree_path=str(tmp_path),
+            started_at=_now(),
+        )
+        session = FakeSession()
+        orchestrator._tmux_sessions["tid-1"] = session  # type: ignore[assignment]
+
+        assert orchestrator.post_to_session("issue-1", "retry the test") is True
+        assert session.sent == ["retry the test"]
+
+    def test_post_to_session_returns_false_without_session(self, tmp_path: Path) -> None:
+        """No waiting worker and no live session → False (caller surfaces an error)."""
+        orchestrator = self._make_orchestrator(tmp_path)
+        assert orchestrator.post_to_session("issue-1", "hello") is False

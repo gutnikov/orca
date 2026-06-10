@@ -64,7 +64,7 @@ export function RunHeader({
     <div className="border-b border-[var(--border)] bg-[var(--canvas)]">
       <div className="px-5 py-3 flex items-center gap-4 flex-wrap">
         <div className="flex-1 min-w-0">
-          <div className="flex items-baseline gap-3 flex-wrap">
+          <div className="flex items-center gap-3 flex-wrap">
             <h1 className="font-mono text-[20px] font-semibold text-[var(--fg)]">{runId}</h1>
             <StatusPill kind={statusToKind(status)} />
             {debugMode && <StatusPill kind="attention" label="debug" pulse={false} size="sm" />}
@@ -82,7 +82,7 @@ export function RunHeader({
             Retry
           </Button>
           <Button size="sm" onClick={() => setUnblockOpen(true)} disabled={!unblockEnabled}>
-            Unblock…
+            Post to session…
           </Button>
           <StopResumeDropButtons runId={runId} status={status} onChange={onChange} />
         </div>

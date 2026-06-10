@@ -1042,7 +1042,12 @@ class RunManager:
         return "\n\n".join(parts)
 
     def unblock_worker(self, run_id: str, issue_id: str, message: str) -> None:
-        """Unblock a blocked worker in a run."""
+        """Post a message to a worker's live session in a run.
+
+        Resumes a formally-waiting worker through the unblock channel, or types
+        the message directly into the live tmux session for a worker stalled at
+        an interactive prompt. Raises if there is no live session for the issue.
+        """
         run_info = self._runs.get(run_id)
         if run_info is None:
             msg = f"Run '{run_id}' not found"
@@ -1050,8 +1055,8 @@ class RunManager:
         if run_info.orchestrator is None:
             msg = f"Run '{run_id}' has no orchestrator"
             raise ValueError(msg)
-        if not run_info.orchestrator.unblock_worker(issue_id, message):
-            msg = f"Issue '{issue_id}' is not waiting in run '{run_id}'"
+        if not run_info.orchestrator.post_to_session(issue_id, message):
+            msg = f"Issue '{issue_id}' has no live session in run '{run_id}'"
             raise ValueError(msg)
 
     def submit_debug_decision(
