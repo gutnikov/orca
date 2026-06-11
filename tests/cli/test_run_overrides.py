@@ -1,10 +1,13 @@
-"""Tests for the `orca run --override` flag parser."""
+"""Tests for the `orca run --override` flag parser and payload building."""
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from orca.cli.run_cmd import parse_worker_overrides
+from orca.cli.main import build_parser
+from orca.cli.run_cmd import build_run_payload, parse_worker_overrides
 
 
 def test_no_overrides_returns_empty_dict() -> None:
@@ -68,3 +71,38 @@ def test_value_can_contain_equals() -> None:
     but if someone passes an unusual value the parser shouldn't choke on it."""
     result = parse_worker_overrides(["preflight.model=foo=bar"])
     assert result == {"preflight": {"model": "foo=bar"}}
+
+
+class TestBuildRunPayload:
+    """--max-hops / --max-retries must not clobber the workflow YAML's values.
+
+    The daemon only overrides the workflow config when the keys are present
+    and non-None, so the CLI must omit them unless the user passed the flags.
+    """
+
+    def _args(self, argv: list[str]) -> object:
+        return build_parser().parse_args(["run", "task.md", *argv])
+
+    def test_limits_omitted_when_not_passed(self) -> None:
+        payload = build_run_payload(self._args([]), {})
+        assert "max_hops" not in payload
+        assert "max_retries" not in payload
+
+    def test_limits_included_when_passed(self) -> None:
+        payload = build_run_payload(self._args(["--max-hops", "50", "--max-retries", "5"]), {})
+        assert payload["max_hops"] == 50
+        assert payload["max_retries"] == 5
+
+    def test_base_fields_always_present(self) -> None:
+        payload = build_run_payload(self._args(["-w", "develop", "-b", "feat/x"]), {})
+        assert payload["task_file"] == str(Path("task.md").resolve())
+        assert payload["workflow"] == "develop"
+        assert payload["branch"] == "feat/x"
+        assert payload["headless"] is False
+        assert payload["debug"] is False
+        assert "worker_overrides" not in payload
+
+    def test_worker_overrides_included_when_present(self) -> None:
+        overrides = {"preflight": {"kind": "codex"}}
+        payload = build_run_payload(self._args([]), overrides)
+        assert payload["worker_overrides"] == overrides

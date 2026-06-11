@@ -116,6 +116,17 @@ class Orchestrator:
 
     async def stop(self) -> None:
         """Cancel in-flight workers and kill all tmux sessions."""
+        await self._cancel_in_flight()
+
+    async def _cancel_in_flight(self) -> None:
+        """Cancel all in-flight worker tasks and close their tmux sessions.
+
+        Shared between stop() and run()'s cleanup path so exceptional exits
+        (DeadlockError, reducer crashes, external cancellation) don't orphan
+        worker tasks or tmux sessions. Safe to call multiple times —
+        cancelling already-finished tasks and closing dead sessions are
+        no-ops.
+        """
         for task in list(self._in_flight.keys()):
             task.cancel()
         if self._in_flight:
@@ -775,13 +786,9 @@ class Orchestrator:
             state_id=issue.state,
         )
 
-    async def _pause_for_debug_review(self, issue_id: str, worker_result: dict[str, Any]) -> None:
-        """Build the debug snapshot, emit DebugReviewRequiredEvent, and await a decision."""
+    async def _pause_for_debug_review(self, issue_id: str, snapshot: DebugReviewSnapshot) -> None:
+        """Emit DebugReviewRequiredEvent for a prebuilt snapshot and await a decision."""
         from orca.engine.types import DebugReviewRequiredEvent
-
-        snapshot = await self._build_debug_review_snapshot(issue_id, worker_result)
-        if snapshot is None:
-            return
 
         ts = self.now()
         review_event = DebugReviewRequiredEvent(
@@ -941,6 +948,19 @@ class Orchestrator:
             raise ValueError(f"Workflow YAML failed validation after rewrite: {exc}") from exc
 
         await self._reset_worktree_for_issue(issue_id)
+
+        # Re-fetch after the await: any reduce that ran in the meantime
+        # replaced self._state (the reducer deep-copies), so the pre-await
+        # `issue` object is stale — mutating it would be lost on save and
+        # could double-dispatch the worker.
+        issue = self._state.issues.get(issue_id)
+        if issue is None:
+            logger.warning(
+                "Issue %s disappeared during worktree reset — skipping restart",
+                issue_id,
+                extra={"event": "restart_state_issue_gone", "issue_id": issue_id},
+            )
+            return
 
         issue.modify_pending = False
         issue.worker_active = True
@@ -1140,194 +1160,232 @@ class Orchestrator:
         pending: list[DispatchWorkerEffect] = []
         self._route_effects(initial_effects, pending)
 
-        while not self._is_terminal(root_issue_id):
-            # Spawn all pending dispatch effects
-            for effect in pending:
-                self._spawn_worker(effect)
-            pending.clear()
+        try:
+            while not self._is_terminal(root_issue_id):
+                # Spawn all pending dispatch effects
+                for effect in pending:
+                    self._spawn_worker(effect)
+                pending.clear()
 
-            # Nothing in flight — check for retry signals before declaring deadlock
-            if not self._in_flight:
-                retried = self._process_retry_signals(pending)
-                if retried:
-                    continue
-                # modify_restart in debug mode leaves the issue with
-                # modify_pending=true and no in-flight worker. The host (CC
-                # via MCP) is expected to rewrite the prompt and call
-                # orca_restart_state, which spawns a fresh worker directly
-                # into _in_flight. Until that happens, sit idle — this is
-                # not a deadlock, it's an external-unblock wait.
-                if any(i.modify_pending for i in self._state.issues.values()):
-                    await asyncio.sleep(0.5)
-                    continue
-                logger.warning(
-                    "Deadlock detected: no tasks in flight and no pending effects. Stopping.",
-                    extra={"event": "deadlock_detected"},
-                )
-                raise DeadlockError(f"Deadlock: root issue {root_issue_id!r} not done and no pending work")
-
-            # Wait for at least one task to complete, with timeout to check for retry signals
-            done, _ = await asyncio.wait(
-                list(self._in_flight.keys()),
-                timeout=5.0,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-
-            # Check for retry signals on each wakeup (timeout or completion)
-            self._process_retry_signals(pending)
-
-            if not done:
-                continue  # timeout — loop back to spawn any retried tasks
-
-            for task in done:
-                issue_id, tracking_id = self._in_flight.pop(task)
-                try:
-                    outcome: WorkerOutcome = task.result()
-                except Exception as exc:
-                    # Treat unexpected exceptions as worker failures
-                    outcome = WorkerFailure(error=f"task raised exception: {exc}")
-
-                ts = self.now()
-
-                # Mark the in-flight session as completed
-                if self._session_sync is not None:
-                    self._collect_usage_for_session(tracking_id, force=True)
-                    self._session_sync.manifest.mark_completed(tracking_id, ts)
-                    self._progress_sessions.discard(tracking_id)
-
-                if isinstance(outcome, WorkerSuccess):
-                    event: WorkerResultEvent | WorkerFailedEvent = WorkerResultEvent(
-                        issue_id=issue_id,
-                        result=outcome.result,
-                        timestamp=ts,
-                    )
-                else:
-                    # Startup failures (e.g. invalid model ID, missing binary)
-                    # should not burn through retries silently. Exhaust the
-                    # retry budget immediately so the error surfaces at once.
-                    if outcome.startup and self._config.max_worker_retries is not None:
-                        issue_obj = self._state.issues.get(issue_id)
-                        if issue_obj is not None:
-                            issue_obj.failure_count = self._config.max_worker_retries - 1
-                    event = WorkerFailedEvent(
-                        issue_id=issue_id,
-                        error=outcome.error,
-                        timestamp=ts,
-                    )
-
-                old_issues = set(self._state.issues.keys())
-                old_issue_state = self._state.issues[issue_id].state if issue_id in self._state.issues else None
-
-                # v1: only pause for root issues. Decomposed (child) issues run
-                # through without a debug pause — documented spec limitation.
-                _issue_for_debug = self._state.issues.get(issue_id)
-                _is_root = _issue_for_debug is not None and _issue_for_debug.decomposed_from is None
-
-                if self.debug and isinstance(outcome, WorkerSuccess) and _is_root:
-                    self._state, _ = reduce(
-                        self._config,
-                        self._state,
-                        event,
-                        self.generate_id,
-                        self.now,
-                        run_debug=True,
-                    )
-                    self.persistence.save(self._state)
-                    await self._pause_for_debug_review(issue_id, outcome.result)
-                    decision = self._debug_decision_events[issue_id][1][0]
-                    self._debug_decision_events.pop(issue_id, None)
-                    from orca.engine.types import DebugDecisionEvent
-
-                    decision_event = DebugDecisionEvent(
-                        issue_id=issue_id,
-                        action=decision["action"],
-                        comments=[],
-                        timestamp=self.now(),
-                    )
-                    if decision["action"] == "restart":
-                        await self._reset_worktree_for_issue(issue_id)
-                    self._state, new_effects = reduce(
-                        self._config,
-                        self._state,
-                        decision_event,
-                        self.generate_id,
-                        self.now,
-                    )
-                    self.persistence.save(self._state)
-                else:
-                    auto_review_snapshot = None
-                    if isinstance(event, WorkerResultEvent):
-                        auto_review_snapshot = await self._build_auto_review_snapshot(event)
-                    self._state, new_effects = reduce(
-                        self._config,
-                        self._state,
-                        event,
-                        self.generate_id,
-                        self.now,
-                        auto_review_snapshot=auto_review_snapshot,
-                    )
-                    self.persistence.save(self._state)
-
-                # Log worker outcome
-                if isinstance(outcome, WorkerSuccess):
-                    logger.info(
-                        "Worker succeeded for issue %s",
-                        issue_id,
-                        extra={
-                            "event": "worker_succeeded",
-                            "issue_id": issue_id,
-                            "result_outcome": outcome.result.get("outcome"),
-                        },
-                    )
-                else:
+                # Nothing in flight — check for retry signals before declaring deadlock
+                if not self._in_flight:
+                    retried = self._process_retry_signals(pending)
+                    if retried:
+                        continue
+                    # modify_restart in debug mode leaves the issue with
+                    # modify_pending=true and no in-flight worker. The host (CC
+                    # via MCP) is expected to rewrite the prompt and call
+                    # orca_restart_state, which spawns a fresh worker directly
+                    # into _in_flight. Until that happens, sit idle — this is
+                    # not a deadlock, it's an external-unblock wait.
+                    if any(i.modify_pending for i in self._state.issues.values()):
+                        await asyncio.sleep(0.5)
+                        continue
                     logger.warning(
-                        "Worker failed for issue %s: %s",
-                        issue_id,
-                        outcome.error,
-                        extra={"event": "worker_failed", "issue_id": issue_id, "error": outcome.error},
+                        "Deadlock detected: no tasks in flight and no pending effects. Stopping.",
+                        extra={"event": "deadlock_detected"},
                     )
+                    raise DeadlockError(f"Deadlock: root issue {root_issue_id!r} not done and no pending work")
 
-                # Detect state transition
-                new_issue_state = self._state.issues[issue_id].state if issue_id in self._state.issues else None
-                if old_issue_state and new_issue_state and old_issue_state != new_issue_state:
-                    logger.info(
-                        "Issue %s transitioned from %s to %s",
-                        issue_id,
-                        old_issue_state,
-                        new_issue_state,
-                        extra={
-                            "event": "state_transitioned",
-                            "issue_id": issue_id,
-                            "from_state": old_issue_state,
-                            "to_state": new_issue_state,
-                        },
-                    )
+                # Wait for at least one task to complete, with timeout to check for retry signals
+                done, _ = await asyncio.wait(
+                    list(self._in_flight.keys()),
+                    timeout=5.0,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
 
-                # Detect new issues (decomposition)
-                new_issues = set(self._state.issues.keys()) - old_issues
-                for new_id in new_issues:
-                    new_issue = self._state.issues[new_id]
-                    logger.info(
-                        "Issue %s created: %s",
-                        new_id,
-                        new_issue.fields.get("title", ""),
-                        extra={
-                            "event": "issue_created",
-                            "issue_id": new_id,
-                            "parent_id": new_issue.decomposed_from,
-                            "title": new_issue.fields.get("title", ""),
-                        },
-                    )
+                # Check for retry signals on each wakeup (timeout or completion)
+                self._process_retry_signals(pending)
 
-                self._route_effects(new_effects, pending)
+                if not done:
+                    continue  # timeout — loop back to spawn any retried tasks
 
-        # Cancel any remaining in-flight tasks
-        for task in list(self._in_flight.keys()):
-            task.cancel()
-        if self._in_flight:
-            await asyncio.gather(*self._in_flight.keys(), return_exceptions=True)
-        self._in_flight.clear()
+                for task in done:
+                    in_flight_entry = self._in_flight.pop(task, None)
+                    if in_flight_entry is None:
+                        # stop() raced us and already reaped this task
+                        continue
+                    issue_id, tracking_id = in_flight_entry
+                    try:
+                        outcome: WorkerOutcome = task.result()
+                    except asyncio.CancelledError:
+                        # Worker cancelled (stop() raced the wait) — a stopped
+                        # worker, not a failure: emit no event for it.
+                        logger.info(
+                            "Worker task for issue %s was cancelled — skipping",
+                            issue_id,
+                            extra={"event": "worker_cancelled", "issue_id": issue_id},
+                        )
+                        continue
+                    except Exception as exc:
+                        # Treat unexpected exceptions as worker failures
+                        outcome = WorkerFailure(error=f"task raised exception: {exc}")
 
-        capture_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await capture_task
+                    ts = self.now()
+
+                    # Mark the in-flight session as completed
+                    if self._session_sync is not None:
+                        self._collect_usage_for_session(tracking_id, force=True)
+                        self._session_sync.manifest.mark_completed(tracking_id, ts)
+                        self._progress_sessions.discard(tracking_id)
+
+                    if isinstance(outcome, WorkerSuccess):
+                        event: WorkerResultEvent | WorkerFailedEvent = WorkerResultEvent(
+                            issue_id=issue_id,
+                            result=outcome.result,
+                            timestamp=ts,
+                        )
+                    else:
+                        # Startup failures (e.g. invalid model ID, missing binary)
+                        # should not burn through retries silently. Exhaust the
+                        # retry budget immediately so the error surfaces at once.
+                        if outcome.startup and self._config.max_worker_retries is not None:
+                            issue_obj = self._state.issues.get(issue_id)
+                            if issue_obj is not None:
+                                issue_obj.failure_count = self._config.max_worker_retries - 1
+                        event = WorkerFailedEvent(
+                            issue_id=issue_id,
+                            error=outcome.error,
+                            timestamp=ts,
+                        )
+
+                    old_issues = set(self._state.issues.keys())
+                    old_issue_state = self._state.issues[issue_id].state if issue_id in self._state.issues else None
+
+                    # v1: only pause for root issues. Decomposed (child) issues run
+                    # through without a debug pause — documented spec limitation.
+                    _issue_for_debug = self._state.issues.get(issue_id)
+                    _is_root = _issue_for_debug is not None and _issue_for_debug.decomposed_from is None
+
+                    # Build the review snapshot up front: if it can't be built
+                    # (missing issue, no state_base_commit, snapshot error), skip
+                    # the debug pause and fall through to the normal reduce path
+                    # instead of failing the whole run.
+                    debug_snapshot: DebugReviewSnapshot | None = None
+                    if self.debug and isinstance(outcome, WorkerSuccess) and _is_root:
+                        try:
+                            debug_snapshot = await self._build_debug_review_snapshot(issue_id, outcome.result)
+                        except Exception as exc:
+                            logger.warning(
+                                "Failed to build debug review snapshot for issue %s: %s",
+                                issue_id,
+                                exc,
+                                extra={"event": "debug_snapshot_failed", "issue_id": issue_id},
+                            )
+                        if debug_snapshot is None:
+                            logger.warning(
+                                "Skipping debug pause for issue %s — no review snapshot available; "
+                                "applying the worker result without review",
+                                issue_id,
+                                extra={"event": "debug_pause_skipped", "issue_id": issue_id},
+                            )
+
+                    if debug_snapshot is not None:
+                        self._state, _ = reduce(
+                            self._config,
+                            self._state,
+                            event,
+                            self.generate_id,
+                            self.now,
+                            run_debug=True,
+                        )
+                        self.persistence.save(self._state)
+                        await self._pause_for_debug_review(issue_id, debug_snapshot)
+                        decision_entry = self._debug_decision_events.pop(issue_id, None)
+                        if decision_entry is not None and decision_entry[1]:
+                            decision = decision_entry[1][0]
+                        else:
+                            decision = {"action": "accept"}
+                        from orca.engine.types import DebugDecisionEvent
+
+                        decision_event = DebugDecisionEvent(
+                            issue_id=issue_id,
+                            action=decision["action"],
+                            comments=[],
+                            timestamp=self.now(),
+                        )
+                        if decision["action"] == "restart":
+                            await self._reset_worktree_for_issue(issue_id)
+                        self._state, new_effects = reduce(
+                            self._config,
+                            self._state,
+                            decision_event,
+                            self.generate_id,
+                            self.now,
+                        )
+                        self.persistence.save(self._state)
+                    else:
+                        auto_review_snapshot = None
+                        if isinstance(event, WorkerResultEvent):
+                            auto_review_snapshot = await self._build_auto_review_snapshot(event)
+                        self._state, new_effects = reduce(
+                            self._config,
+                            self._state,
+                            event,
+                            self.generate_id,
+                            self.now,
+                            auto_review_snapshot=auto_review_snapshot,
+                        )
+                        self.persistence.save(self._state)
+
+                    # Log worker outcome
+                    if isinstance(outcome, WorkerSuccess):
+                        logger.info(
+                            "Worker succeeded for issue %s",
+                            issue_id,
+                            extra={
+                                "event": "worker_succeeded",
+                                "issue_id": issue_id,
+                                "result_outcome": outcome.result.get("outcome"),
+                            },
+                        )
+                    else:
+                        logger.warning(
+                            "Worker failed for issue %s: %s",
+                            issue_id,
+                            outcome.error,
+                            extra={"event": "worker_failed", "issue_id": issue_id, "error": outcome.error},
+                        )
+
+                    # Detect state transition
+                    new_issue_state = self._state.issues[issue_id].state if issue_id in self._state.issues else None
+                    if old_issue_state and new_issue_state and old_issue_state != new_issue_state:
+                        logger.info(
+                            "Issue %s transitioned from %s to %s",
+                            issue_id,
+                            old_issue_state,
+                            new_issue_state,
+                            extra={
+                                "event": "state_transitioned",
+                                "issue_id": issue_id,
+                                "from_state": old_issue_state,
+                                "to_state": new_issue_state,
+                            },
+                        )
+
+                    # Detect new issues (decomposition)
+                    new_issues = set(self._state.issues.keys()) - old_issues
+                    for new_id in new_issues:
+                        new_issue = self._state.issues[new_id]
+                        logger.info(
+                            "Issue %s created: %s",
+                            new_id,
+                            new_issue.fields.get("title", ""),
+                            extra={
+                                "event": "issue_created",
+                                "issue_id": new_id,
+                                "parent_id": new_issue.decomposed_from,
+                                "title": new_issue.fields.get("title", ""),
+                            },
+                        )
+
+                    self._route_effects(new_effects, pending)
+        finally:
+            # Always tear down the capture loop and any in-flight workers —
+            # on normal completion, DeadlockError, reducer exceptions, and
+            # external cancellation (daemon stop) alike — so background
+            # tasks and tmux sessions don't leak.
+            capture_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await capture_task
+            await self._cancel_in_flight()

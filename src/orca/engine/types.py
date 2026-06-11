@@ -87,6 +87,7 @@ class TypeDef:
 
 
 _DONE_SENTINEL = StateDef()
+_FAILED_SENTINEL = StateDef()
 
 
 @dataclass(frozen=True)
@@ -102,6 +103,8 @@ class StateMachineConfig:
     def get_state(self, type_name: str, state_name: str) -> StateDef:
         if state_name == "done":
             return _DONE_SENTINEL
+        if state_name == "failed":
+            return _FAILED_SENTINEL
         return self.types[type_name].states[state_name]
 
     @property

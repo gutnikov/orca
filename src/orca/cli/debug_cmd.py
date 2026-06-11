@@ -11,7 +11,7 @@ import sys
 from argparse import Namespace
 from pathlib import Path
 
-import aiohttp
+from orca.cli._http import daemon_request
 
 
 def debug_command(root: Path | None = None) -> None:
@@ -29,12 +29,11 @@ def debug_command(root: Path | None = None) -> None:
     sock = socket_path(repo)
 
     async def _list() -> None:
-        connector = aiohttp.UnixConnector(path=str(sock))
-        async with (
-            aiohttp.ClientSession(connector=connector) as session,
-            session.get("http://localhost/api/runs") as resp,
-        ):
-            runs = await resp.json()
+        resp = await daemon_request(sock, "GET", "/api/runs")
+        if resp.status != 200:
+            print(f"Error: {resp.error()}", file=sys.stderr)
+            raise SystemExit(1)
+        runs = resp.json() or []
 
         paused = []
         for r in runs:

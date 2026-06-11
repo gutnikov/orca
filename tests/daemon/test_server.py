@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import os
+import shutil
 import socket
+import stat
+import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 
 from orca.daemon.lifecycle import pidfile_path, write_browser_port, write_pidfile, write_root_marker
-from orca.daemon.server import _pick_free_port, _port_is_free, _resolve_browser_port
+from orca.daemon.server import _bind_uds, _pick_free_port, _port_is_free, _resolve_browser_port
 
 
 @pytest.fixture()
@@ -30,6 +34,39 @@ class TestPortIsFree:
             s.listen(1)
             bound_port = s.getsockname()[1]
             assert _port_is_free(bound_port) is False
+
+
+@pytest.fixture()
+def short_dir() -> Iterator[Path]:
+    """AF_UNIX paths are limited to ~104 chars on macOS; pytest's tmp_path is
+    too deep, so bind test sockets under a short /tmp directory instead."""
+    d = Path(tempfile.mkdtemp(prefix="orca-uds-", dir="/tmp"))
+    yield d
+    shutil.rmtree(d, ignore_errors=True)
+
+
+class TestBindUds:
+    def test_socket_is_owner_only(self, short_dir: Path) -> None:
+        """The daemon UDS is the privileged control surface — it must be
+        bound with 0o600 and live in a 0o700 directory."""
+        sock_path = short_dir / "d" / "daemon.sock"
+        sock = _bind_uds(sock_path)
+        try:
+            assert sock_path.exists()
+            assert stat.S_IMODE(sock_path.lstat().st_mode) == 0o600
+            assert stat.S_IMODE(sock_path.parent.stat().st_mode) == 0o700
+        finally:
+            sock.close()
+
+    def test_clamps_existing_dir_permissions(self, short_dir: Path) -> None:
+        daemon_dir = short_dir / "d"
+        daemon_dir.mkdir(parents=True)
+        os.chmod(daemon_dir, 0o755)
+        sock = _bind_uds(daemon_dir / "daemon.sock")
+        try:
+            assert stat.S_IMODE(daemon_dir.stat().st_mode) == 0o700
+        finally:
+            sock.close()
 
 
 class TestResolveBrowserPort:

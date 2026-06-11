@@ -27,6 +27,8 @@ export function StopResumeDropButtons({ runId, status, onChange }: Props) {
       if (label === "drop") {
         void navigate({ to: "/" })
       }
+    } catch (exc) {
+      toast.error(exc instanceof Error ? exc.message : String(exc))
     } finally {
       setBusy(null)
     }

@@ -331,6 +331,90 @@ class TestCliAgentWorker:
         pty.send_keys.assert_called_once()
         assert "INVALID" in pty.send_keys.call_args[0][0]
 
+    async def test_non_dict_result_gets_correction_not_crash(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A JSON array/string result.json must trigger the correction path, not AttributeError."""
+        import orca.orchestrator.worker as _mod
+
+        monkeypatch.setattr(_mod, "_POLL_INTERVAL", 0.05)
+
+        effect = _make_effect()
+        result_path = tmp_path / "result.json"
+        prompt_path = tmp_path / "prompt.md"
+        prompt_path.write_text("Do the thing")
+
+        pty = MagicMock()
+        pty.session_name = "mock-session"
+        pty.kill = MagicMock()
+        pty.close = MagicMock()
+        pty.send_keys = MagicMock(return_value=True)
+        type(pty).alive = property(lambda self: True)
+
+        async def _spawn(*args: Any, **kwargs: Any) -> None:
+            result_path.write_text(json.dumps(["done", "summary"]))
+
+        pty.spawn = AsyncMock(side_effect=_spawn)
+
+        worker = CliAgentWorker(repo_root=tmp_path, kind_config=KIND_REGISTRY["claude-code"])
+        outcome = await worker.execute(
+            effect,
+            tmp_path,
+            result_path,
+            prompt_path,
+            inactivity_timeout=0,
+            pty_session=pty,
+        )
+
+        assert isinstance(outcome, WorkerFailure)
+        assert "dict" in outcome.error
+        pty.send_keys.assert_called_once()
+        assert "INVALID" in pty.send_keys.call_args[0][0]
+
+    async def test_grace_period_reread_falls_back_to_cached_result(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """If result.json vanishes during the grace period, return the dict validated at detection."""
+        import orca.orchestrator.worker as _mod
+
+        monkeypatch.setattr(_mod, "_POLL_INTERVAL", 0.05)
+        monkeypatch.setattr(_mod, "_RESULT_GRACE_PERIOD", 0.1)
+
+        effect = _make_effect()
+        result_path = tmp_path / "result.json"
+        prompt_path = tmp_path / "prompt.md"
+        prompt_path.write_text("Do the thing")
+
+        valid_result: dict[str, Any] = {"outcome": "done", "summary": "All done"}
+
+        pty = MagicMock()
+        pty.session_name = "mock-session"
+        pty.kill = MagicMock()
+        pty.close = MagicMock()
+
+        alive_calls = 0
+
+        def _alive() -> bool:
+            nonlocal alive_calls
+            alive_calls += 1
+            # Delete the result file after detection (worker mid-rewrite / cleanup)
+            if alive_calls == 2:
+                result_path.unlink(missing_ok=True)
+            return True
+
+        type(pty).alive = property(lambda self: _alive())
+
+        async def _spawn(*args: Any, **kwargs: Any) -> None:
+            result_path.write_text(json.dumps(valid_result))
+
+        pty.spawn = AsyncMock(side_effect=_spawn)
+
+        worker = CliAgentWorker(repo_root=tmp_path, kind_config=KIND_REGISTRY["claude-code"])
+        outcome = await worker.execute(effect, tmp_path, result_path, prompt_path, pty_session=pty)
+
+        assert isinstance(outcome, WorkerSuccess)
+        assert outcome.result == valid_result
+
     async def test_template_render_error_returns_worker_failure(self, tmp_path: Path) -> None:
         """Prompt render failures should not escape as raw task exceptions."""
         effect = _make_effect()

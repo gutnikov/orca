@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from argparse import Namespace
 from pathlib import Path
 
-import aiohttp
+from orca.cli._http import daemon_request
 
 
 def parse_worker_overrides(raw: list[str] | None) -> dict[str, dict[str, str]]:
@@ -38,6 +37,31 @@ def parse_worker_overrides(raw: list[str] | None) -> dict[str, dict[str, str]]:
     return overrides
 
 
+def build_run_payload(args: Namespace, worker_overrides: dict[str, dict[str, str]]) -> dict[str, object]:
+    """Build the /api/runs/start request payload.
+
+    --max-hops / --max-retries are only included when the user actually
+    passed them; otherwise the workflow YAML's values stay in effect (the
+    daemon overrides the config only for non-None values).
+    """
+    payload: dict[str, object] = {
+        "task_file": str(args.task_file.resolve()),
+        "workflow": args.workflow,
+        "branch": args.branch,
+        "base": args.base,
+        "run_id": args.run_id,
+        "headless": args.headless,
+        "debug": args.debug,
+    }
+    if args.max_hops is not None:
+        payload["max_hops"] = args.max_hops
+    if args.max_retries is not None:
+        payload["max_retries"] = args.max_retries
+    if worker_overrides:
+        payload["worker_overrides"] = worker_overrides
+    return payload
+
+
 def run_command(args: Namespace) -> None:
     """Check daemon running, POST /api/runs/start, print run_id or error."""
     import asyncio
@@ -62,31 +86,15 @@ def run_command(args: Namespace) -> None:
         raise SystemExit(1) from None
 
     sock = socket_path(repo)
+    payload = build_run_payload(args, worker_overrides)
 
     async def _submit() -> None:
-        connector = aiohttp.UnixConnector(path=str(sock))
-        payload: dict[str, object] = {
-            "task_file": str(task_file.resolve()),
-            "workflow": args.workflow,
-            "branch": args.branch,
-            "base": args.base,
-            "run_id": args.run_id,
-            "headless": args.headless,
-            "max_hops": args.max_hops,
-            "max_retries": args.max_retries,
-            "debug": args.debug,
-        }
-        if worker_overrides:
-            payload["worker_overrides"] = worker_overrides
-        async with (
-            aiohttp.ClientSession(connector=connector) as session,
-            session.post("http://localhost/api/runs/start", json=payload) as resp,
-        ):
-            body = await resp.json()
-            if resp.status in (200, 201):
-                print(f"Run started: {body['run_id']}")
-            else:
-                print(f"Error: {body.get('error', json.dumps(body))}", file=sys.stderr)
-                raise SystemExit(1)
+        resp = await daemon_request(sock, "POST", "/api/runs/start", json_body=payload)
+        if resp.status in (200, 201):
+            body = resp.json()
+            print(f"Run started: {body['run_id']}")
+        else:
+            print(f"Error: {resp.error()}", file=sys.stderr)
+            raise SystemExit(1)
 
     asyncio.run(_submit())

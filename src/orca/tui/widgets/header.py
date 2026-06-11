@@ -1,10 +1,23 @@
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Any
 
 from textual.widgets import Static
 
 from orca.engine.types import State, StateMachineConfig
+
+
+def _as_epoch(started_at: Any) -> float | None:
+    """Coerce a started_at value (ISO-8601 string or epoch number) to epoch seconds."""
+    if isinstance(started_at, int | float):
+        return float(started_at)
+    if isinstance(started_at, str):
+        try:
+            return datetime.fromisoformat(started_at).timestamp()
+        except ValueError:
+            return None
+    return None
 
 
 def _format_elapsed(seconds: float) -> str:
@@ -147,7 +160,11 @@ class OrcaHeader(Static):
         return f"Step {visited}/{total_steps}"
 
     def _elapsed_text(self) -> str | None:
-        """Calculate elapsed time from first session's started_at."""
+        """Calculate elapsed time from first session's started_at.
+
+        Production data carries ISO-8601 strings (daemon's _now().isoformat());
+        numeric epoch timestamps are also accepted.
+        """
         if not self._sessions:
             return None
 
@@ -156,13 +173,9 @@ class OrcaHeader(Static):
 
         earliest: float | None = None
         for session in self._sessions:
-            started_at = session.get("started_at")
-            if (
-                started_at is not None
-                and isinstance(started_at, int | float)
-                and (earliest is None or started_at < earliest)
-            ):
-                earliest = float(started_at)
+            timestamp = _as_epoch(session.get("started_at"))
+            if timestamp is not None and (earliest is None or timestamp < earliest):
+                earliest = timestamp
 
         if earliest is None:
             return None

@@ -55,6 +55,8 @@ export function NewRunDialog({ open, onOpenChange }: Props) {
       toast.success(`Started ${result.run_id}`)
       onOpenChange(false)
       void navigate({ to: "/runs/$runId", params: { runId: result.run_id } })
+    } catch (exc) {
+      setErrorMsg(exc instanceof Error ? exc.message : String(exc))
     } finally {
       setSubmitting(false)
     }

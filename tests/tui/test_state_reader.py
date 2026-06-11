@@ -100,6 +100,34 @@ class TestStateReader:
         third = reader.read()
         assert third is not None
 
+    def test_read_returns_none_on_torn_json(self, tmp_path: Path) -> None:
+        """Foreign writers can leave torn JSON — must not crash the poll loop."""
+        run_dir = tmp_path / "run"
+        run_dir.mkdir(parents=True)
+        (run_dir / "state.json").write_text('{"issues": {"trunc')
+        reader = StateReader(run_dir)
+        assert reader.read() is None
+
+    def test_read_recovers_after_torn_json(self, tmp_path: Path) -> None:
+        """A failed read must not consume the mtime — the next good write is picked up."""
+        run_dir = tmp_path / "run"
+        run_dir.mkdir(parents=True)
+        state_path = run_dir / "state.json"
+        state_path.write_text('{"issues": {"trunc')
+        reader = StateReader(run_dir)
+        assert reader.read() is None
+        time.sleep(0.05)
+        _write_state(state_path, _make_state())
+        result = reader.read()
+        assert result is not None
+
+    def test_read_returns_none_on_torn_sessions_json(self, tmp_path: Path) -> None:
+        run_dir = tmp_path / "run"
+        _write_state(run_dir / "state.json", _make_state())
+        (run_dir / "sessions.json").write_text("[{tru")
+        reader = StateReader(run_dir)
+        assert reader.read() is None
+
     def test_reads_sessions(self, tmp_path: Path) -> None:
         run_dir = tmp_path / "run"
         _write_state(run_dir / "state.json", _make_state())

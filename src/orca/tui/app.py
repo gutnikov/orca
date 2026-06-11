@@ -279,6 +279,9 @@ class OrcaApp(App[None]):
         if self._daemon_reader is None:
             return
         result = await self._daemon_reader.read()
+        if self._daemon_reader.unreachable:
+            self.sub_title = "daemon unreachable"
+            return
         if result is not None:
             state, sessions = result
             self._state = state

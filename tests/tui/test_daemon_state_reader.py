@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+import aiohttp
 import pytest
 
 from orca.engine.types import EventLogEntry, Issue, State
@@ -104,3 +105,30 @@ class TestDaemonStateReader:
         session = _mock_session()
         reader = DaemonStateReader(session, "run-123")
         assert reader.sessions == []
+
+    @pytest.mark.asyncio()
+    async def test_read_returns_none_when_daemon_unreachable(self) -> None:
+        """A connection error mid-session must not crash the TUI poll loop."""
+        session = MagicMock()
+        session.get = MagicMock(side_effect=aiohttp.ClientConnectionError("daemon died"))
+        reader = DaemonStateReader(session, "run-123")
+
+        result = await reader.read()
+
+        assert result is None
+        assert reader.unreachable is True
+
+    @pytest.mark.asyncio()
+    async def test_unreachable_clears_after_successful_read(self) -> None:
+        session = MagicMock()
+        session.get = MagicMock(side_effect=aiohttp.ClientConnectionError("daemon died"))
+        reader = DaemonStateReader(session, "run-123")
+        await reader.read()
+        assert reader.unreachable is True
+
+        # Daemon comes back: subsequent reads succeed and clear the flag.
+        reader._session = _mock_session(_make_state_dict())
+
+        result = await reader.read()
+        assert result is not None
+        assert reader.unreachable is False

@@ -33,6 +33,8 @@ export function UnblockDialog({ runId, issueId, open, onOpenChange, onSent }: Pr
       setMessage("")
       onOpenChange(false)
       onSent()
+    } catch (exc) {
+      toast.error(exc instanceof Error ? exc.message : String(exc))
     } finally {
       setSubmitting(false)
     }

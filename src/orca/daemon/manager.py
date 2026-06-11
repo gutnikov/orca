@@ -333,6 +333,9 @@ class RunManager:
         self.repo_root = repo_root
         self._runs: dict[str, RunInfo] = {}
         self._usage_backfill_attempted: set[tuple[str, str]] = set()
+        # Serializes the duplicate-check + reservation in start_run so two
+        # concurrent starts for the same run_id can't both pass the guard.
+        self._start_lock = asyncio.Lock()
 
     @staticmethod
     def make_run_id(branch: str, workflow: str) -> str:
@@ -410,158 +413,182 @@ class RunManager:
 
         run_id = run_id or self.make_run_id(branch, effective_workflow)
 
-        # Check for duplicate
-        existing = self._runs.get(run_id)
-        if existing is not None and existing.status == RunStatus.RUNNING:
-            msg = f"Run '{run_id}' is already running"
-            raise ValueError(msg)
-
-        run_dir = self.repo_root / ".orca-state" / "runs" / branch / effective_workflow
-        run_dir.mkdir(parents=True, exist_ok=True)
-        (run_dir / "config_source.json").write_text(_json.dumps({"config_path": str(config_path.resolve())}))
-        persistence = Persistence(self.repo_root, branch, effective_workflow)
-        branches = BranchMap(self.repo_root, branch, effective_workflow)
-        worktree_mgr = WorktreeManager(self.repo_root, branch)
-
-        log_path = run_dir / "orca.log.jsonl"
-        setup_logging(log_path)
-
-        # Read task file
-        fields = parse_task_file(task_file)
-
-        initial_effects: list[Effect] = []
-
-        if persistence.exists():
-            # Resume: load state and branches, recover effects
-            state = persistence.load()
-            if state is None:
-                msg = "Failed to load state from persistence"
-                raise RuntimeError(msg)
-            branches.load()
-
-            # Reset hop_count on non-terminal issues (failure_count is handled by _recover_effects)
-            for issue in state.issues.values():
-                if issue.state == "done":
-                    continue
-                issue.hop_count = 0
-
-            # Clean up sessions from previous run
-            manifest = SessionManifest(run_dir)
-            manifest.mark_orphans_completed(_now())
-
-            recovered_events, recovered_effects = _recover_effects(
-                config, state, branches, worktree_mgr, run_dir, _generate_id, _now
+        # Check for duplicate and reserve the run_id atomically. Setup below
+        # awaits several times before the run is registered, so without the
+        # lock + placeholder two concurrent starts for the same run_id would
+        # both pass the guard and double-start.
+        async with self._start_lock:
+            prior = self._runs.get(run_id)
+            if prior is not None and prior.status == RunStatus.RUNNING:
+                msg = f"Run '{run_id}' is already running"
+                raise ValueError(msg)
+            placeholder = RunInfo(
+                run_id=run_id,
+                branch=branch,
+                workflow=effective_workflow,
+                status=RunStatus.RUNNING,
+                issue_count=0,
+                created_at=_now(),
+                debug=debug,
             )
+            self._runs[run_id] = placeholder
 
-            for event in recovered_events:
-                state, new_effects = reduce(config, state, event, _generate_id, _now)
-                initial_effects.extend(new_effects)
+        try:
+            run_dir = self.repo_root / ".orca-state" / "runs" / branch / effective_workflow
+            run_dir.mkdir(parents=True, exist_ok=True)
+            (run_dir / "config_source.json").write_text(_json.dumps({"config_path": str(config_path.resolve())}))
+            persistence = Persistence(self.repo_root, branch, effective_workflow)
+            branches = BranchMap(self.repo_root, branch, effective_workflow)
+            worktree_mgr = WorktreeManager(self.repo_root, branch)
 
-            initial_effects.extend(recovered_effects)
-        else:
-            # Fresh start — clear stale session manifest
-            (run_dir / "sessions.json").unlink(missing_ok=True)
-            root_issue_id = _generate_id()
+            log_path = run_dir / "orca.log.jsonl"
+            setup_logging(log_path)
 
-            # Ensure a worktree exists when the requested branch differs from
-            # the main directory's HEAD — prevents silent wrong-branch execution.
-            current_branch = resolve_branch()
-            if base is not None:
-                # Explicit base: always create worktree (integration branch mode)
-                if not await _git_branch_exists(branch, self.repo_root):
-                    await _git_create_branch(branch, base, self.repo_root)
-                await worktree_mgr.create(
+            # Read task file
+            fields = parse_task_file(task_file)
+
+            initial_effects: list[Effect] = []
+
+            if persistence.exists():
+                # Resume: load state and branches, recover effects
+                state = persistence.load()
+                if state is None:
+                    msg = "Failed to load state from persistence"
+                    raise RuntimeError(msg)
+                branches.load()
+
+                # Reset hop_count on non-terminal issues (failure_count is handled by _recover_effects)
+                for issue in state.issues.values():
+                    if issue.state == "done":
+                        continue
+                    issue.hop_count = 0
+
+                # Clean up sessions from previous run
+                manifest = SessionManifest(run_dir)
+                manifest.mark_orphans_completed(_now())
+
+                recovered_events, recovered_effects = _recover_effects(
+                    config, state, branches, worktree_mgr, run_dir, _generate_id, _now
+                )
+
+                for event in recovered_events:
+                    state, new_effects = reduce(config, state, event, _generate_id, _now)
+                    initial_effects.extend(new_effects)
+
+                initial_effects.extend(recovered_effects)
+            else:
+                # Fresh start — clear stale session manifest
+                (run_dir / "sessions.json").unlink(missing_ok=True)
+                root_issue_id = _generate_id()
+
+                # Ensure a worktree exists when the requested branch differs from
+                # the main directory's HEAD — prevents silent wrong-branch execution.
+                current_branch = resolve_branch()
+                if base is not None:
+                    # Explicit base: always create worktree (integration branch mode)
+                    if not await _git_branch_exists(branch, self.repo_root):
+                        await _git_create_branch(branch, base, self.repo_root)
+                    await worktree_mgr.create(
+                        issue_id=root_issue_id,
+                        branch_name=branch,
+                        parent_branch=base,
+                    )
+                elif branch != current_branch:
+                    # Branch differs from HEAD: isolate via worktree
+                    if await _git_branch_exists(branch, self.repo_root):
+                        await worktree_mgr.create(
+                            issue_id=root_issue_id,
+                            branch_name=branch,
+                            parent_branch=branch,
+                        )
+                    else:
+                        base_ref = resolve_base_ref(None, orch_config.base_branch)
+                        await _git_create_branch(branch, base_ref, self.repo_root)
+                        await worktree_mgr.create(
+                            issue_id=root_issue_id,
+                            branch_name=branch,
+                            parent_branch=base_ref,
+                        )
+
+                state = State(issues={}, worker_queues={})
+                create_event = CreateEvent(
                     issue_id=root_issue_id,
-                    branch_name=branch,
-                    parent_branch=base,
+                    fields=fields,
+                    timestamp=_now(),
                 )
-            elif branch != current_branch:
-                # Branch differs from HEAD: isolate via worktree
-                if await _git_branch_exists(branch, self.repo_root):
-                    await worktree_mgr.create(
-                        issue_id=root_issue_id,
-                        branch_name=branch,
-                        parent_branch=branch,
-                    )
-                else:
-                    base_ref = resolve_base_ref(None, orch_config.base_branch)
-                    await _git_create_branch(branch, base_ref, self.repo_root)
-                    await worktree_mgr.create(
-                        issue_id=root_issue_id,
-                        branch_name=branch,
-                        parent_branch=base_ref,
-                    )
+                state, initial_effects = reduce(config, state, create_event, _generate_id, _now)
 
-            state = State(issues={}, worker_queues={})
-            create_event = CreateEvent(
-                issue_id=root_issue_id,
-                fields=fields,
-                timestamp=_now(),
+                branches.set(root_issue_id, branch)
+                branches.save()
+                persistence.save(state)
+
+            # Find root issue ID
+            root_issue_id = _find_root_issue(state)
+
+            # Set up workers and orchestrator
+            workers = {name: CliAgentWorker(self.repo_root, kc) for name, kc in KIND_REGISTRY.items()}
+
+            session_sync = SessionSync(run_dir=run_dir)
+
+            orchestrator = Orchestrator(
+                config=config,
+                state=state,
+                root_branch=branch,
+                persistence=persistence,
+                branches=branches,
+                workers=workers,
+                generate_id=_generate_id,
+                now=_now,
+                worktree_mgr=worktree_mgr,
+                repo_root=self.repo_root,
+                flow_root=flow_root,
+                session_sync=session_sync,
+                worker_overrides=worker_overrides,
             )
-            state, initial_effects = reduce(config, state, create_event, _generate_id, _now)
+            orchestrator.debug = debug
 
-            branches.set(root_issue_id, branch)
-            branches.save()
-            persistence.save(state)
+            # Create RunInfo and launch
+            now_str = _now()
+            run_info = RunInfo(
+                run_id=run_id,
+                branch=branch,
+                workflow=effective_workflow,
+                status=RunStatus.RUNNING,
+                issue_count=len(state.issues),
+                created_at=now_str,
+                config=config,
+                orchestrator=orchestrator,
+                debug=debug,
+            )
 
-        # Find root issue ID
-        root_issue_id = _find_root_issue(state)
+            async def _run_wrapper() -> None:
+                try:
+                    await orchestrator.run(root_issue_id, initial_effects)
+                    run_info.status = RunStatus.COMPLETED
+                except asyncio.CancelledError:
+                    run_info.status = RunStatus.STOPPED
+                    raise
+                except Exception:
+                    run_info.status = RunStatus.FAILED
+                    logger.error(
+                        "Run %s failed",
+                        run_id,
+                        exc_info=True,
+                        extra={"event": "run_failed", "run_id": run_id},
+                    )
 
-        # Set up workers and orchestrator
-        workers = {name: CliAgentWorker(self.repo_root, kc) for name, kc in KIND_REGISTRY.items()}
-
-        session_sync = SessionSync(run_dir=run_dir)
-
-        orchestrator = Orchestrator(
-            config=config,
-            state=state,
-            root_branch=branch,
-            persistence=persistence,
-            branches=branches,
-            workers=workers,
-            generate_id=_generate_id,
-            now=_now,
-            worktree_mgr=worktree_mgr,
-            repo_root=self.repo_root,
-            flow_root=flow_root,
-            session_sync=session_sync,
-            worker_overrides=worker_overrides,
-        )
-        orchestrator.debug = debug
-
-        # Create RunInfo and launch
-        now_str = _now()
-        run_info = RunInfo(
-            run_id=run_id,
-            branch=branch,
-            workflow=effective_workflow,
-            status=RunStatus.RUNNING,
-            issue_count=len(state.issues),
-            created_at=now_str,
-            config=config,
-            orchestrator=orchestrator,
-            debug=debug,
-        )
-
-        async def _run_wrapper() -> None:
-            try:
-                await orchestrator.run(root_issue_id, initial_effects)
-                run_info.status = RunStatus.COMPLETED
-            except asyncio.CancelledError:
-                run_info.status = RunStatus.STOPPED
-                raise
-            except Exception:
-                run_info.status = RunStatus.FAILED
-                logger.error(
-                    "Run %s failed",
-                    run_id,
-                    exc_info=True,
-                    extra={"event": "run_failed", "run_id": run_id},
-                )
-
-        task: asyncio.Task[None] = asyncio.create_task(_run_wrapper())
-        run_info.task = task
-        self._runs[run_id] = run_info
+            task: asyncio.Task[None] = asyncio.create_task(_run_wrapper())
+            run_info.task = task
+            self._runs[run_id] = run_info
+        except BaseException:
+            # Setup failed: drop the placeholder so a retry isn't blocked,
+            # restoring any prior (finished) RunInfo it displaced.
+            if self._runs.get(run_id) is placeholder:
+                if prior is not None:
+                    self._runs[run_id] = prior
+                else:
+                    del self._runs[run_id]
+            raise
 
         logger.info(
             "Run %s started",
@@ -813,6 +840,25 @@ class RunManager:
 
     async def stop_all(self) -> None:
         """Stop all running orchestrators (daemon shutdown)."""
+        # Stop each run's workers/tmux sessions first (mirrors stop_run) —
+        # cancelling the run task alone leaves tmux worker sessions and the
+        # capture loop running after the daemon exits. Isolate per-run
+        # failures so one bad stop can't orphan the other runs' workers.
+        for run_info in self._runs.values():
+            if run_info.orchestrator is None:
+                continue
+            if run_info.status != RunStatus.RUNNING and (run_info.task is None or run_info.task.done()):
+                continue
+            try:
+                await run_info.orchestrator.stop()
+            except Exception:
+                logger.error(
+                    "Failed to stop orchestrator for run %s",
+                    run_info.run_id,
+                    exc_info=True,
+                    extra={"event": "run_stop_failed", "run_id": run_info.run_id},
+                )
+
         tasks: list[asyncio.Task[None]] = []
         for run_info in self._runs.values():
             if run_info.task is not None and not run_info.task.done():

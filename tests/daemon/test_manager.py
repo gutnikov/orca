@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -346,6 +347,169 @@ class TestRunManager:
         assert source["config_path"] == str((repo_root / ".orca" / "default.yml").resolve())
 
         await mgr.stop_all()
+
+
+class TestStopAll:
+    @staticmethod
+    def _run_info(run_id: str, orchestrator: Any, task: asyncio.Task[None]) -> RunInfo:
+        branch, _, workflow = run_id.partition(":")
+        return RunInfo(
+            run_id=run_id,
+            branch=branch,
+            workflow=workflow,
+            status=RunStatus.RUNNING,
+            issue_count=1,
+            created_at="2026-01-01T00:00:00Z",
+            orchestrator=orchestrator,
+            task=task,
+        )
+
+    @pytest.mark.asyncio()
+    async def test_stop_all_stops_orchestrators(self, repo_root: Path) -> None:
+        """stop_all must stop each running run's orchestrator (workers + tmux
+        sessions), not just cancel the asyncio task — otherwise daemon shutdown
+        orphans tmux worker sessions."""
+        mgr = RunManager(repo_root)
+        orch = MagicMock()
+        orch.stop = AsyncMock()
+        task: asyncio.Task[None] = asyncio.create_task(asyncio.sleep(60))
+        mgr._runs["main:default"] = self._run_info("main:default", orch, task)
+
+        await mgr.stop_all()
+
+        orch.stop.assert_awaited_once()
+        assert task.cancelled()
+        assert mgr._runs["main:default"].status == RunStatus.STOPPED
+
+    @pytest.mark.asyncio()
+    async def test_stop_all_isolates_per_run_failures(self, repo_root: Path) -> None:
+        """One orchestrator failing to stop must not prevent the others from
+        being stopped."""
+        mgr = RunManager(repo_root)
+        bad = MagicMock()
+        bad.stop = AsyncMock(side_effect=RuntimeError("tmux exploded"))
+        good = MagicMock()
+        good.stop = AsyncMock()
+        task_a: asyncio.Task[None] = asyncio.create_task(asyncio.sleep(60))
+        task_b: asyncio.Task[None] = asyncio.create_task(asyncio.sleep(60))
+        mgr._runs["a:default"] = self._run_info("a:default", bad, task_a)
+        mgr._runs["b:default"] = self._run_info("b:default", good, task_b)
+
+        await mgr.stop_all()
+
+        bad.stop.assert_awaited_once()
+        good.stop.assert_awaited_once()
+        assert task_a.cancelled()
+        assert task_b.cancelled()
+        assert mgr._runs["a:default"].status == RunStatus.STOPPED
+        assert mgr._runs["b:default"].status == RunStatus.STOPPED
+
+
+class TestConcurrentStart:
+    @pytest.mark.asyncio()
+    async def test_concurrent_start_same_run_id_rejected(self, repo_root: Path) -> None:
+        """Two concurrent start_run calls for the same run_id must not both
+        succeed — the duplicate guard has to hold across the awaits in setup."""
+        mgr = RunManager(repo_root)
+        task_file = repo_root / "task.md"
+        mock_worker = MockWorker(
+            outcomes={
+                "todo": WorkerSuccess(result={"outcome": "start"}),
+                "implementing": WorkerSuccess(result={"outcome": "complete"}),
+            }
+        )
+
+        async def slow_branch_exists(branch: str, root: Path) -> bool:
+            await asyncio.sleep(0.05)
+            return True
+
+        worktree_mgr = MagicMock()
+        worktree_mgr.create = AsyncMock()
+        with (
+            patch("orca.daemon.manager.resolve_branch", return_value="main"),
+            patch("orca.daemon.manager.CliAgentWorker", return_value=mock_worker),
+            patch("orca.daemon.manager._git_branch_exists", side_effect=slow_branch_exists),
+            patch("orca.daemon.manager.WorktreeManager", return_value=worktree_mgr),
+        ):
+            results = await asyncio.gather(
+                mgr.start_run(task_file, branch="feat/race"),
+                mgr.start_run(task_file, branch="feat/race"),
+                return_exceptions=True,
+            )
+
+        succeeded = [r for r in results if isinstance(r, str)]
+        failed = [r for r in results if isinstance(r, Exception)]
+        assert len(succeeded) == 1
+        assert len(failed) == 1
+        assert "already running" in str(failed[0])
+
+        await mgr.stop_all()
+
+    @pytest.mark.asyncio()
+    async def test_failed_start_clears_reservation(self, repo_root: Path) -> None:
+        """A failed start_run must not leave a placeholder behind that blocks
+        a subsequent start of the same run_id."""
+        mgr = RunManager(repo_root)
+        task_file = repo_root / "task.md"
+
+        with (
+            patch("orca.daemon.manager.resolve_branch", return_value="main"),
+            patch(
+                "orca.daemon.manager._git_branch_exists",
+                AsyncMock(side_effect=RuntimeError("git broke")),
+            ),
+            pytest.raises(RuntimeError, match="git broke"),
+        ):
+            await mgr.start_run(task_file, branch="feat/fail")
+
+        assert mgr.get_run("feat/fail:default") is None
+
+        mock_worker = MockWorker(
+            outcomes={
+                "todo": WorkerSuccess(result={"outcome": "start"}),
+                "implementing": WorkerSuccess(result={"outcome": "complete"}),
+            }
+        )
+        worktree_mgr = MagicMock()
+        worktree_mgr.create = AsyncMock()
+        with (
+            patch("orca.daemon.manager.resolve_branch", return_value="main"),
+            patch("orca.daemon.manager.CliAgentWorker", return_value=mock_worker),
+            patch("orca.daemon.manager._git_branch_exists", AsyncMock(return_value=True)),
+            patch("orca.daemon.manager.WorktreeManager", return_value=worktree_mgr),
+        ):
+            run_id = await mgr.start_run(task_file, branch="feat/fail")
+
+        assert run_id == "feat/fail:default"
+        await mgr.stop_all()
+
+    @pytest.mark.asyncio()
+    async def test_failed_start_restores_prior_run_info(self, repo_root: Path) -> None:
+        """When a finished run is restarted and the restart fails, the prior
+        RunInfo (with its history) must be restored, not dropped."""
+        mgr = RunManager(repo_root)
+        task_file = repo_root / "task.md"
+        prior = RunInfo(
+            run_id="feat/fail:default",
+            branch="feat/fail",
+            workflow="default",
+            status=RunStatus.STOPPED,
+            issue_count=1,
+            created_at="2026-01-01T00:00:00Z",
+        )
+        mgr._runs["feat/fail:default"] = prior
+
+        with (
+            patch("orca.daemon.manager.resolve_branch", return_value="main"),
+            patch(
+                "orca.daemon.manager._git_branch_exists",
+                AsyncMock(side_effect=RuntimeError("git broke")),
+            ),
+            pytest.raises(RuntimeError, match="git broke"),
+        ):
+            await mgr.start_run(task_file, branch="feat/fail")
+
+        assert mgr.get_run("feat/fail:default") is prior
 
 
 @pytest.fixture()

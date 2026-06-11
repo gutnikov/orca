@@ -109,8 +109,8 @@ function toChangesetFile(
  */
 function buildOverlay(
   comments: InlineComment[],
-  onAdd: (c: Omit<InlineComment, "id"> & Partial<Pick<InlineComment, "id">>) => void,
   onRemove: (idx: number) => void,
+  onUpdate: (idx: number, body: string) => void,
   openDraftKey: string | null,
   setOpenDraftKey: (k: string | null) => void,
   draftBody: string,
@@ -139,10 +139,9 @@ function buildOverlay(
     },
 
     globalIndexOf: (c: ReviewComment) => {
-      // Find the global index of this ReviewComment in the underlying InlineComment array
-      return comments.findIndex(
-        (ic) => ic.file === c.file && ic.line === c.line && ic.body === c.body,
-      );
+      // Find the global index of this ReviewComment in the underlying InlineComment
+      // array by stable id — file/line/body matching mis-targets duplicate bodies.
+      return comments.findIndex((ic) => ic.id === c.id);
     },
 
     onOpenDraft: (side, line) => {
@@ -166,11 +165,8 @@ function buildOverlay(
     },
 
     onEditComment: (index, body) => {
-      // Editing: remove old + add updated. Index is into the reviewComments array.
-      const original = comments[index];
-      if (!original) return;
-      onRemove(index);
-      onAdd({ ...original, body });
+      // Single PUT on the existing id — remove+add would race DELETE against PUT.
+      onUpdate(index, body);
     },
 
     onDeleteComment: (index) => {
@@ -288,10 +284,12 @@ export function DebugReviewLayout({
   // No-op mutations for readOnly mode.
   const noOpAdd = useCallback((_c: Omit<InlineComment, "id"> & Partial<Pick<InlineComment, "id">>) => {}, []);
   const noOpRemove = useCallback((_idx: number) => {}, []);
+  const noOpUpdate = useCallback((_idx: number, _body: string) => {}, []);
   const noOpReply = useCallback(async (_commentId: string, _body: string) => {}, []);
 
   const add = readOnly ? noOpAdd : live.add;
   const remove = readOnly ? noOpRemove : live.remove;
+  const update = readOnly ? noOpUpdate : live.update;
   const reply = readOnly ? noOpReply : liveThreads.reply;
 
   const { clear } = live;
@@ -315,8 +313,8 @@ export function DebugReviewLayout({
     () =>
       buildOverlay(
         comments,
-        add,
         remove,
+        update,
         openDraftKey,
         setOpenDraftKey,
         draftBody,
@@ -326,7 +324,7 @@ export function DebugReviewLayout({
         readOnly,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [comments, add, remove, openDraftKey, draftBody, threadFor, reply, readOnly],
+    [comments, remove, update, openDraftKey, draftBody, threadFor, reply, readOnly],
   );
 
   // Result first — that's what the user looks at to decide what to do next.

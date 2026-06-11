@@ -201,6 +201,13 @@ def _validate(config: StateMachineConfig) -> None:
         msg = f"max_hops must be a positive integer, got {config.max_hops}"
         raise ConfigValidationError(msg)
 
+    # Validate max_worker_retries if present
+    if config.max_worker_retries is not None and (
+        not isinstance(config.max_worker_retries, int) or config.max_worker_retries < 1
+    ):
+        msg = f"max_worker_retries must be a positive integer, got {config.max_worker_retries}"
+        raise ConfigValidationError(msg)
+
     # Validate root_type exists in types
     if config.root_type not in config.types:
         msg = f"root_type '{config.root_type}' does not exist in types"
@@ -346,6 +353,8 @@ def _parse_typed_config(raw: dict[str, Any]) -> StateMachineConfig:
     config = StateMachineConfig(
         root_type=root_type,
         types=types,
+        max_hops=raw.get("max_hops"),
+        max_worker_retries=raw.get("max_worker_retries"),
     )
     _validate(config)
     return config
@@ -373,6 +382,8 @@ def _parse_legacy_config(raw: dict[str, Any]) -> StateMachineConfig:
     config = StateMachineConfig(
         root_type="default",
         types={"default": type_def},
+        max_hops=raw.get("max_hops"),
+        max_worker_retries=raw.get("max_worker_retries"),
     )
     _validate(config)
     return config

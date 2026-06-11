@@ -132,6 +132,23 @@ class TestOrcaApp:
         assert result_map["session-implementing"]["summary"] == "implementing"
 
 
+class TestDaemonUnreachable:
+    @pytest.mark.asyncio
+    async def test_unreachable_daemon_sets_subtitle_instead_of_crashing(self, tmp_path: Path) -> None:
+        class _UnreachableReader:
+            unreachable = True
+
+            async def read(self) -> None:
+                return None
+
+        app = OrcaApp(run_dir=tmp_path / "run", branch_name="test-branch")
+        async with app.run_test() as pilot:
+            app._daemon_reader = _UnreachableReader()  # type: ignore[assignment]
+            await app._poll_daemon_state()
+            await pilot.pause()
+            assert app.sub_title == "daemon unreachable"
+
+
 class TestDaemonRunSelection:
     def test_selects_requested_run_id(self) -> None:
         runs = [

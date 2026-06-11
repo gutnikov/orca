@@ -301,7 +301,7 @@ initial: todo
         with pytest.raises(ConfigValidationError, match="max_workers"):
             parse_config(yaml_str)
 
-    def test_max_hops_ignored_from_yaml(self) -> None:
+    def test_max_hops_zero_rejected(self) -> None:
         yaml_str = """\
 issue:
   fields: {}
@@ -320,12 +320,12 @@ states:
 initial: todo
 max_hops: 0
 """
-        cfg = parse_config(yaml_str)
-        assert cfg.max_hops is None  # max_hops from YAML is ignored
+        with pytest.raises(ConfigValidationError, match="max_hops"):
+            parse_config(yaml_str)
 
 
 class TestParseMaxHops:
-    def test_max_hops_not_parsed_from_yaml(self) -> None:
+    def test_max_hops_parsed_from_yaml(self) -> None:
         yaml_str = """\
 issue:
   fields: {}
@@ -345,7 +345,7 @@ initial: todo
 max_hops: 50
 """
         cfg = parse_config(yaml_str)
-        assert cfg.max_hops is None  # max_hops is CLI-only now
+        assert cfg.max_hops == 50
 
 
 class TestWorkerDefFields:
@@ -750,9 +750,9 @@ types:
         assert isinstance(rule, OnDecompose)
         assert rule.child_type == "task"
 
-    def test_max_hops_not_parsed(self) -> None:
+    def test_max_hops_parsed(self) -> None:
         cfg = parse_config(self.TYPED_YAML)
-        assert cfg.max_hops is None  # max_hops is CLI-only, not parsed from YAML
+        assert cfg.max_hops == 15
 
 
 class TestTypedConfigValidation:
@@ -868,10 +868,11 @@ class TestBuiltinStates:
         assert state_def.worker is None
         assert state_def.on == {}
 
-    def test_get_state_failed_raises(self, simple_config_yaml: str) -> None:
+    def test_get_state_failed_returns_sentinel(self, simple_config_yaml: str) -> None:
         cfg = parse_config(simple_config_yaml)
-        with pytest.raises(KeyError):
-            cfg.get_state("default", "failed")
+        state_def = cfg.get_state("default", "failed")
+        assert state_def.worker is None
+        assert state_def.on == {}
 
     def test_defining_done_raises(self) -> None:
         yaml_str = """\

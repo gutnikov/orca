@@ -50,14 +50,18 @@ export function RunHeader({
 
   const retry = async () => {
     if (!selectedIssueId) return
-    const r = await fetch(`/api/runs/${runId}/retry/${selectedIssueId}`, { method: "POST" })
-    if (!r.ok) {
-      const body = (await r.json().catch(() => ({}))) as { error?: string }
-      toast.error(body.error ?? `HTTP ${r.status}`)
-      return
+    try {
+      const r = await fetch(`/api/runs/${runId}/retry/${selectedIssueId}`, { method: "POST" })
+      if (!r.ok) {
+        const body = (await r.json().catch(() => ({}))) as { error?: string }
+        toast.error(body.error ?? `HTTP ${r.status}`)
+        return
+      }
+      toast.success("Retry requested")
+      onChange()
+    } catch (exc) {
+      toast.error(exc instanceof Error ? exc.message : String(exc))
     }
-    toast.success("Retry requested")
-    onChange()
   }
 
   return (

@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
-import aiohttp
+from orca.cli._http import daemon_request
 
 
 def drop_command(run_id: str, root: Path | None = None) -> None:
@@ -24,16 +23,11 @@ def drop_command(run_id: str, root: Path | None = None) -> None:
     sock = socket_path(repo)
 
     async def _drop() -> None:
-        connector = aiohttp.UnixConnector(path=str(sock))
-        async with (
-            aiohttp.ClientSession(connector=connector) as session,
-            session.post(f"http://localhost/api/runs/{run_id}/drop") as resp,
-        ):
-            body = await resp.json()
-            if resp.status == 200:
-                print(f"Run dropped: {run_id}")
-            else:
-                print(f"Error: {body.get('error', json.dumps(body))}", file=sys.stderr)
-                raise SystemExit(1)
+        resp = await daemon_request(sock, "POST", f"/api/runs/{run_id}/drop")
+        if resp.status == 200:
+            print(f"Run dropped: {run_id}")
+        else:
+            print(f"Error: {resp.error()}", file=sys.stderr)
+            raise SystemExit(1)
 
     asyncio.run(_drop())

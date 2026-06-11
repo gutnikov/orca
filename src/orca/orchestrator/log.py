@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -27,11 +28,32 @@ class JSONFormatter(logging.Formatter):
 
 
 def setup_logging(log_path: Path, level: int = logging.DEBUG) -> None:
-    """Configure the 'orca' logger to write JSONL to a file."""
+    """Configure the 'orca' logger to write JSONL to a file.
+
+    Idempotent: repeated calls with the same path keep the existing handler,
+    and calls with a new path remove + close the old file handler first —
+    otherwise every run would stack another FileHandler on the shared
+    'orca' logger (duplicated records, leaked file descriptors).
+    """
     log_path.parent.mkdir(parents=True, exist_ok=True)
+    target = os.path.abspath(log_path)
+    orca_logger = logging.getLogger("orca")
+
+    has_target = False
+    for existing in list(orca_logger.handlers):
+        if not isinstance(existing, logging.FileHandler):
+            continue
+        if existing.baseFilename == target:
+            has_target = True
+            continue
+        orca_logger.removeHandler(existing)
+        existing.close()
+
+    orca_logger.setLevel(level)
+    orca_logger.propagate = False
+    if has_target:
+        return
+
     handler = logging.FileHandler(log_path)
     handler.setFormatter(JSONFormatter())
-    orca_logger = logging.getLogger("orca")
-    orca_logger.setLevel(level)
     orca_logger.addHandler(handler)
-    orca_logger.propagate = False

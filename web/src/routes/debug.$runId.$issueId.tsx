@@ -27,6 +27,7 @@ function DebugReviewPage() {
 
   useEffect(() => {
     const decoded = decodeURIComponent(runId);
+    const controller = new AbortController();
     void (async () => {
       try {
         const debugUrl =
@@ -35,8 +36,8 @@ function DebugReviewPage() {
             : `/api/runs/${decoded}/issues/${issueId}/debug`;
 
         const [snapRes, issueRes] = await Promise.all([
-          fetch(debugUrl),
-          fetch(`/api/runs/${decoded}/issues/${issueId}`),
+          fetch(debugUrl, { signal: controller.signal }),
+          fetch(`/api/runs/${decoded}/issues/${issueId}`, { signal: controller.signal }),
         ]);
         if (snapRes.status === 404) {
           setError(
@@ -51,15 +52,19 @@ function DebugReviewPage() {
           return;
         }
         const snap: Snapshot = await snapRes.json();
+        if (controller.signal.aborted) return;
         setSnapshot(snap);
         if (issueRes.ok) {
           const issue = await issueRes.json();
+          if (controller.signal.aborted) return;
           setStateName(issue.state ?? "");
         }
       } catch (exc) {
+        if (controller.signal.aborted) return;
         setError(String(exc));
       }
     })();
+    return () => controller.abort();
   }, [runId, issueId, attempt]);
 
   const handleSubmit = async (action: DebugAction) => {
@@ -79,8 +84,10 @@ function DebugReviewPage() {
     if (res.ok || res.status === 409) {
       setSubmittedAction(action);
     } else {
+      // Propagate the failure so DebugReviewLayout's submit handler skips its
+      // success path (clearing local drafts) and surfaces the error instead.
       const body = await res.json().catch(() => ({}));
-      setError(body.error ?? `HTTP ${res.status}`);
+      throw new Error(body.error ?? `HTTP ${res.status}`);
     }
   };
 

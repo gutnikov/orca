@@ -272,12 +272,13 @@ function RunViewerPage() {
       search: { issue: selectedIssueId, session: sid, tab: activeTab } as SearchParams,
       replace: true,
     })
-    // Boost log capture frequency for the focused session.
+    // Boost log capture frequency for the focused session. Best-effort —
+    // failure just means slower log refresh, so swallow rejections.
     void fetch(`/api/runs/${runId}/hot-session`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ session_id: sid, hot: true }),
-    })
+    }).catch(() => {})
   }
 
   const setTab = (t: Tab) => {

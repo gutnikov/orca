@@ -42,24 +42,39 @@ def parse_task_file(path: Path) -> dict[str, Any]:
 
     Supports two formats:
     - YAML: if content parses as a YAML dict, return its fields directly.
-      Optional ``---`` frontmatter delimiters are stripped before parsing.
-    - Plain text (legacy): first line is the title, remainder is the description.
+      Optional ``---`` frontmatter delimiters are stripped before parsing;
+      content after the closing ``---`` is appended to the description.
+    - Plain text (legacy): first line is the title, remainder is the
+      description. Files that fail YAML parsing (e.g. prose containing
+      ``{`` or ``:`` sequences) also fall back to plain text.
     """
     text = path.read_text()
 
     # Strip optional frontmatter delimiters
     stripped = text.strip()
+    trailing = ""
     if stripped.startswith("---"):
         body = stripped.split("\n", 1)[1] if "\n" in stripped else ""
-        # Remove closing delimiter if present
+        # Remove closing delimiter if present; keep what follows it
         if "\n---" in body:
-            body = body[: body.index("\n---")]
-        parsed = yaml.safe_load(body)
+            idx = body.index("\n---")
+            rest = body[idx + 1 :]  # starts with the closing '---' line
+            trailing = rest.split("\n", 1)[1].strip() if "\n" in rest else ""
+            body = body[:idx]
     else:
-        parsed = yaml.safe_load(text)
+        body = text
+
+    try:
+        parsed = yaml.safe_load(body)
+    except yaml.YAMLError:
+        parsed = None
 
     if isinstance(parsed, dict):
-        return {k: v for k, v in parsed.items() if v is not None}
+        fields = {k: v for k, v in parsed.items() if v is not None}
+        if trailing:
+            existing = fields.get("description")
+            fields["description"] = f"{existing}\n\n{trailing}" if existing else trailing
+        return fields
 
     # Legacy plain-text fallback: first line = title, rest = description
     lines = text.split("\n", 1)

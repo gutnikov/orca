@@ -10,6 +10,7 @@ instead of ending its turn).
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 from orca.daemon.http_api import _compact_run
 from orca.engine.types import Issue
@@ -35,7 +36,10 @@ def _state_dict_from_issues(issues: dict[str, Issue]) -> dict[str, object]:
 
 def _fake_run_info(issues: dict[str, Issue]) -> SimpleNamespace:
     return SimpleNamespace(
-        orchestrator=SimpleNamespace(state=SimpleNamespace(issues=issues)),
+        orchestrator=SimpleNamespace(
+            state=SimpleNamespace(issues=issues),
+            persistence=MagicMock(),
+        ),
         status=SimpleNamespace(value="running"),
     )
 
@@ -88,6 +92,24 @@ def test_must_surface_re_emits_for_new_pause_after_resolution() -> None:
 
     re_surfaced = _compact_run("repo:branch", state_dict, run_info, sessions=[], browser_port=8888)
     assert "must_surface_to_user" in re_surfaced
+
+
+def test_surfacing_persists_state() -> None:
+    """agent_surfaced_at is mutated on the live state inside a GET handler —
+    it must be persisted immediately or the "surface once" suppression resets
+    on daemon restart."""
+    issue = _make_issue(debug_pending=True, agent_surfaced_at=None)
+    issues = {"i1": issue}
+    state_dict = _state_dict_from_issues(issues)
+    run_info = _fake_run_info(issues)
+
+    first = _compact_run("repo:branch", state_dict, run_info, sessions=[], browser_port=8888)
+    assert "must_surface_to_user" in first
+    run_info.orchestrator.persistence.save.assert_called_once_with(run_info.orchestrator.state)
+
+    # Second poll: nothing new surfaced, so no extra save.
+    _compact_run("repo:branch", state_dict, run_info, sessions=[], browser_port=8888)
+    run_info.orchestrator.persistence.save.assert_called_once()
 
 
 def test_no_must_surface_when_no_debug_pause() -> None:

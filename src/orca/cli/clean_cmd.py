@@ -12,6 +12,8 @@ from typing import Any
 
 import aiohttp
 
+from orca.cli._http import daemon_request
+
 TERMINAL_STATUSES = frozenset({"completed", "failed", "stopped", "interrupted"})
 
 
@@ -52,11 +54,15 @@ def clean_command(
     if worktrees_dir.exists() and not active_runs:
         worktrees_to_remove = sorted(p for p in worktrees_dir.iterdir() if p.is_dir())
 
-    temp_files = sorted(state_dir.rglob(".prompt-*.tmp"))
+    # Never touch temp files of active runs — deleting one mid-spawn gives
+    # the worker empty stdin. Active runs' run dirs and worktrees are excluded.
+    temp_files = _filter_temp_files(sorted(state_dir.rglob(".prompt-*.tmp")), state_dir, active_runs)
 
     bytes_freed = 0
     for run in terminal_runs:
-        bytes_freed += _dir_size(state_dir / "runs" / run["branch"] / run["workflow"])
+        run_dir = _run_dir_for(state_dir, run)
+        if run_dir is not None:
+            bytes_freed += _dir_size(run_dir)
     for wt in worktrees_to_remove:
         bytes_freed += _dir_size(wt)
     for tmp in temp_files:
@@ -106,16 +112,27 @@ def clean_command(
         assert sock is not None
         drops_via_daemon = asyncio.run(_drop_runs_via_daemon(sock, terminal_runs))
 
+    runs_dir = state_dir / "runs"
     runs_removed = 0
     for run in terminal_runs:
-        run_dir = state_dir / "runs" / run["branch"] / run["workflow"]
+        run_dir = _run_dir_for(state_dir, run)
+        if run_dir is None:
+            print(
+                f"Warning: skipping run {run.get('run_id', '?')!r} — its run dir would fall outside {runs_dir}/",
+                file=sys.stderr,
+            )
+            continue
         if run_dir.exists():
             shutil.rmtree(run_dir, ignore_errors=True)
             runs_removed += 1
+        # Prune now-empty intermediate dirs (slash branches nest several levels).
         parent = run_dir.parent
-        if parent.exists() and not any(parent.iterdir()):
+        while parent != runs_dir and parent.exists() and not any(parent.iterdir()):
             with contextlib.suppress(OSError):
                 parent.rmdir()
+            if parent.exists():
+                break
+            parent = parent.parent
 
     worktrees_removed = 0
     for wt in worktrees_to_remove:
@@ -148,15 +165,11 @@ async def _classify_runs_via_daemon(
     sock: Path,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """Query the daemon and split runs into (terminal, active)."""
-    connector = aiohttp.UnixConnector(path=str(sock))
-    async with (
-        aiohttp.ClientSession(connector=connector) as session,
-        session.get("http://localhost/api/runs") as resp,
-    ):
-        if resp.status != 200:
-            print(f"Error: daemon returned {resp.status} for /api/runs", file=sys.stderr)
-            raise SystemExit(1)
-        runs: list[dict[str, Any]] = await resp.json()
+    resp = await daemon_request(sock, "GET", "/api/runs")
+    if resp.status != 200:
+        print(f"Error: daemon returned {resp.status} for /api/runs", file=sys.stderr)
+        raise SystemExit(1)
+    runs: list[dict[str, Any]] = resp.json() or []
 
     terminal = [r for r in runs if r["status"].lower() in TERMINAL_STATUSES]
     active = [r for r in runs if r["status"].lower() == "running"]
@@ -166,29 +179,67 @@ async def _classify_runs_via_daemon(
 def _classify_runs_on_disk(
     state_dir: Path,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """When daemon is down, scan .orca-state/runs/ — treat every run as terminal."""
+    """When daemon is down, scan .orca-state/runs/ — treat every run as terminal.
+
+    Run dirs are runs/<branch>/<workflow> where <branch> may contain slashes
+    (feat/x), so scan for state.json at any depth: the workflow is the last
+    path component, the branch is everything above it.
+    """
     runs_dir = state_dir / "runs"
     if not runs_dir.exists():
         return [], []
 
     found: list[dict[str, Any]] = []
-    for branch_dir in runs_dir.iterdir():
-        if not branch_dir.is_dir():
+    for state_file in sorted(runs_dir.rglob("state.json")):
+        rel = state_file.parent.relative_to(runs_dir)
+        if len(rel.parts) < 2:
             continue
-        for workflow_dir in branch_dir.iterdir():
-            if not workflow_dir.is_dir():
-                continue
-            if not (workflow_dir / "state.json").exists():
-                continue
-            found.append(
-                {
-                    "run_id": f"{branch_dir.name}:{workflow_dir.name}",
-                    "branch": branch_dir.name,
-                    "workflow": workflow_dir.name,
-                    "status": "interrupted",
-                }
-            )
+        workflow = rel.parts[-1]
+        branch = "/".join(rel.parts[:-1])
+        found.append(
+            {
+                "run_id": f"{branch}:{workflow}",
+                "branch": branch,
+                "workflow": workflow,
+                "status": "interrupted",
+            }
+        )
     return found, []
+
+
+def _run_dir_for(state_dir: Path, run: dict[str, Any]) -> Path | None:
+    """Resolve a run's on-disk dir, or None when the daemon-supplied branch/
+    workflow would land it outside .orca-state/runs/ (empty components,
+    `..` traversal, absolute paths)."""
+    branch = str(run.get("branch") or "")
+    workflow = str(run.get("workflow") or "")
+    if not branch or not workflow:
+        return None
+    runs_root = (state_dir / "runs").resolve()
+    run_dir = state_dir / "runs" / branch / workflow
+    resolved = run_dir.resolve()
+    if resolved == runs_root or not resolved.is_relative_to(runs_root):
+        return None
+    return run_dir
+
+
+def _filter_temp_files(
+    temp_files: list[Path],
+    state_dir: Path,
+    active_runs: list[dict[str, Any]],
+) -> list[Path]:
+    """Drop temp files that live under an active run's run dir or worktree."""
+    if not active_runs:
+        return temp_files
+    protected: list[Path] = []
+    for run in active_runs:
+        branch = str(run.get("branch") or "")
+        workflow = str(run.get("workflow") or "")
+        if branch and workflow:
+            protected.append((state_dir / "runs" / branch / workflow).resolve())
+        if branch:
+            protected.append((state_dir / "worktrees" / branch).resolve())
+    return [tmp for tmp in temp_files if not any(tmp.resolve().is_relative_to(p) for p in protected)]
 
 
 async def _drop_runs_via_daemon(sock: Path, runs: list[dict[str, Any]]) -> int:

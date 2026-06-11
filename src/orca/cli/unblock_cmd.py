@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
-import aiohttp
+from orca.cli._http import daemon_request
 
 
 def unblock_command(run_id: str, issue_id: str, message: str, root: Path | None = None) -> None:
@@ -24,19 +23,16 @@ def unblock_command(run_id: str, issue_id: str, message: str, root: Path | None 
     sock = socket_path(repo)
 
     async def _unblock() -> None:
-        connector = aiohttp.UnixConnector(path=str(sock))
-        async with (
-            aiohttp.ClientSession(connector=connector) as session,
-            session.post(
-                f"http://localhost/api/runs/{run_id}/unblock/{issue_id}",
-                json={"message": message},
-            ) as resp,
-        ):
-            body = await resp.json()
-            if resp.status == 200:
-                print(f"Worker unblocked: {issue_id} in run {run_id}")
-            else:
-                print(f"Error: {body.get('error', json.dumps(body))}", file=sys.stderr)
-                raise SystemExit(1)
+        resp = await daemon_request(
+            sock,
+            "POST",
+            f"/api/runs/{run_id}/unblock/{issue_id}",
+            json_body={"message": message},
+        )
+        if resp.status == 200:
+            print(f"Worker unblocked: {issue_id} in run {run_id}")
+        else:
+            print(f"Error: {resp.error()}", file=sys.stderr)
+            raise SystemExit(1)
 
     asyncio.run(_unblock())

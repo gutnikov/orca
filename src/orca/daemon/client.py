@@ -7,51 +7,78 @@ from typing import Any
 
 import aiohttp
 
+#: Generous enough for the slowest endpoints (log tails are read from disk
+#: and returned whole — nothing streams), tight enough that a wedged daemon
+#: doesn't hang the MCP/CLI caller indefinitely.
+DEFAULT_TIMEOUT_SECONDS = 30.0
+
 
 class DaemonClient:
     """Proxy to the orca daemon HTTP API via Unix socket."""
 
-    def __init__(self, socket_path: Path) -> None:
+    def __init__(self, socket_path: Path, timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS) -> None:
         self._socket_path = socket_path
+        self._timeout = aiohttp.ClientTimeout(total=timeout_seconds)
 
     def _connector(self) -> aiohttp.UnixConnector:
         return aiohttp.UnixConnector(path=str(self._socket_path))
 
+    def _session(self) -> aiohttp.ClientSession:
+        return aiohttp.ClientSession(connector=self._connector(), timeout=self._timeout)
+
+    def _unreachable(self, path: str, exc: BaseException) -> RuntimeError:
+        return RuntimeError(f"orca daemon unreachable at {self._socket_path} (request: {path}): {exc!r}")
+
     async def _get_json(self, path: str) -> dict[str, Any]:
-        async with (
-            aiohttp.ClientSession(connector=self._connector()) as session,
-            session.get(f"http://localhost{path}") as resp,
-        ):
-            return await resp.json()  # type: ignore[no-any-return]
+        try:
+            async with (
+                self._session() as session,
+                session.get(f"http://localhost{path}") as resp,
+            ):
+                return await resp.json()  # type: ignore[no-any-return]
+        except (TimeoutError, aiohttp.ClientError) as exc:
+            raise self._unreachable(path, exc) from exc
 
     async def _get_text(self, path: str) -> str:
-        async with (
-            aiohttp.ClientSession(connector=self._connector()) as session,
-            session.get(f"http://localhost{path}") as resp,
-        ):
-            text: str = await resp.text()
-            return text
+        try:
+            async with (
+                self._session() as session,
+                session.get(f"http://localhost{path}") as resp,
+            ):
+                text: str = await resp.text()
+                return text
+        except (TimeoutError, aiohttp.ClientError) as exc:
+            raise self._unreachable(path, exc) from exc
 
     async def _post_json(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
-        async with (
-            aiohttp.ClientSession(connector=self._connector()) as session,
-            session.post(f"http://localhost{path}", json=body) as resp,
-        ):
-            return await resp.json()  # type: ignore[no-any-return]
+        try:
+            async with (
+                self._session() as session,
+                session.post(f"http://localhost{path}", json=body) as resp,
+            ):
+                return await resp.json()  # type: ignore[no-any-return]
+        except (TimeoutError, aiohttp.ClientError) as exc:
+            raise self._unreachable(path, exc) from exc
 
     async def _put_json(self, path: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
-        async with (
-            aiohttp.ClientSession(connector=self._connector()) as session,
-            session.put(f"http://localhost{path}", json=body) as resp,
-        ):
-            return await resp.json()  # type: ignore[no-any-return]
+        try:
+            async with (
+                self._session() as session,
+                session.put(f"http://localhost{path}", json=body) as resp,
+            ):
+                return await resp.json()  # type: ignore[no-any-return]
+        except (TimeoutError, aiohttp.ClientError) as exc:
+            raise self._unreachable(path, exc) from exc
 
     async def _delete_json(self, path: str) -> dict[str, Any]:
-        async with (
-            aiohttp.ClientSession(connector=self._connector()) as session,
-            session.delete(f"http://localhost{path}") as resp,
-        ):
-            return await resp.json()  # type: ignore[no-any-return]
+        try:
+            async with (
+                self._session() as session,
+                session.delete(f"http://localhost{path}") as resp,
+            ):
+                return await resp.json()  # type: ignore[no-any-return]
+        except (TimeoutError, aiohttp.ClientError) as exc:
+            raise self._unreachable(path, exc) from exc
 
     async def status(self) -> dict[str, Any]:
         return await self._get_json("/api/status")

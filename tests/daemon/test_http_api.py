@@ -56,6 +56,50 @@ class TestWorkerLog:
         assert resp.text == ""
 
 
+class TestWorkerLogTailParam:
+    """?tail= must be parsed defensively: non-integer input falls back to the
+    default, and values are clamped to [1, 10000] so negative numbers can't
+    corrupt the tail slice."""
+
+    def test_non_integer_tail_returns_200_not_500(self, client: TestClient) -> None:
+        resp = client.get("/api/runs/nonexistent:default/logs/issue-1", params={"tail": "abc"})
+        assert resp.status_code == 200
+        assert resp.text == ""
+
+    def test_non_integer_tail_all_logs_returns_200_not_500(self, client: TestClient) -> None:
+        resp = client.get("/api/runs/nonexistent:default/logs", params={"tail": "abc"})
+        assert resp.status_code == 200
+
+    def test_tail_values_sanitized(self, manager: RunManager, client: TestClient) -> None:
+        captured: list[int] = []
+
+        def fake_get_worker_log(
+            run_id: str,
+            issue_id: str,
+            tail: int = 100,
+            session_id: str | None = None,
+        ) -> str:
+            captured.append(tail)
+            return ""
+
+        manager.get_worker_log = fake_get_worker_log  # type: ignore[method-assign]
+        for raw, expected in (("abc", 100), ("-5", 1), ("0", 1), ("50", 50), ("999999", 10000)):
+            client.get("/api/runs/x:default/logs/issue-1", params={"tail": raw})
+            assert captured[-1] == expected
+
+    def test_tail_values_sanitized_all_logs(self, manager: RunManager, client: TestClient) -> None:
+        captured: list[int] = []
+
+        def fake_get_all_worker_logs(run_id: str, tail: int = 100) -> str:
+            captured.append(tail)
+            return ""
+
+        manager.get_all_worker_logs = fake_get_all_worker_logs  # type: ignore[method-assign]
+        for raw, expected in (("abc", 100), ("-5", 1), ("999999", 10000)):
+            client.get("/api/runs/x:default/logs", params={"tail": raw})
+            assert captured[-1] == expected
+
+
 class TestWorkerLogBySession:
     """Per-session log resolution via ?session_id=... (used by web dashboard)."""
 

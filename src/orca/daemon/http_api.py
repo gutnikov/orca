@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,27 @@ from starlette.types import Scope
 
 from orca.daemon.lifecycle import read_browser_port
 from orca.daemon.manager import RunManager, RunStatus, debug_review_url
+
+logger = logging.getLogger(__name__)
+
+_DEFAULT_TAIL = 100
+_MAX_TAIL = 10_000
+
+
+def _parse_tail(raw: str | None) -> int:
+    """Defensively parse the ``?tail=`` query param.
+
+    Falls back to the default on non-integer input (instead of a 500) and
+    clamps to [1, _MAX_TAIL] so negative values can't corrupt the tail slice
+    and huge values can't balloon responses.
+    """
+    if raw is None:
+        return _DEFAULT_TAIL
+    try:
+        tail = int(raw)
+    except ValueError:
+        return _DEFAULT_TAIL
+    return max(1, min(tail, _MAX_TAIL))
 
 
 def _get_version() -> str:
@@ -206,6 +228,15 @@ def _compact_run(
             live = live_issues.get(r["issue_id"])
             if live is not None:
                 live.agent_surfaced_at = ts
+        # Persist immediately: agent_surfaced_at was just mutated on the live
+        # state inside a GET handler — without a save, the "surface once"
+        # suppression resets on daemon restart and the agent re-surfaces a
+        # stale pause. unsurfaced_reviews is non-empty only when run_info has
+        # a live orchestrator (see live_issues above).
+        try:
+            run_info.orchestrator.persistence.save(run_info.orchestrator.state)
+        except Exception:
+            logger.warning("Could not persist agent_surfaced_at for run %s", run_id, exc_info=True)
     if run_info is not None:
         result["status"] = run_info.status.value
     return result
@@ -225,7 +256,7 @@ async def _get_worker_log(request: Request) -> PlainTextResponse:
     manager: RunManager = request.app.state.manager
     run_id: str = request.path_params["run_id"]
     issue_id: str = request.path_params["issue_id"]
-    tail = int(request.query_params.get("tail", "100"))
+    tail = _parse_tail(request.query_params.get("tail"))
     session_id = request.query_params.get("session_id")
     text = manager.get_worker_log(run_id, issue_id, tail, session_id=session_id)
     return PlainTextResponse(text)
@@ -234,7 +265,7 @@ async def _get_worker_log(request: Request) -> PlainTextResponse:
 async def _get_all_worker_logs(request: Request) -> PlainTextResponse:
     manager: RunManager = request.app.state.manager
     run_id: str = request.path_params["run_id"]
-    tail = int(request.query_params.get("tail", "100"))
+    tail = _parse_tail(request.query_params.get("tail"))
     text = manager.get_all_worker_logs(run_id, tail)
     return PlainTextResponse(text)
 

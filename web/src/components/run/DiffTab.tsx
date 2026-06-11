@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ChevronDown, ChevronRight, ChevronsDownUp, ChevronsUpDown, GitCompareArrows } from "lucide-react"
 
 import { cn } from "@/lib/utils"
@@ -232,25 +232,39 @@ export function DiffTab({
     return () => { cancelled = true }
   }, [issueId, runId, debugPending, selectedState, selectedStateLocalIndex])
 
-  // Fetch snapshot when user picks a different attempt from the dropdown
+  // Fetch snapshot when user picks a different attempt from the dropdown.
+  // Abort the previous fetch so a slow stale response can't overwrite the
+  // newer selection.
+  const loadAttemptAbortRef = useRef<AbortController | null>(null)
+  useEffect(() => {
+    return () => loadAttemptAbortRef.current?.abort()
+  }, [])
   const loadAttempt = useCallback(async (attempt: number) => {
     if (!issueId) return
     const decoded = decodeURIComponent(runId)
+    loadAttemptAbortRef.current?.abort()
+    const controller = new AbortController()
+    loadAttemptAbortRef.current = controller
     setSelectedAttempt(attempt)
     setLoading(true)
     try {
-      const res = await fetch(`/api/runs/${decoded}/issues/${issueId}/debug?attempt=${attempt}`)
+      const res = await fetch(`/api/runs/${decoded}/issues/${issueId}/debug?attempt=${attempt}`, {
+        signal: controller.signal,
+      })
       if (res.ok) {
-        setSnapshot(await res.json())
+        const snap = await res.json()
+        if (controller.signal.aborted) return
+        setSnapshot(snap)
         setError(null)
       } else {
         setError("Diff snapshot not found for this attempt.")
         setSnapshot(null)
       }
     } catch (exc) {
+      if (controller.signal.aborted) return
       setError(String(exc))
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }, [issueId, runId])
 

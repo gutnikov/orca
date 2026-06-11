@@ -50,6 +50,24 @@ def _pick_free_port() -> int:
         return port
 
 
+def _bind_uds(sock_path: Path) -> _socket.socket:
+    """Create and bind the daemon UDS with owner-only permissions.
+
+    The UDS is the privileged control surface (start/stop runs, read logs),
+    so it must not be world-connectable. Binding here — instead of letting
+    uvicorn bind via ``config.uds``, which chmods the socket to 0o666 — lets
+    us clamp the mode before the listener ever accepts a connection. The
+    daemon dir is clamped to 0o700 as a second layer (it also holds the
+    pidfile and browser-port marker).
+    """
+    sock_path.parent.mkdir(parents=True, exist_ok=True)
+    os.chmod(sock_path.parent, 0o700)
+    sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
+    sock.bind(str(sock_path))
+    os.chmod(sock_path, 0o600)
+    return sock
+
+
 def _resolve_browser_port(requested: int | None) -> tuple[int | None, str | None]:
     """Resolve the browser-facing TCP port.
 
@@ -92,15 +110,17 @@ async def serve(repo_root: Path) -> None:
     manager = RunManager(repo_root)
     manager.scan_interrupted_runs()
 
-    # 4. Create app and write pidfile
+    # 4. Create app, bind the UDS (owner-only), and write pidfile
     app = create_app(manager)
     sock = socket_path(repo_root)
-    sock.parent.mkdir(parents=True, exist_ok=True)
+    uds_socket = _bind_uds(sock)
     pf = pidfile_path(repo_root)
     write_pidfile(pf, os.getpid())
     write_root_marker(repo_root)
 
-    # 5. Configure uvicorn (UDS — privileged surface)
+    # 5. Configure uvicorn (UDS — privileged surface). The pre-bound socket
+    # is handed to server.serve() below so uvicorn never re-binds (and never
+    # loosens) the 0o600 socket created in _bind_uds.
     config = uvicorn.Config(
         app=app,
         uds=str(sock),
@@ -152,7 +172,7 @@ async def serve(repo_root: Path) -> None:
         loop.add_signal_handler(sig, _handle_signal)
 
     # Start servers
-    server_task = asyncio.create_task(server.serve())
+    server_task = asyncio.create_task(server.serve(sockets=[uds_socket]))
     browser_task: asyncio.Task[None] | None = None
     if browser_server is not None:
         browser_task = asyncio.create_task(browser_server.serve())

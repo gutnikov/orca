@@ -102,3 +102,31 @@ class TestSetupLogging:
         setup_logging(log_file)
         logger = logging.getLogger("orca")
         assert logger.propagate is False
+
+    def test_repeated_setup_same_path_does_not_stack_handlers(self, tmp_path: Path) -> None:
+        log_file = tmp_path / "orca.jsonl"
+        setup_logging(log_file)
+        setup_logging(log_file)
+        setup_logging(log_file)
+
+        logger = logging.getLogger("orca")
+        file_handlers = [h for h in logger.handlers if isinstance(h, logging.FileHandler)]
+        assert len(file_handlers) == 1
+
+        logger.info("logged once")
+        lines = log_file.read_text().strip().splitlines()
+        assert len(lines) == 1
+
+    def test_setup_with_new_path_replaces_old_handler(self, tmp_path: Path) -> None:
+        first = tmp_path / "run1" / "orca.jsonl"
+        second = tmp_path / "run2" / "orca.jsonl"
+        setup_logging(first)
+        setup_logging(second)
+
+        logger = logging.getLogger("orca")
+        file_handlers = [h for h in logger.handlers if isinstance(h, logging.FileHandler)]
+        assert len(file_handlers) == 1
+
+        logger.info("only to second")
+        assert "only to second" in second.read_text()
+        assert "only to second" not in first.read_text()

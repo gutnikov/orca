@@ -45,8 +45,9 @@ class TestCliDispatch:
         assert args.workflow is None
         assert args.branch is None
         assert args.base is None
-        assert args.max_hops == 10
-        assert args.max_retries == 3
+        # None means "not passed" — the workflow YAML's limits stay in effect.
+        assert args.max_hops is None
+        assert args.max_retries is None
 
     def test_run_subcommand_all_options(self) -> None:
         parser = build_parser()

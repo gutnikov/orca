@@ -20,11 +20,21 @@ export function usePollInterval(
   useEffect(() => {
     if (!enabled) return
     let cancelled = false
+    let inFlight = false
     let timer: ReturnType<typeof setInterval> | null = null
 
     const tick = () => {
-      if (cancelled) return
-      void callbackRef.current()
+      // Skip this tick while the previous callback is still pending — a slow
+      // daemon must not pile up overlapping requests whose stale responses
+      // could overwrite fresher data.
+      if (cancelled || inFlight) return
+      inFlight = true
+      Promise.resolve()
+        .then(() => callbackRef.current())
+        .catch(() => {})
+        .finally(() => {
+          inFlight = false
+        })
     }
 
     const start = () => {

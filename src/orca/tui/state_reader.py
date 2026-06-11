@@ -23,26 +23,32 @@ class StateReader:
         return self._last_mtime
 
     def read(self) -> tuple[State, list[dict[str, Any]]] | None:
-        """Read state and sessions. Returns None if nothing changed."""
-        if not self._state_path.exists():
-            return None
+        """Read state and sessions. Returns None if nothing changed.
 
-        state_mtime = self._state_path.stat().st_mtime
-        sessions_mtime = self._sessions_path.stat().st_mtime if self._sessions_path.exists() else 0.0
-        latest_mtime = max(state_mtime, sessions_mtime)
+        Also returns None on OSError (file deleted between exists() and
+        read_text()) or torn JSON from foreign writers — without consuming
+        the mtime, so the next good write is still picked up.
+        """
+        try:
+            if not self._state_path.exists():
+                return None
 
-        if latest_mtime == self._last_mtime:
+            state_mtime = self._state_path.stat().st_mtime
+            sessions_mtime = self._sessions_path.stat().st_mtime if self._sessions_path.exists() else 0.0
+            latest_mtime = max(state_mtime, sessions_mtime)
+
+            if latest_mtime == self._last_mtime:
+                return None
+
+            data = json.loads(self._state_path.read_text())
+            state = State.from_dict(data)
+
+            sessions = json.loads(self._sessions_path.read_text()) if self._sessions_path.exists() else []
+        except (OSError, json.JSONDecodeError):
             return None
 
         self._last_mtime = latest_mtime
-        data = json.loads(self._state_path.read_text())
-        state = State.from_dict(data)
-
-        if self._sessions_path.exists():
-            self._sessions = json.loads(self._sessions_path.read_text())
-        else:
-            self._sessions = []
-
+        self._sessions = sessions
         return state, self._sessions
 
     @property
@@ -62,13 +68,24 @@ class DaemonStateReader:
         self._last_state_dict: dict[str, Any] | None = None
         self._sessions: list[dict[str, Any]] = []
         self._run_status: str = ""
+        self._unreachable: bool = False
 
     async def read(self) -> tuple[State, list[dict[str, Any]]] | None:
-        """Fetch state from daemon. Returns None if unchanged."""
-        async with self._session.get(f"http://localhost/api/runs/{self._run_id}") as resp:
-            if resp.status != 200:
-                return None
-            data = await resp.json()
+        """Fetch state from daemon. Returns None if unchanged or unreachable.
+
+        Connection errors (daemon died mid-session) set `unreachable` instead
+        of propagating — a raised exception inside a Textual interval callback
+        would crash the whole app.
+        """
+        try:
+            async with self._session.get(f"http://localhost/api/runs/{self._run_id}") as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+        except (aiohttp.ClientError, OSError, TimeoutError):
+            self._unreachable = True
+            return None
+        self._unreachable = False
         state_dict = data.get("state")
         sessions = data.get("sessions", [])
         self._run_status = str(data.get("status", ""))
@@ -86,6 +103,10 @@ class DaemonStateReader:
     @property
     def run_status(self) -> str:
         return self._run_status
+
+    @property
+    def unreachable(self) -> bool:
+        return self._unreachable
 
     def reset(self) -> None:
         self._last_state_dict = None

@@ -57,6 +57,28 @@ class TestParseTaskFile:
         fields = parse_task_file(task)
         assert fields == {"title": "ai-team", "description": "AI team features"}
 
+    def test_plain_text_with_yaml_breaking_chars(self, tmp_path: Path) -> None:
+        """Plain prose with `{`/`:` patterns must hit the plain-text fallback, not ScannerError."""
+        task = tmp_path / "task.md"
+        task.write_text("Fix the parser: handle {braces: everywhere\nMore description here.\n")
+        fields = parse_task_file(task)
+        assert fields == {
+            "title": "Fix the parser: handle {braces: everywhere",
+            "description": "More description here.",
+        }
+
+    def test_frontmatter_trailing_content_becomes_description(self, tmp_path: Path) -> None:
+        task = tmp_path / "task.md"
+        task.write_text("---\ntitle: My task\n---\nExtra body line one.\nLine two.\n")
+        fields = parse_task_file(task)
+        assert fields == {"title": "My task", "description": "Extra body line one.\nLine two."}
+
+    def test_frontmatter_trailing_content_appended_to_description(self, tmp_path: Path) -> None:
+        task = tmp_path / "task.md"
+        task.write_text("---\ntitle: My task\ndescription: Base desc\n---\nTrailing notes.\n")
+        fields = parse_task_file(task)
+        assert fields == {"title": "My task", "description": "Base desc\n\nTrailing notes."}
+
 
 class TestResolveConfigPath:
     def test_default_config(self, tmp_path: Path) -> None:

@@ -335,8 +335,8 @@ class TestWorkerResultUnknownOutcomeErrors:
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)
 
-        # worker_active stays True (validation is before mutation)
-        assert state.issues["U-1"].worker_active is True
+        # Slot is released — the worker process has already exited
+        assert state.issues["U-1"].worker_active is False
         assert state.issues["U-1"].state == "work"
 
 

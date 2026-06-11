@@ -33,7 +33,9 @@ PLUGIN_SKILL_ROOTS = (
     REPO_ROOT / "plugins" / "orca" / "skills",
 )
 
-LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)]+\.md)\)")
+# Group 2 is the .md path with any `#fragment` suffix already stripped, so
+# anchored links like `[x](foo.md#section)` are validated too.
+LINK_RE = re.compile(r"\[([^\]]+)\]\(([^)#]+\.md)(?:#[^)]*)?\)")
 
 
 def _check_links_under(root: pathlib.Path, *, enforce_no_escape: bool) -> list[str]:

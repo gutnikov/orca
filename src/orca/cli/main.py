@@ -71,8 +71,9 @@ def build_parser() -> argparse.ArgumentParser:
         help="Pause after every worker completion for review (debug mode).",
     )
     run_parser.add_argument("--run-id", type=str, default=None)
-    run_parser.add_argument("--max-hops", type=int, default=10)
-    run_parser.add_argument("--max-retries", type=int, default=3)
+    # default=None means "not passed" — the workflow YAML's limits apply.
+    run_parser.add_argument("--max-hops", type=int, default=None)
+    run_parser.add_argument("--max-retries", type=int, default=None)
     run_parser.add_argument(
         "--override",
         action="append",

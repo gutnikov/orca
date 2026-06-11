@@ -7,12 +7,11 @@ export function parseUnifiedDiff(text: string): Hunk[] {
   let current: Hunk | null = null
   let oldCursor = 0
   let newCursor = 0
+  let oldRemaining = 0
+  let newRemaining = 0
 
   const lines = text.split("\n")
   for (const line of lines) {
-    if (line.startsWith("---") || line.startsWith("+++") || line.startsWith("diff ") || line.startsWith("index ")) {
-      continue
-    }
     const m = line.match(HUNK_HEADER_RE)
     if (m) {
       if (current) hunks.push(current)
@@ -23,21 +22,34 @@ export function parseUnifiedDiff(text: string): Hunk[] {
       current = { oldStart, oldLines, newStart, newLines, header: line, rows: [] }
       oldCursor = oldStart
       newCursor = newStart
+      oldRemaining = oldLines
+      newRemaining = newLines
       continue
     }
+    // Outside a hunk (file headers like ---/+++/diff/index, or trailer lines
+    // after a hunk's declared line counts are exhausted) nothing is content.
+    // Inside a hunk, a line starting with "---" is a removed line "--…" and
+    // must NOT be skipped, or every old-side line number after it shifts.
     if (!current) continue
+    if (oldRemaining <= 0 && newRemaining <= 0) continue
+    // "\ No newline at end of file" — metadata, consumes neither cursor.
+    if (line.startsWith("\\")) continue
 
     if (line.startsWith("+")) {
       current.rows.push({ type: "added", oldLine: null, newLine: newCursor, text: line.slice(1) })
       newCursor++
+      newRemaining--
     } else if (line.startsWith("-")) {
       current.rows.push({ type: "removed", oldLine: oldCursor, newLine: null, text: line.slice(1) })
       oldCursor++
+      oldRemaining--
     } else {
       const text = line.startsWith(" ") ? line.slice(1) : line
       current.rows.push({ type: "context", oldLine: oldCursor, newLine: newCursor, text })
       oldCursor++
       newCursor++
+      oldRemaining--
+      newRemaining--
     }
   }
   if (current) hunks.push(current)

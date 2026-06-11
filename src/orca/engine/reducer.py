@@ -254,12 +254,18 @@ def _handle_worker_result(
     outcome = event.result.get("outcome")
 
     if outcome is None or outcome not in state_def.on:
+        # The worker process has already exited — release the slot and
+        # backfill so the run isn't wedged with a phantom active worker.
+        issue.worker_active = False
+        append_log(issue, event.timestamp, "worker_result", event.result)
         effects.append(
             ErrorEffect(
                 issue_id=event.issue_id,
                 message=f"Outcome '{outcome}' is not valid for state '{issue.state}'",
             )
         )
+        if state_def.max_workers is not None:
+            backfill_queue(config, state, f"{issue.type}:{issue.state}", effects)
         return
 
     rule = state_def.on[outcome]
@@ -267,7 +273,6 @@ def _handle_worker_result(
     # Handle built-in "failed" target: treat as worker failure (retry logic)
     if isinstance(rule, OnTransition) and rule.target == "failed":
         reason = str(event.result.get("reason", "Worker returned failure outcome"))
-        issue.worker_active = False
         issue.failure_count += 1
 
         append_log(issue, event.timestamp, "worker_result", event.result)
@@ -278,13 +283,10 @@ def _handle_worker_result(
         if "failure_context" in issue_fields_def:
             issue.fields["failure_context"] = reason
 
-        # Slot backfill
-        old_state_name = issue.state
-        if state_def.max_workers is not None:
-            backfill_queue(config, state, f"{issue.type}:{old_state_name}", effects)
-
         # Check retry limit
         if config.max_worker_retries is not None and issue.failure_count >= config.max_worker_retries:
+            # Give up — release the worker slot, backfill, and log
+            issue.worker_active = False
             append_log(
                 issue,
                 ts,
@@ -298,10 +300,11 @@ def _handle_worker_result(
                     f"'{issue.state}' — retries exhausted",
                 )
             )
+            if state_def.max_workers is not None:
+                backfill_queue(config, state, f"{issue.type}:{issue.state}", effects)
             return
 
-        # Retry — re-dispatch
-        issue.worker_active = True
+        # Retry — worker_active stays True, slot is RETAINED
         append_log(issue, ts, "worker_dispatched", {"state": issue.state})
         effects.append(
             DispatchWorkerEffect(
@@ -314,11 +317,16 @@ def _handle_worker_result(
         )
         return
 
-    # If decompose, validate sub_issues is not empty (before mutation)
+    # If decompose, validate the entire sub_issues payload (before any mutation)
+    # so a bad entry can never leave partially-created orphan children behind.
     if isinstance(rule, OnDecompose):
         sub_issues: list[dict[str, object]] = event.result.get("sub_issues", [])
         if not sub_issues:
             effects.append(ErrorEffect(issue_id=event.issue_id, message="Decompose requires non-empty sub_issues"))
+            return
+        error = _validate_sub_issues(config, rule, sub_issues)
+        if error is not None:
+            effects.append(ErrorEffect(issue_id=event.issue_id, message=error))
             return
 
     # If debug mode, append the worker_result log entry and pause for review.
@@ -550,6 +558,34 @@ def _apply_transition(
             append_log(issue, ts, "worker_dispatched", {"state": issue.state})
 
 
+def _validate_sub_issues(
+    config: StateMachineConfig,
+    rule: OnDecompose,
+    sub_issues: list[dict[str, object]],
+) -> str | None:
+    """Validate a decompose sub_issues payload. Returns an error message, or None if valid."""
+    seen_keys: set[str] = set()
+    for i, sub in enumerate(sub_issues):
+        if not isinstance(sub, dict):
+            return f"Decompose sub_issues[{i}] must be a mapping, got {type(sub).__name__}"
+        key = str(sub.get("key", ""))
+        if not key:
+            return f"Decompose sub_issues[{i}] is missing a 'key'"
+        if key in seen_keys:
+            return f"Duplicate sub_issue key '{key}'"
+        seen_keys.add(key)
+
+        # Resolve child type: worker override > rule default
+        child_type_name = str(sub.get("type", "")) if "type" in sub else None
+        if not child_type_name:
+            child_type_name = rule.child_type
+        if not child_type_name:
+            return f"No type for child '{key}': decompose rule has no child_type and worker didn't specify one"
+        if child_type_name not in config.types:
+            return f"Unknown type '{child_type_name}' for child '{key}'"
+    return None
+
+
 def _apply_decompose(
     config: StateMachineConfig,
     state: State,
@@ -561,9 +597,6 @@ def _apply_decompose(
 ) -> None:
     sub_issues: list[dict[str, object]] = event.result.get("sub_issues", [])
 
-    # Increment parent hop count
-    _parent_issue.hop_count += 1
-
     # Get default child_type from decompose rule
     parent_state_def = config.get_state(_parent_issue.type, _parent_issue.state)
     outcome: str = event.result["outcome"]
@@ -572,7 +605,14 @@ def _apply_decompose(
     default_child_type = rule.child_type
     parent_old_state = _parent_issue.state
 
+    # Increment parent hop count. When the rule has a `then` target,
+    # _apply_transition below counts the hop instead — decompose+then is
+    # one logical step and must cost exactly one hop.
+    if rule.then is None:
+        _parent_issue.hop_count += 1
+
     # Generate IDs and build key -> real_id mapping
+    # (keys were validated as present and unique before any mutation)
     key_to_id: dict[str, str] = {}
     for sub in sub_issues:
         key = str(sub.get("key", ""))
@@ -585,27 +625,11 @@ def _apply_decompose(
         real_id = key_to_id[key]
         fields: dict[str, object] = sub.get("fields", {})  # type: ignore[assignment]
 
-        # Resolve child type: worker override > rule default
+        # Resolve child type: worker override > rule default (validated above)
         child_type_name = str(sub.get("type", "")) if "type" in sub else None
         if not child_type_name:
             child_type_name = default_child_type
-        if not child_type_name:
-            effects.append(
-                ErrorEffect(
-                    issue_id=event.issue_id,
-                    message=f"No type for child '{key}': decompose rule has no child_type "
-                    "and worker didn't specify one",
-                )
-            )
-            return
-        if child_type_name not in config.types:
-            effects.append(
-                ErrorEffect(
-                    issue_id=event.issue_id,
-                    message=f"Unknown type '{child_type_name}' for child '{key}'",
-                )
-            )
-            return
+        assert child_type_name is not None
 
         child_type_def = config.get_type(child_type_name)
 
@@ -778,6 +802,16 @@ def _handle_debug_decision(
             )
         )
         return
+    # Validate the action before any mutation — an unknown action must not
+    # destroy the user's comments or log a bogus decision.
+    if event.action not in ("accept", "restart", "modify_restart", "modify_continue", "stop"):
+        effects.append(
+            ErrorEffect(
+                issue_id=event.issue_id,
+                message=f"Unknown debug action: {event.action!r}",
+            )
+        )
+        return
     # Source-of-truth comments + threads come from the persisted issue, not
     # from event.comments — the orchestrator no longer carries comments in
     # the event (they were persisted on save). Build the payload BEFORE we
@@ -882,13 +916,6 @@ def _handle_debug_decision(
     if event.action == "stop":
         issue.debug_pending = False
         return
-
-    effects.append(
-        ErrorEffect(
-            issue_id=event.issue_id,
-            message=f"Unknown debug action: {event.action!r}",
-        )
-    )
 
 
 def _handle_debug_modify_request(

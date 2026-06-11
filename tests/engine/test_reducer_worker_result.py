@@ -295,8 +295,8 @@ class TestUnknownOutcome:
         )
         assert len(effects) == 1
         assert isinstance(effects[0], ErrorEffect)
-        # worker_active stays True since validation is before mutation
-        assert state2.issues["A"].worker_active is True
+        # Slot is released — the worker process has already exited
+        assert state2.issues["A"].worker_active is False
         assert state2.issues["A"].state == "todo"
 
 

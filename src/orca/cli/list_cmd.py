@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-import json
 import sys
 from argparse import Namespace
 from pathlib import Path
 
-import aiohttp
+from orca.cli._http import daemon_request
 
 
 def runs_command(root: Path | None = None, *, waiting_only: bool = False) -> None:
@@ -32,12 +31,11 @@ def runs_command(root: Path | None = None, *, waiting_only: bool = False) -> Non
     sock = socket_path(repo)
 
     async def _list() -> None:
-        connector = aiohttp.UnixConnector(path=str(sock))
-        async with (
-            aiohttp.ClientSession(connector=connector) as session,
-            session.get("http://localhost/api/runs") as resp,
-        ):
-            runs = await resp.json()
+        resp = await daemon_request(sock, "GET", "/api/runs")
+        if resp.status != 200:
+            print(f"Error: {resp.error()}", file=sys.stderr)
+            raise SystemExit(1)
+        runs = resp.json() or []
 
         if waiting_only:
             runs = [r for r in runs if r.get("waiting_issues")]
@@ -91,17 +89,11 @@ def logs_command(args: Namespace) -> None:
             url = f"http://localhost/api/runs/{run_id}/logs/{issue_id}?tail={tail}"
         else:
             url = f"http://localhost/api/runs/{run_id}/logs?tail={tail}"
-        connector = aiohttp.UnixConnector(path=str(sock))
-        async with (
-            aiohttp.ClientSession(connector=connector) as session,
-            session.get(url) as resp,
-        ):
-            if resp.status == 200:
-                text = await resp.text()
-                print(text)
-            else:
-                body = await resp.json()
-                print(f"Error: {body.get('error', json.dumps(body))}", file=sys.stderr)
-                raise SystemExit(1)
+        resp = await daemon_request(sock, "GET", url)
+        if resp.status == 200:
+            print(resp.text)
+        else:
+            print(f"Error: {resp.error()}", file=sys.stderr)
+            raise SystemExit(1)
 
     asyncio.run(_logs())

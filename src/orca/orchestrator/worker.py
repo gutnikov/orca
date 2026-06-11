@@ -128,6 +128,23 @@ KIND_REGISTRY: dict[str, KindConfig] = {
 }
 
 
+def _reread_result(result_path: Path, fallback: dict[str, Any]) -> dict[str, Any]:
+    """Re-read result.json after a validated detection.
+
+    The worker may still touch the file after the result was detected
+    (delete it, rewrite it mid-flush) — fall back to the dict validated at
+    detection time if the file is gone, unparsable, or no longer a JSON
+    object.
+    """
+    try:
+        candidate = json.loads(result_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return fallback
+    if not isinstance(candidate, dict):
+        return fallback
+    return candidate
+
+
 def _build_correction_message(error: str, result_format: dict[str, Any], result_path: Path) -> str:
     """Build a message telling the worker to fix its invalid result.json."""
     format_json = json.dumps(result_format, indent=2)
@@ -269,6 +286,9 @@ class CliAgentWorker:
         elapsed = 0.0
         result_detected_at: float | None = None
         result_detected_while_alive = False
+        # The dict validated at detection time — re-reads after the grace
+        # period fall back to it if the file was deleted or is mid-rewrite.
+        detected_result: dict[str, Any] = {}
         last_validation_error: str | None = None
         correction_sent = False
 
@@ -281,8 +301,14 @@ class CliAgentWorker:
                 try:
                     candidate = json.loads(result_path.read_text())
 
+                    # Non-dict results (JSON array/string/number) skip the
+                    # waiting/stale checks and go straight to validate_result,
+                    # which reports them as a validation failure so the
+                    # correction path below kicks in instead of crashing.
+                    is_dict = isinstance(candidate, dict)
+
                     # Check for built-in "waiting" outcome before validation
-                    if candidate.get("outcome") == "waiting" and unblock_event is not None:
+                    if is_dict and candidate.get("outcome") == "waiting" and unblock_event is not None:
                         # Check session is still alive before entering waiting state
                         if not pty_session.alive:
                             return WorkerFailure(error="session died while reporting waiting")
@@ -361,6 +387,7 @@ class CliAgentWorker:
                     if error is None:
                         result_detected_at = elapsed
                         result_detected_while_alive = pty_session.alive
+                        detected_result = candidate
                         last_validation_error = None
                         if session_manifest and session_id:
                             session_manifest.update_result_error(session_id, None)
@@ -376,7 +403,7 @@ class CliAgentWorker:
                         # polling for the real result.
                         outcome_def = effect.result_format.get("outcome", {})
                         valid_outcomes = outcome_def.get("values", [])
-                        candidate_outcome = candidate.get("outcome")
+                        candidate_outcome = candidate.get("outcome") if is_dict else None
                         if (
                             isinstance(candidate_outcome, str)
                             and candidate_outcome
@@ -424,7 +451,7 @@ class CliAgentWorker:
 
             # Grace period elapsed — kill session, return success
             if result_detected_at is not None and elapsed - result_detected_at >= _RESULT_GRACE_PERIOD:
-                result = json.loads(result_path.read_text())
+                result = _reread_result(result_path, detected_result)
                 if pty_session.alive:
                     pty_session.kill()
                 return WorkerSuccess(result=result)
@@ -436,7 +463,7 @@ class CliAgentWorker:
                     # Kill to ensure cleanup if it was alive when result was detected.
                     if result_detected_while_alive:
                         pty_session.kill()
-                    result = json.loads(result_path.read_text())
+                    result = _reread_result(result_path, detected_result)
                     return WorkerSuccess(result=result)
                 if result_path.exists():
                     try:

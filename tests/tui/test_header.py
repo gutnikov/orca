@@ -1,9 +1,15 @@
 from __future__ import annotations
 
 import time
+from datetime import UTC, datetime, timedelta
 
 from orca.engine.types import Issue, State, StateDef, StateMachineConfig, TypeDef, WorkerDef
 from orca.tui.widgets.header import OrcaHeader, _format_elapsed
+
+
+def _iso_ago(seconds: float) -> str:
+    """ISO-8601 started_at like production data (daemon manager._now())."""
+    return (datetime.now(UTC) - timedelta(seconds=seconds)).isoformat()
 
 
 def _make_config(states: dict[str, StateDef] | None = None) -> StateMachineConfig:
@@ -81,7 +87,7 @@ class TestOrcaHeaderRunning:
                 ),
             }
         )
-        sessions = [{"started_at": time.time() - 60}]
+        sessions = [{"started_at": _iso_ago(60)}]
         header.update_state(state, sessions)
         text = header.render_text()
         assert "my-branch" in text
@@ -170,7 +176,8 @@ class TestOrcaHeaderCompleted:
 
 
 class TestOrcaHeaderElapsed:
-    def test_elapsed_time_displayed(self) -> None:
+    def test_elapsed_time_displayed_from_iso_timestamp(self) -> None:
+        """Production started_at is an ISO-8601 string (manager._now().isoformat())."""
         config = _make_config()
         header = OrcaHeader(branch_name="b", config=config)
         state = _make_state(
@@ -179,10 +186,50 @@ class TestOrcaHeaderElapsed:
             }
         )
         # 14 minutes ago
+        sessions = [{"started_at": _iso_ago(840)}]
+        header.update_state(state, sessions)
+        text = header.render_text()
+        assert "14m" in text
+
+    def test_elapsed_time_displayed_from_numeric_timestamp(self) -> None:
+        """Numeric epoch timestamps are still supported."""
+        config = _make_config()
+        header = OrcaHeader(branch_name="b", config=config)
+        state = _make_state(
+            {
+                "root-1": _make_issue(state="triage", worker_active=True, visit_counts={"triage": 1}),
+            }
+        )
         sessions = [{"started_at": time.time() - 840}]
         header.update_state(state, sessions)
         text = header.render_text()
         assert "14m" in text
+
+    def test_earliest_session_wins(self) -> None:
+        config = _make_config()
+        header = OrcaHeader(branch_name="b", config=config)
+        state = _make_state(
+            {
+                "root-1": _make_issue(state="triage", worker_active=True, visit_counts={"triage": 1}),
+            }
+        )
+        sessions = [{"started_at": _iso_ago(120)}, {"started_at": _iso_ago(840)}]
+        header.update_state(state, sessions)
+        text = header.render_text()
+        assert "14m" in text
+
+    def test_unparseable_started_at_ignored(self) -> None:
+        config = _make_config()
+        header = OrcaHeader(branch_name="b", config=config)
+        state = _make_state(
+            {
+                "root-1": _make_issue(state="triage", worker_active=True, visit_counts={"triage": 1}),
+            }
+        )
+        sessions = [{"started_at": "not-a-timestamp"}]
+        header.update_state(state, sessions)
+        # Must not raise; no elapsed segment is rendered.
+        assert header._elapsed_text() is None
 
     def test_no_sessions_no_elapsed(self) -> None:
         config = _make_config()
